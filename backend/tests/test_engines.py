@@ -50,6 +50,7 @@ def test_run_language(client, auth, project, lang):
     assert job["status"] == "COMPLETED", job
     assert job["exit_code"] == 0
     assert expect in job["stdout"], job
+    assert "An issue was encountered" not in job["stdout"]
 
 
 @pytest.mark.parametrize("lang", list(ERRORS))

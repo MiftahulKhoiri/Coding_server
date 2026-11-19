@@ -35,6 +35,8 @@ class CSharpEngine(BaseEngine):
             "DOTNET_CLI_HOME": str(ctx.cache_dir / "dotnet-home"),
             "HOME": str(ctx.cache_dir / "dotnet-home"),
             "DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE": "1",
+            # Tanpa ini dotnet mencetak "An issue was encountered verifying workloads" ke stdout program.
+            "DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK": "true",
             # W^X memakai memfd "double mapping" raksasa yang ditolak RLIMIT_FSIZE (SIGXFSZ, exit 153).
             "DOTNET_EnableWriteXorExecute": "0",
             "DOTNET_ADD_GLOBAL_TOOLS_TO_PATH": "0",
