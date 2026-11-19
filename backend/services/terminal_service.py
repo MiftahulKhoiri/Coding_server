@@ -104,7 +104,7 @@ class TerminalService:
             network=self.s.terminal_network, new_session=False,
             env={"PS1": r"\[\e[32m\]coding_server\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]$ ", "HISTFILE": "/dev/null",
                  "GOCACHE": str(self.s.cache_dir / "lang" / "go-build"), "GOPATH": str(self.s.cache_dir / "lang" / "gopath"),
-                 "DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1",
+                 "DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1", "DOTNET_EnableWriteXorExecute": "0",
                  "DOTNET_CLI_HOME": str(self.s.cache_dir / "lang" / "dotnet-home")},
         )
         (self.s.cache_dir / "lang").mkdir(parents=True, exist_ok=True)

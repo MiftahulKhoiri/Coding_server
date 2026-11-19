@@ -35,6 +35,8 @@ class CSharpEngine(BaseEngine):
             "DOTNET_CLI_HOME": str(ctx.cache_dir / "dotnet-home"),
             "HOME": str(ctx.cache_dir / "dotnet-home"),
             "DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE": "1",
+            # W^X memakai memfd "double mapping" raksasa yang ditolak RLIMIT_FSIZE (SIGXFSZ, exit 153).
+            "DOTNET_EnableWriteXorExecute": "0",
             "DOTNET_ADD_GLOBAL_TOOLS_TO_PATH": "0",
             "DOTNET_GENERATE_ASPNET_CERTIFICATE": "false",
             "NUGET_PACKAGES": str(ctx.cache_dir / "nuget"),
