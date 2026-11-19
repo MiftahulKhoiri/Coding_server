@@ -44,7 +44,7 @@ class BackendIntegrationTest {
             .create(CodingApi::class.java)
     }
 
-    @Test fun fullFlow() = runBlocking {
+    @Test fun fullFlow(): Unit = runBlocking {
         assumeTrue("CS_SERVER_URL tidak diisi", url.isNotBlank() && password.isNotBlank())
         assertEquals("ok", api().health().status)
         val tok = api().login(LoginRequest("admin", password))
@@ -86,6 +86,7 @@ class BackendIntegrationTest {
             a.saveHttp(HttpSaved(name = "it", url = "https://example.com"))
             assertTrue(a.httpCollections().collections.isNotEmpty())
             a.aiStatus(); a.backups(); a.recent(); a.history(p.id)
+            Unit
         } finally {
             a.deleteProject(p.id)
         }
