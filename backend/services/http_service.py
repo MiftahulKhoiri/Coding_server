@@ -140,7 +140,10 @@ class HttpService:
              json.dumps(data.get("headers") or {}), json.dumps(data.get("params") or {}), data.get("body"),
              data.get("body_type") or "none", time.time()),
         )
-        return self.db.one("SELECT * FROM http_requests WHERE id=?", (cur.lastrowid,))
+        row = self.db.one("SELECT * FROM http_requests WHERE id=?", (cur.lastrowid,))
+        row["headers"] = json.loads(row["headers"])
+        row["params"] = json.loads(row["params"])
+        return row
 
     def delete(self, user: dict, request_id: int) -> None:
         row = self.db.one("SELECT id FROM http_requests WHERE id=? AND user_id=?", (request_id, user["id"]))

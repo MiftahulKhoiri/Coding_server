@@ -82,6 +82,7 @@ def test_http_ssrf_blocked(client, auth, url):
 def test_http_collections(client, auth):
     r = client.post("/api/v1/http/collections", json={"name": "contoh", "method": "GET", "url": "https://example.com"}, headers=auth)
     assert r.status_code == 201
+    assert r.json()["headers"] == {}  # objek, bukan string JSON
     cols = client.get("/api/v1/http/collections", headers=auth).json()["collections"]
     assert cols[0]["requests"][0]["name"] == "contoh"
 
