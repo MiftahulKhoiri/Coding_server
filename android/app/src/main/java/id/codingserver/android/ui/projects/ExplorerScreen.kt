@@ -17,7 +17,7 @@ import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.NoteAdd
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.DropdownMenu
@@ -117,7 +117,7 @@ fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (Fi
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(p.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            IconButton(onClick = { dialog = Dlg.NewFile("") }) { Icon(Icons.Default.NoteAdd, "File baru") }
+            IconButton(onClick = { dialog = Dlg.NewFile("") }) { Icon(Icons.AutoMirrored.Filled.NoteAdd, "File baru") }
             IconButton(onClick = { dialog = Dlg.NewFolder("") }) { Icon(Icons.Default.CreateNewFolder, "Folder baru") }
             IconButton(onClick = { searching = !searching; results = null }) { Icon(Icons.Default.Search, "Cari") }
             IconButton(onClick = { refreshAll() }) { Icon(Icons.Default.Refresh, "Refresh") }

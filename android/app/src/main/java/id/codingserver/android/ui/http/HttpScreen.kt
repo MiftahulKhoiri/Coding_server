@@ -50,9 +50,10 @@ private fun parseKv(text: String): Map<String, String> =
         l.substring(0, i).trim() to l.substring(i + 1).trim()
     }.toMap()
 
+private val PrettyJson = kotlinx.serialization.json.Json { prettyPrint = true }
+
 private fun pretty(body: String): String = runCatching {
-    val el = ApiJson.parseToJsonElement(body)
-    kotlinx.serialization.json.Json { prettyPrint = true }.encodeToString(JsonElement.serializer(), el)
+    PrettyJson.encodeToString(JsonElement.serializer(), ApiJson.parseToJsonElement(body))
 }.getOrDefault(body)
 
 /** HTTP Client / API tester (lewat server, dengan perlindungan SSRF) + koleksi request. */

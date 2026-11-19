@@ -1,0 +1,95 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - "web_editor/**"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "web_editor/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web_editor/package-lock.json
+
+      - name: Build editor CodeMirror 6 & terminal xterm.js (aset WebView)
+        working-directory: web_editor
+        run: npm ci --no-audit --no-fund && npm run build
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit test
+        run: ./gradlew testDebugUnitTest --console=plain
+
+      - name: Build APK release
+        env:
+          # Kunci rilis tersimpan terenkripsi di signing/release.jks.enc; secret ini membukanya.
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in signing/release.jks.enc \
+              -out "$RUNNER_TEMP/release.jks" -pass env:ANDROID_KEYSTORE_PASSWORD \
+              || { echo "::error::Gagal membuka kunci rilis: secret ANDROID_KEYSTORE_PASSWORD salah?"; exit 1; }
+            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.jks" ANDROID_KEY_ALIAS=codingserver
+            export ANDROID_KEY_PASSWORD="$ANDROID_KEYSTORE_PASSWORD"
+            ./gradlew assembleRelease --console=plain
+            rm -f "$RUNNER_TEMP/release.jks"
+            echo "SIGNING=release" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Secret ANDROID_KEYSTORE_PASSWORD belum diisi. APK ditandatangani kunci DEBUG (lihat android/README.md)."
+            ./gradlew assembleRelease -Pcodingserver.allowDebugSigning --console=plain
+            echo "SIGNING=debug" >> "$GITHUB_ENV"
+          fi
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/CodingServer.apk"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        continue-on-error: true
+        with:
+          name: android-build
+          path: |
+            ${{ runner.temp }}/CodingServer.apk
+            android/app/build/reports/tests/
+          if-no-files-found: ignore
+
+      - name: Terbitkan ke GitHub Release (android-latest)
+        if: success() && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          NOTE="APK otomatis dari commit ${{ github.sha }}. Instal di HP Android 8.0 ke atas. Aplikasi memeriksa pembaruan dari rilis ini (Pengaturan > Periksa pembaruan)."
+          if [ "$SIGNING" = "debug" ]; then NOTE="$NOTE PERINGATAN: ditandatangani kunci debug karena secret ANDROID_KEYSTORE_PASSWORD belum diisi."; fi
+          gh release create android-latest "$RUNNER_TEMP/CodingServer.apk" \
+            --title "Coding Server Android (build #${{ github.run_number }})" \
+            --notes "$NOTE" \
+            --target "${{ github.sha }}" --latest=false
