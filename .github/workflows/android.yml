@@ -47,7 +47,25 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Unit test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Jalankan backend asli untuk uji kontrak API
+        working-directory: .
+        run: |
+          pip install -q -r requirements.txt
+          PASS=$(python -c 'import secrets;print(secrets.token_urlsafe(16))')
+          echo "::add-mask::$PASS"
+          export CS_WORKSPACE_DIR="$RUNNER_TEMP/ws" CS_LOGS_DIR="$RUNNER_TEMP/logs" CS_BACKUPS_DIR="$RUNNER_TEMP/bk"
+          export CS_ADMIN_PASSWORD="$PASS" CS_SANDBOX=none CS_MIN_FREE_MEMORY_MB=64
+          nohup python -m uvicorn backend.main:app --host 127.0.0.1 --port 8800 > "$RUNNER_TEMP/backend.log" 2>&1 &
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8800/api/v1/system/health && break; sleep 1; done
+          echo "CS_SERVER_URL=http://127.0.0.1:8800" >> "$GITHUB_ENV"
+          echo "CS_ADMIN_PASSWORD=$PASS" >> "$GITHUB_ENV"
+
+      - name: Unit & integration test
         run: ./gradlew testDebugUnitTest --console=plain
 
       - name: Build APK release
