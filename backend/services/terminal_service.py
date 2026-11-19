@@ -93,13 +93,14 @@ class TerminalService:
         if len(running) >= self.s.max_terminal_sessions:
             raise ServiceUnavailable("Jumlah sesi terminal maksimum tercapai", code="too_many_sessions")
         registry = get_registry()
-        ro = []
+        ro, rw = [], [project_dir.resolve(), self.s.cache_dir / "lang"]
         for e in registry.all():
             for d in e.runtime_dirs():
                 if d not in ro:
                     ro.append(d)
+            rw += [d for d in e.extra_writable() if d not in rw]
         spec = SandboxSpec(
-            cwd=cwd, writable=[project_dir.resolve(), self.s.cache_dir / "lang"], readonly=ro,
+            cwd=cwd, writable=rw, readonly=ro,
             network=self.s.terminal_network, new_session=False,
             env={"PS1": r"\[\e[32m\]coding_server\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]$ ", "HISTFILE": "/dev/null",
                  "GOCACHE": str(self.s.cache_dir / "lang" / "go-build"), "GOPATH": str(self.s.cache_dir / "lang" / "gopath"),

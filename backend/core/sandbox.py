@@ -119,7 +119,7 @@ def wrap(argv: list[str], spec: SandboxSpec, *, enabled: bool) -> tuple[list[str
     args += ["--ro-bind", "/etc", "/etc"]
     for d in ("/opt", "/run/systemd/resolve", "/srv"):
         args += ["--ro-bind-try", d, d]
-    args += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", home]
+    args += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/dev/shm", "--tmpfs", "/tmp", "--tmpfs", home]
     for p in spec.readonly:
         args += ["--ro-bind", str(p), str(p)]
     for p in spec.writable:

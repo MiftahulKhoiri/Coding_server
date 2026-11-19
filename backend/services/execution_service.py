@@ -248,7 +248,7 @@ class ExecutionService:
                 await self._emit(job, {"type": "phase", "phase": step.phase, "index": i, "argv": step.argv})
                 spec = SandboxSpec(
                     cwd=step.cwd,
-                    writable=[ctx.project_dir, ctx.build_dir, ctx.cache_dir],
+                    writable=[ctx.project_dir, ctx.build_dir, ctx.cache_dir, *engine.extra_writable()],
                     readonly=engine.runtime_dirs(),
                     network=step.network,
                     env=step.env,

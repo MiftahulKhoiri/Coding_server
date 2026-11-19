@@ -126,6 +126,10 @@ class BaseEngine(ABC):
         root = runtime_root(exe) if exe else None
         return [root] if root else []
 
+    def extra_writable(self) -> list[Path]:
+        """Folder tambahan yang perlu bisa ditulis di dalam sandbox (mis. lock file runtime)."""
+        return []
+
     def require(self) -> str:
         exe = self.executable()
         if not exe:

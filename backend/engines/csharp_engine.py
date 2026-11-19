@@ -33,10 +33,27 @@ class CSharpEngine(BaseEngine):
             "DOTNET_NOLOGO": "1",
             "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1",
             "DOTNET_CLI_HOME": str(ctx.cache_dir / "dotnet-home"),
+            "HOME": str(ctx.cache_dir / "dotnet-home"),
+            "DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE": "1",
+            "DOTNET_ADD_GLOBAL_TOOLS_TO_PATH": "0",
+            "DOTNET_GENERATE_ASPNET_CERTIFICATE": "false",
             "NUGET_PACKAGES": str(ctx.cache_dir / "nuget"),
             "DOTNET_ROOT": str(Path(exe).resolve().parent) if exe else "",
             "DOTNET_GCHeapHardLimit": hex(max(64, ctx.memory_mb - 128) * 1024 * 1024),
         }
+
+    def extra_writable(self) -> list[Path]:
+        # .NET menaruh lock file mutex bernama (mis. 'NuGet-Migrations') di <dotnet_root>/corefx,
+        # sedangkan folder instalasi dipasang read-only di sandbox -> sediakan subfolder yang bisa ditulis.
+        exe = self.executable()
+        if not exe:
+            return []
+        d = Path(exe).resolve().parent / "corefx"
+        try:
+            d.mkdir(exist_ok=True)
+        except OSError:
+            return []
+        return [d]
 
     def _tfm(self) -> str:
         ver = (self.get_status().get("version") or "8.0").split(".")
