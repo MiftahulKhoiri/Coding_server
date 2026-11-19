@@ -1,0 +1,30 @@
+[Unit]
+Description=CODING_SERVER - multi-language development server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@BASE@
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=@HOME@/.local/bin:@HOME@/.dotnet:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-@BASE@/deployment/configuration/coding_server.env
+ExecStart=@BASE@/scripts/run_server.sh --foreground
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillMode=mixed
+# Hardening (bwrap tetap bisa membuat namespace sebagai user biasa)
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+LimitNOFILE=65536
+StandardOutput=append:@BASE@/logs/service.log
+StandardError=append:@BASE@/logs/service.log
+
+[Install]
+WantedBy=multi-user.target
