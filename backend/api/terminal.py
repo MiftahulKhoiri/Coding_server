@@ -23,12 +23,12 @@ async def create_session(body: TerminalCreate, user: dict = Depends(require("ter
 
 
 @router.get("/sessions", response_model=list[TerminalOut])
-def list_sessions(user: dict = Depends(require("terminal")), svc: Services = Depends(services)):
+async def list_sessions(user: dict = Depends(require("terminal")), svc: Services = Depends(services)):
     return svc.terminal.list(user)
 
 
 @router.delete("/sessions/{session_id}", response_model=OkResponse)
-def close_session(session_id: str, user: dict = Depends(require("terminal")), svc: Services = Depends(services)):
+async def close_session(session_id: str, user: dict = Depends(require("terminal")), svc: Services = Depends(services)):
     svc.terminal.get(session_id, user)
     svc.terminal.close(session_id)
     svc.db.audit("terminal_close", user=user, target=session_id)

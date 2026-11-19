@@ -3,6 +3,8 @@ source "$(dirname "$0")/common.sh"
 echo "== CODING_SERVER =="
 if systemd_installed; then
   echo "Mode: systemd ($(systemctl is-enabled $SERVICE 2>/dev/null), $(systemctl is-active $SERVICE 2>/dev/null))"
+elif user_systemd_installed; then
+  echo "Mode: systemd --user ($(systemctl --user is-enabled $SERVICE 2>/dev/null), $(systemctl --user is-active $SERVICE 2>/dev/null)), linger: $(linger_enabled && echo ya || echo TIDAK)"
 elif [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   echo "Mode: supervisor, PID $(cat "$PID_FILE")"
 else

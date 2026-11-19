@@ -3,6 +3,9 @@ source "$(dirname "$0")/common.sh"
 if systemd_installed; then
   as_root systemctl stop "$SERVICE" && c_ok "Service $SERVICE dihentikan"
 fi
+if user_systemd_installed; then
+  systemctl --user stop "$SERVICE" && c_ok "Service $SERVICE dihentikan (systemd --user)"
+fi
 if [ -f "$PID_FILE" ]; then
   pid=$(cat "$PID_FILE")
   if kill -0 "$pid" 2>/dev/null; then

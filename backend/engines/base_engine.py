@@ -56,11 +56,12 @@ EXTRA_PATHS = [
 
 
 def find_executable(*names: str) -> str | None:
+    """Cari executable dan kembalikan path ASLI (symlink diselesaikan) agar tetap valid di dalam sandbox."""
     path = os.environ.get("PATH", "") + ":" + ":".join(EXTRA_PATHS)
     for n in names:
         exe = shutil.which(n, path=path)
         if exe:
-            return exe
+            return os.path.realpath(exe)
     return None
 
 

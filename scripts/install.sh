@@ -51,6 +51,8 @@ if systemd_installed; then
   c_ok "systemd service sudah terpasang"
 elif sudo -n true 2>/dev/null; then
   sudo -n "$BASE/scripts/install_systemd.sh"
+elif linger_enabled; then
+  "$BASE/scripts/install_user_systemd.sh"
 else
   ( crontab -l 2>/dev/null | grep -v coding_server_autostart; \
     echo "@reboot $BASE/scripts/start.sh >> $BASE/logs/autostart.log 2>&1 # coding_server_autostart" ) | crontab -
@@ -59,7 +61,7 @@ else
 fi
 
 # 9. Jalankan & health check
-"$BASE/scripts/restart.sh"
+if user_systemd_installed || systemd_installed; then "$BASE/scripts/start.sh"; else "$BASE/scripts/restart.sh"; fi
 if [ -f workspace/metadata/initial_admin_password.txt ]; then
   echo; c_info "Login awal (simpan lalu hapus file ini):"; cat workspace/metadata/initial_admin_password.txt
 fi

@@ -9,6 +9,8 @@ import asyncio
 import fcntl
 import os
 import pty
+import shutil
+import subprocess
 import signal
 import struct
 import termios
@@ -58,6 +60,8 @@ class TerminalService:
         self.s = settings
         self.sessions: dict[str, TerminalSession] = {}
         self._reaper: asyncio.Task | None = None
+        self._procs: dict[int, subprocess.Popen] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def start_reaper(self) -> None:
         if self._reaper is None:
@@ -105,29 +109,39 @@ class TerminalService:
         (self.s.cache_dir / "lang").mkdir(parents=True, exist_ok=True)
         argv, env = wrap(["/bin/bash", "--noprofile", "--norc", "-i"], spec, enabled=self.s.sandbox_enabled)
         limits = Limits(timeout=self.s.terminal_idle_timeout, memory_mb=self.s.memory_limit_mb, cpu_seconds=24 * 3600)
-        pid, fd = pty.fork()
-        if pid == 0:  # anak
+        # Tanpa fork() manual di proses multi-thread: subprocess memakai _posixsubprocess (aman),
+        # setsid --ctty menjadikan PTY sebagai terminal pengendali, prlimit membatasi sumber daya.
+        prefix: list[str] = []
+        if shutil.which("setsid"):
+            prefix += [shutil.which("setsid"), "--ctty"]
+        if shutil.which("prlimit"):
+            prefix += [shutil.which("prlimit"), "--core=0", f"--fsize={1024 ** 3}", f"--cpu={limits.cpu_seconds}", "--"]
+        if shutil.which("nice"):
+            prefix += [shutil.which("nice"), "-n", "5"]
+        master, slave = pty.openpty()
+        self._resize(master, cols, rows)
+        try:
+            proc = subprocess.Popen(prefix + argv, stdin=slave, stdout=slave, stderr=slave, cwd=str(cwd), env=env,
+                                    start_new_session=True, close_fds=True)
+        except OSError as e:
+            os.close(master)
+            os.close(slave)
+            raise ServiceUnavailable(f"Gagal memulai shell: {e}", code="terminal_failed")
+        finally:
             try:
-                os.chdir(cwd)
-                os.nice(5)
-                import resource
-
-                resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-                fs = 1024 * 1024 * 1024
-                resource.setrlimit(resource.RLIMIT_FSIZE, (fs, fs))
-                os.execvpe(argv[0], argv, env)
-            except Exception as e:  # pragma: no cover
-                os.write(2, f"gagal memulai shell: {e}\n".encode())
-            finally:
-                os._exit(127)
-        _ = limits
+                os.close(slave)
+            except OSError:
+                pass
+        pid, fd = proc.pid, master
+        self._procs[pid] = proc
         self._resize(fd, cols, rows)
         flags = fcntl.fcntl(fd, fcntl.F_GETFL)
         fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         now = time.time()
         sess = TerminalSession(uuid.uuid4().hex[:16], user["id"], project_id, str(cwd), now, now, pid, fd)
         self.sessions[sess.session_id] = sess
-        asyncio.get_running_loop().add_reader(fd, self._on_readable, sess)
+        self._loop = asyncio.get_running_loop()
+        self._loop.add_reader(fd, self._on_readable, sess)
         log.info("Sesi terminal %s dibuat oleh %s di %s", sess.session_id, user["username"], cwd)
         return sess
 
@@ -146,6 +160,8 @@ class TerminalService:
             pass
 
     def _on_readable(self, sess: TerminalSession) -> None:
+        if sess.status != "running":
+            return
         try:
             data = os.read(sess.fd, 65536)
         except BlockingIOError:
@@ -168,15 +184,16 @@ class TerminalService:
     def _ended(self, sess: TerminalSession) -> None:
         if sess.status != "running":
             return
-        try:
-            asyncio.get_running_loop().remove_reader(sess.fd)
-        except Exception:
-            pass
-        try:
-            _, st = os.waitpid(sess.pid, os.WNOHANG)
-            sess.exit_code = os.waitstatus_to_exitcode(st) if st else None
-        except ChildProcessError:
-            pass
+        # remove_reader WAJIB sebelum fd ditutup; kalau tidak, nomor fd yang dipakai ulang
+        # (mis. pidfd proses lain) akan "dicuri" callback terminal.
+        if self._loop is not None:
+            self._loop.remove_reader(sess.fd)
+        proc = self._procs.pop(sess.pid, None)
+        if proc is not None:
+            try:
+                sess.exit_code = proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
         try:
             os.close(sess.fd)
         except OSError:
@@ -217,10 +234,6 @@ class TerminalService:
             kill_tree(sess.pid, signal.SIGHUP)
             kill_tree(sess.pid, signal.SIGKILL)
             self._ended(sess)
-        try:
-            os.waitpid(sess.pid, os.WNOHANG)
-        except ChildProcessError:
-            pass
         sess.status = "closed"
         self.sessions.pop(session_id, None)
 

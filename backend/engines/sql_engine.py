@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -16,7 +17,11 @@ class SqlEngine(BaseEngine):
     address_space_limit = True
 
     def executable(self) -> str | None:
-        return sys.executable
+        # Python asli (bukan symlink venv) supaya bisa dijalankan di dalam sandbox.
+        return os.path.realpath(sys.executable)
+
+    def runtime_dirs(self) -> list[Path]:
+        return [RUNNER]
 
     def get_version(self) -> str | None:
         import sqlite3
@@ -32,7 +37,7 @@ class SqlEngine(BaseEngine):
         return [str(db)]
 
     def build_steps(self, ctx: EngineContext) -> list[Step]:
-        return [self.step("build", [sys.executable, "-I", str(RUNNER), "--check", str(ctx.file), *self._db(ctx)], ctx)]
+        return [self.step("build", [self.executable(), "-I", str(RUNNER), "--check", str(ctx.file), *self._db(ctx)], ctx)]
 
     def run_steps(self, ctx: EngineContext) -> list[Step]:
-        return [self.step("run", [sys.executable, "-I", str(RUNNER), str(ctx.file), *self._db(ctx)], ctx)]
+        return [self.step("run", [self.executable(), "-I", str(RUNNER), str(ctx.file), *self._db(ctx)], ctx)]

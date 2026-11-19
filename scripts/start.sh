@@ -2,6 +2,8 @@
 source "$(dirname "$0")/common.sh"
 if systemd_installed; then
   as_root systemctl start "$SERVICE" && c_ok "Service $SERVICE dijalankan (systemd)" || { c_err "Gagal: butuh sudo"; exit 1; }
+elif user_systemd_installed; then
+  systemctl --user start "$SERVICE" && c_ok "Service $SERVICE dijalankan (systemd --user)" || { c_err "Gagal start"; exit 1; }
 else
   if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     c_warn "Server sudah berjalan (PID $(cat "$PID_FILE"))"; exit 0

@@ -103,7 +103,7 @@ def wrap(argv: list[str], spec: SandboxSpec, *, enabled: bool) -> tuple[list[str
     env = dict(BASE_ENV)
     env["HOME"] = home
     env.update(spec.env)
-    extra_paths = [str(p / "bin") if (p / "bin").is_dir() else str(p) for p in spec.readonly]
+    extra_paths = [str(p / "bin") if (p / "bin").is_dir() else str(p) for p in spec.readonly if p.is_dir()]
     if extra_paths:
         env["PATH"] = ":".join(extra_paths + [env["PATH"]])
     if not enabled:

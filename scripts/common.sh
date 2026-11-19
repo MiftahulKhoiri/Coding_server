@@ -17,5 +17,9 @@ c_warn() { printf '\033[33m[!!]\033[0m %s\n' "$*"; }
 c_err()  { printf '\033[31m[XX]\033[0m %s\n' "$*"; }
 c_info() { printf '\033[36m[..]\033[0m %s\n' "$*"; }
 
+USER_UNIT="$HOME/.config/systemd/user/$SERVICE.service"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 systemd_installed() { [ -f "/etc/systemd/system/$SERVICE.service" ]; }
+user_systemd_installed() { [ -f "$USER_UNIT" ]; }
+linger_enabled() { [ -f "/var/lib/systemd/linger/$(id -un)" ]; }
 as_root() { if [ "$(id -u)" -eq 0 ]; then "$@"; else sudo -n "$@"; fi; }
