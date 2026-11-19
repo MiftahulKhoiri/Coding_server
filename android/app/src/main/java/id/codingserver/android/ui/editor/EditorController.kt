@@ -1,0 +1,163 @@
+package id.codingserver.android.ui.editor
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.view.ViewGroup
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import id.codingserver.android.data.api.ApiJson
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.Serializable
+import kotlin.coroutines.resume
+
+sealed interface EditorEvent {
+    data class Changed(val tabId: String, val dirty: Boolean) : EditorEvent
+    data class SaveRequested(val tabId: String) : EditorEvent
+    data class RunRequested(val tabId: String) : EditorEvent
+}
+
+@Serializable data class Symbol(val name: String, val line: Int, val text: String = "")
+@Serializable data class Diagnostic(val line: Int, val column: Int? = null, val severity: String = "error", val message: String)
+
+/** Jembatan JS -> Kotlin. Dipanggil dari thread WebView, diteruskan lewat flow. */
+class EditorBridge(private val c: EditorController) {
+    @JavascriptInterface fun onReady() { c.ready.complete(Unit) }
+    @JavascriptInterface fun onChange(tabId: String?, dirty: Boolean) { tabId?.let { c.events.tryEmit(EditorEvent.Changed(it, dirty)) } }
+    @JavascriptInterface fun onSave(tabId: String?) { tabId?.let { c.events.tryEmit(EditorEvent.SaveRequested(it)) } }
+    @JavascriptInterface fun onRun(tabId: String?) { tabId?.let { c.events.tryEmit(EditorEvent.RunRequested(it)) } }
+    @JavascriptInterface fun onCursor(line: Int, col: Int) { c.cursor.value = line to col }
+    @JavascriptInterface fun onLog(msg: String?) { android.util.Log.d("CodingServerEditor", msg ?: "") }
+}
+
+/**
+ * Satu WebView CodeMirror 6 yang hidup selama Activity (tab & riwayat undo tetap ada saat
+ * berpindah layar). Semua pemanggilan JS lewat thread utama.
+ */
+@SuppressLint("SetJavaScriptEnabled")
+class EditorController(context: Context) {
+    val ready = CompletableDeferred<Unit>()
+    val events = MutableSharedFlow<EditorEvent>(extraBufferCapacity = 64)
+    val eventsFlow: SharedFlow<EditorEvent> get() = events
+    val cursor = MutableStateFlow(1 to 1)
+    val cursorFlow: StateFlow<Pair<Int, Int>> get() = cursor
+    private val main = Handler(Looper.getMainLooper())
+
+    val webView: WebView = WebView(context.applicationContext).apply {
+        settings.javaScriptEnabled = true
+        settings.domStorageEnabled = true
+        settings.allowFileAccess = false
+        settings.allowContentAccess = false
+        settings.builtInZoomControls = false
+        webChromeClient = WebChromeClient()
+        webViewClient = object : WebViewClient() {
+            // Editor tidak boleh membuka halaman lain.
+            override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?) = true
+        }
+        addJavascriptInterface(EditorBridge(this@EditorController), "AndroidBridge")
+        loadUrl("file:///android_asset/web/editor.html")
+    }
+
+    fun detach() { (webView.parent as? ViewGroup)?.removeView(webView) }
+
+    suspend fun eval(js: String): String? {
+        ready.await()
+        return suspendCancellableCoroutine { cont ->
+            main.post { webView.evaluateJavascript(js) { r -> if (cont.isActive) cont.resume(r) } }
+        }
+    }
+
+    private fun q(s: String) = ApiJson.encodeToString(String.serializer(), s)
+    private fun decodeString(raw: String?): String? =
+        if (raw == null || raw == "null") null else runCatching { ApiJson.decodeFromString(String.serializer(), raw) }.getOrNull()
+
+    suspend fun hasTab(id: String) = eval("CS.hasTab(${q(id)})") == "true"
+    suspend fun openTab(id: String, text: String, filename: String) { eval("CS.openTab(${q(id)}, ${q(text)}, ${q(filename)})") }
+    suspend fun switchTab(id: String) = eval("CS.switchTab(${q(id)})") == "true"
+    suspend fun closeTab(id: String) { eval("CS.closeTab(${q(id)})") }
+    suspend fun renameTab(old: String, new: String, filename: String) { eval("CS.renameTab(${q(old)}, ${q(new)}, ${q(filename)})") }
+    suspend fun getDoc(id: String): String? = decodeString(eval("CS.getDoc(${q(id)})"))
+    suspend fun setDoc(id: String, text: String, markSaved: Boolean) { eval("CS.setDoc(${q(id)}, ${q(text)}, $markSaved)") }
+    suspend fun markSaved(id: String) { eval("CS.markSaved(${q(id)})") }
+    suspend fun isDirty(id: String) = eval("CS.isDirty(${q(id)})") == "true"
+    suspend fun undo() { eval("CS.undo()") }
+    suspend fun redo() { eval("CS.redo()") }
+    suspend fun openSearch() { eval("CS.openSearch()") }
+    suspend fun gotoLine(line: Int) { eval("CS.gotoLine($line)") }
+    suspend fun gotoDefinition() = eval("CS.gotoDefinition()") == "true"
+    suspend fun foldAll() { eval("CS.foldAll()") }
+    suspend fun unfoldAll() { eval("CS.unfoldAll()") }
+    suspend fun insert(text: String) { eval("CS.insert(${q(text)})") }
+    suspend fun applyPrefs(dark: Boolean, font: Int, wrap: Boolean, tab: Int) {
+        eval("CS.configure({theme:${q(if (dark) "dark" else "light")},fontSize:$font,wordWrap:$wrap,tabSize:$tab})")
+    }
+    suspend fun symbols(): List<Symbol> {
+        val raw = decodeString(eval("CS.symbols()")) ?: return emptyList()
+        return runCatching { ApiJson.decodeFromString(ListSerializer(Symbol.serializer()), raw) }.getOrDefault(emptyList())
+    }
+    suspend fun setDiagnostics(d: List<Diagnostic>) {
+        eval("CS.setDiagnostics(${q(ApiJson.encodeToString(ListSerializer(Diagnostic.serializer()), d))})")
+    }
+    suspend fun clearDiagnostics() { eval("CS.clearDiagnostics()") }
+}
+
+/** Ambil error kompilasi/runtime dari output sebagai diagnostics untuk file tertentu. */
+object DiagnosticParser {
+    private val gccLike = Regex("""^(.+?):(\d+):(?:(\d+):)?\s*(fatal error|error|warning|note)?:?\s*(.*)$""")
+    private val pyTrace = Regex("""File "(.+?)", line (\d+)""")
+    private val javac = Regex("""^(.+?\.java):(\d+):\s*(error|warning):\s*(.*)$""")
+    private val csharp = Regex("""^(.+?\.cs)\((\d+),(\d+)\):\s*(error|warning)\s+\w+:\s*(.*?)(?:\s*\[.*\])?$""")
+    private val php = Regex("""(?:PHP )?(Parse error|Fatal error|Warning):\s*(.*) in (.+?) on line (\d+)""")
+
+    fun parse(output: String, file: String): List<Diagnostic> {
+        val name = file.substringAfterLast('/')
+        val out = mutableListOf<Diagnostic>()
+        val lines = output.lines()
+        for ((i, raw) in lines.withIndex()) {
+            val line = raw.trim()
+            val cs = csharp.find(line)
+            if (cs != null) {
+                if (cs.groupValues[1].endsWith(name)) out += Diagnostic(cs.groupValues[2].toInt(), cs.groupValues[3].toInt(),
+                    cs.groupValues[4], cs.groupValues[5])
+                continue
+            }
+            val jv = javac.find(line)
+            if (jv != null) {
+                if (jv.groupValues[1].endsWith(name)) out += Diagnostic(jv.groupValues[2].toInt(), null, jv.groupValues[3], jv.groupValues[4])
+                continue
+            }
+            val ph = php.find(line)
+            if (ph != null) {
+                if (ph.groupValues[3].endsWith(name)) out += Diagnostic(ph.groupValues[4].toInt(), null,
+                    if (ph.groupValues[1] == "Warning") "warning" else "error", ph.groupValues[2])
+                continue
+            }
+            val py = pyTrace.find(line)
+            if (py != null) {
+                if (py.groupValues[1].endsWith(name)) {
+                    val msg = lines.drop(i + 1).firstOrNull { l -> l.isNotBlank() && !l.startsWith("  ") }
+                        ?: lines.lastOrNull { it.isNotBlank() } ?: "error"
+                    out += Diagnostic(py.groupValues[2].toInt(), null, "error", msg.trim())
+                }
+                continue
+            }
+            val g = gccLike.find(line)
+            if (g != null && g.groupValues[1].endsWith(name) && !g.groupValues[1].contains(' ')) {
+                val sev = when (g.groupValues[4]) { "warning" -> "warning"; "note" -> "info"; else -> "error" }
+                out += Diagnostic(g.groupValues[2].toInt(), g.groupValues[3].toIntOrNull(), sev, g.groupValues[5])
+            }
+        }
+        // Python: hanya frame terakhir yang relevan
+        return out.distinctBy { Triple(it.line, it.column, it.message) }
+    }
+}

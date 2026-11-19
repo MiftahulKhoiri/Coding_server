@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  CODING_SERVER berjalan di jaringan rumah lewat HTTP biasa (http://192.168.x.x:8800) atau VPN
+  (Tailscale). Karena itu HTTP tanpa TLS diizinkan. Untuk akses lewat internet gunakan HTTPS
+  (reverse proxy) - lihat docs/SECURITY.md.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

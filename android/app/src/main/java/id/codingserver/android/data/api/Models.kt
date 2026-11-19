@@ -1,0 +1,198 @@
+package id.codingserver.android.data.api
+
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+
+@Serializable data class ErrorBody(val code: String = "", val message: String = "", val details: JsonElement? = null)
+@Serializable data class ErrorResponse(val error: ErrorBody)
+@Serializable data class OkResponse(val ok: Boolean = true, val message: String = "")
+
+// ---------- auth ----------
+@Serializable data class LoginRequest(val username: String, val password: String)
+@Serializable data class RefreshRequest(val refresh_token: String)
+@Serializable data class LogoutRequest(val refresh_token: String? = null)
+@Serializable data class UserOut(
+    val id: Int, val username: String, val role: String, val is_active: Boolean = true,
+    val permissions: List<String> = emptyList(), val created_at: Double = 0.0,
+)
+@Serializable data class TokenResponse(
+    val access_token: String, val refresh_token: String, val token_type: String = "bearer",
+    val expires_at: Long, val refresh_expires_at: Long, val user: UserOut,
+)
+
+// ---------- system ----------
+@Serializable data class Health(
+    val status: String, val version: String = "", val time: Double = 0.0, val database: Boolean = true,
+    val sandbox: Boolean = false, val name: String = "",
+)
+@Serializable data class SystemInfo(
+    val hostname: String = "", val board: String? = null, val os: String? = null, val kernel: String = "",
+    val architecture: String = "", val cpu_count: Int = 0, val python: String = "", val server_version: String = "",
+    val uptime_seconds: Long = 0, val server_uptime_seconds: Long = 0, val workspace: String = "",
+)
+@Serializable data class CpuInfo(val percent: Double = 0.0, val per_cpu: List<Double> = emptyList(),
+                                 val load_avg: List<Double> = emptyList(), val freq_mhz: Double? = null)
+@Serializable data class MemInfo(val total: Long = 0, val available: Long = 0, val used: Long = 0, val percent: Double = 0.0,
+                                 val swap_total: Long = 0, val swap_used: Long = 0)
+@Serializable data class DiskInfo(val path: String = "", val total: Long = 0, val used: Long = 0, val free: Long = 0,
+                                  val percent: Double = 0.0)
+@Serializable data class NetIf(val `interface`: String, val up: Boolean = false, val ipv4: List<String> = emptyList())
+@Serializable data class NetInfo(val interfaces: List<NetIf> = emptyList(), val bytes_sent: Long = 0, val bytes_recv: Long = 0)
+@Serializable data class QueueStats(val max_concurrent: Int = 0, val running: Int = 0, val waiting: Int = 0)
+@Serializable data class Resources(
+    val cpu: CpuInfo = CpuInfo(), val memory: MemInfo = MemInfo(), val disk: DiskInfo = DiskInfo(),
+    val temperature_c: Double? = null, val uptime_seconds: Long = 0, val network: NetInfo = NetInfo(),
+    val jobs: QueueStats? = null,
+)
+@Serializable data class EngineStatus(
+    val engine_id: String, val language: String, val extensions: List<String> = emptyList(), val build: Boolean = true,
+    val run: Boolean = true, val status: String, val version: String? = null, val executable: String? = null,
+)
+@Serializable data class Engines(val engines: List<EngineStatus>)
+@Serializable data class RecentFile(val project_id: String, val path: String, val opened_at: Double = 0.0)
+@Serializable data class Dashboard(
+    val info: SystemInfo = SystemInfo(), val resources: Resources = Resources(), val projects_count: Int = 0,
+    val recent_projects: List<Project> = emptyList(), val recent_files: List<RecentFile> = emptyList(),
+    val active_executions: List<Job> = emptyList(), val jobs: QueueStats = QueueStats(), val terminal_sessions: Int = 0,
+)
+@Serializable data class ProcInfo(val pid: Int, val name: String? = null, val user: String? = null,
+                                  val cpu_percent: Double? = null, val rss_mb: Double = 0.0, val cmd: String = "")
+@Serializable data class Processes(val processes: List<ProcInfo> = emptyList(), val jobs: List<Job> = emptyList(), val terminals: Int = 0)
+
+// ---------- projects & files ----------
+@Serializable data class Project(
+    val id: String, val name: String, val description: String = "", val language: String = "", val owner_id: Int = 0,
+    val created_at: Double = 0.0, val updated_at: Double = 0.0, val path_exists: Boolean = true,
+)
+@Serializable data class ProjectCreate(val name: String, val description: String = "", val language: String = "", val template: Boolean = true)
+@Serializable data class ProjectUpdate(val name: String? = null, val description: String? = null, val language: String? = null)
+@Serializable data class Templates(val languages: List<String>)
+
+@Serializable data class FileEntry(
+    val name: String, val path: String, val type: String, val size: Long = 0, val modified: Double = 0.0,
+    val extension: String = "", val language: String = "", val mime: String? = null,
+    val children: List<FileEntry>? = null, val truncated: Boolean? = null,
+    // hasil pencarian isi file
+    val line: Int? = null, val text: String? = null,
+) {
+    val isFolder: Boolean get() = type == "folder"
+}
+@Serializable data class FileContent(
+    val name: String, val path: String, val type: String = "file", val size: Long = 0, val modified: Double = 0.0,
+    val extension: String = "", val language: String = "", val binary: Boolean = false, val content: String? = null,
+    val encoding: String? = null, val sha256: String = "",
+)
+@Serializable data class FileWritten(
+    val name: String, val path: String, val type: String = "file", val size: Long = 0, val modified: Double = 0.0,
+    val sha256: String? = null,
+)
+@Serializable data class FileCreate(val project_id: String, val path: String, val type: String = "file", val content: String = "")
+@Serializable data class FileWrite(val project_id: String, val path: String, val content: String, val expected_sha256: String? = null)
+@Serializable data class FileRename(val project_id: String, val path: String, val new_name: String)
+@Serializable data class FileMove(val project_id: String, val path: String, val destination: String, val overwrite: Boolean = false)
+@Serializable data class FavoriteRequest(val project_id: String, val path: String)
+@Serializable data class FileList(val files: List<RecentFile> = emptyList())
+@Serializable data class HistoryEntry(
+    val id: Int, val path: String, val action: String, val sha256: String? = null, val size: Long? = null,
+    val actor_type: String = "user", val note: String = "", val created_at: Double = 0.0,
+)
+@Serializable data class HistoryList(val history: List<HistoryEntry> = emptyList())
+@Serializable data class RestoreRequest(val project_id: String, val history_id: Int)
+
+// ---------- execution ----------
+@Serializable data class RunRequest(
+    val project_id: String, val path: String, val language: String? = null, val args: List<String> = emptyList(),
+    val stdin: String? = null, val interactive: Boolean = false, val timeout: Int? = null,
+)
+@Serializable data class Job(
+    val process_id: String, val project_id: String = "", val user_id: Int = 0, val action: String = "run",
+    val language: String = "", val file: String = "", val status: String = "QUEUED", val exit_code: Int? = null,
+    val command: List<List<String>> = emptyList(), val error: String = "", val created_at: Double = 0.0,
+    val start_time: Double? = null, val end_time: Double? = null, val duration: Double? = null,
+    val truncated: Boolean = false, val preview_path: String? = null, val stdout: String? = null, val stderr: String? = null,
+) {
+    val finished: Boolean get() = status in setOf("COMPLETED", "FAILED", "TIMEOUT", "CANCELLED")
+}
+@Serializable data class JobList(val executions: List<Job> = emptyList(), val queue: QueueStats = QueueStats())
+@Serializable data class StdinRequest(val data: String = "", val eof: Boolean = false)
+@Serializable data class Artifact(val path: String, val size: Long = 0, val modified: Double = 0.0, val location: String = "")
+@Serializable data class Artifacts(val artifacts: List<Artifact> = emptyList())
+@Serializable data class PreviewToken(val url: String, val expires_at: Long = 0)
+
+// ---------- terminal ----------
+@Serializable data class TerminalCreate(val project_id: String, val cwd: String = "", val cols: Int = 80, val rows: Int = 24)
+@Serializable data class TerminalSession(
+    val session_id: String, val owner_id: Int = 0, val project_id: String = "", val working_directory: String = "",
+    val created_at: Double = 0.0, val last_activity: Double = 0.0, val status: String = "", val exit_code: Int? = null,
+    val history: List<String> = emptyList(),
+)
+
+// ---------- database ----------
+@Serializable data class DbItem(val name: String, val size: Long = 0, val modified: Double = 0.0)
+@Serializable data class DbList(val databases: List<DbItem> = emptyList())
+@Serializable data class DbCreate(val name: String, val project_id: String? = null)
+@Serializable data class DbQuery(
+    val database: String, val project_id: String? = null, val sql: String, val mode: String = "read",
+    val confirm: Boolean = false,
+)
+@Serializable data class StmtResult(
+    val statement: String = "", val columns: List<String>? = null, val rows: List<List<JsonElement>>? = null,
+    val truncated: Boolean = false, val rowcount: Int? = null,
+)
+@Serializable data class DbQueryResult(val results: List<StmtResult> = emptyList(), val duration_ms: Double = 0.0, val mode: String = "")
+@Serializable data class DbColumn(val cid: Int = 0, val name: String, val type: String = "", val notnull: Boolean = false, val pk: Boolean = false)
+@Serializable data class DbObject(val type: String, val name: String, val table: String = "", val sql: String? = null,
+                                  val columns: List<DbColumn>? = null, val row_count: Long? = null)
+@Serializable data class DbSchema(val objects: List<DbObject> = emptyList())
+@Serializable data class DbRef(val database: String, val project_id: String? = null)
+
+// ---------- git ----------
+@Serializable data class GitProject(val project_id: String)
+@Serializable data class GitFile(val index: String = " ", val worktree: String = " ", val path: String)
+@Serializable data class GitStatus(val branch: String = "", val files: List<GitFile> = emptyList(), val clean: Boolean = true)
+@Serializable data class GitResult(val exit_code: Int? = null, val stdout: String = "", val stderr: String = "", val ok: Boolean = false)
+@Serializable data class GitCommit(val project_id: String, val message: String, val add_all: Boolean = true)
+@Serializable data class Commit(val hash: String, val author: String = "", val email: String = "", val date: String = "", val message: String = "")
+@Serializable data class GitLog(val commits: List<Commit> = emptyList())
+@Serializable data class GitBranches(val current: String? = null, val branches: List<String> = emptyList())
+@Serializable data class GitBranch(val project_id: String, val name: String, val checkout: Boolean = true)
+@Serializable data class GitCheckout(val project_id: String, val ref: String)
+@Serializable data class GitRemoteOp(val project_id: String, val remote: String = "origin", val branch: String? = null)
+@Serializable data class GitRemoteSet(val project_id: String, val name: String = "origin", val url: String)
+@Serializable data class GitClone(val url: String, val name: String? = null, val branch: String? = null)
+@Serializable data class GitCloneResult(val project: Project, val ok: Boolean = false, val stdout: String = "", val stderr: String = "")
+@Serializable data class GitCredential(val host: String = "github.com", val username: String, val token: String)
+@Serializable data class GitCredInfo(val host: String, val username: String, val created_at: Double = 0.0)
+@Serializable data class GitCreds(val credentials: List<GitCredInfo> = emptyList())
+
+// ---------- http ----------
+@Serializable data class HttpRequestIn(
+    val method: String = "GET", val url: String, val headers: Map<String, String> = emptyMap(),
+    val params: Map<String, String> = emptyMap(), val body: String? = null, val body_type: String = "none",
+    val form: Map<String, String>? = null, val follow_redirects: Boolean = true,
+)
+@Serializable data class HttpResponseOut(
+    val status_code: Int, val reason: String = "", val http_version: String = "", val url: String = "",
+    val headers: Map<String, String> = emptyMap(), val body: String = "", val size: Long = 0, val truncated: Boolean = false,
+    val time_ms: Double = 0.0,
+)
+@Serializable data class HttpSaved(
+    val id: Int? = null, val name: String, val collection: String = "default", val method: String = "GET", val url: String,
+    val headers: Map<String, String> = emptyMap(), val params: Map<String, String> = emptyMap(), val body: String? = null,
+    val body_type: String = "none",
+)
+@Serializable data class HttpCollection(val name: String, val requests: List<HttpSaved> = emptyList())
+@Serializable data class HttpCollections(val collections: List<HttpCollection> = emptyList())
+
+// ---------- backup ----------
+@Serializable data class BackupInfo(val name: String, val size: Long = 0, val created_at: Double = 0.0)
+@Serializable data class BackupList(val backups: List<BackupInfo> = emptyList(), val retention: Int = 0)
+@Serializable data class BackupCreate(val label: String = "manual")
+
+// ---------- AI ----------
+@Serializable data class AIStatus(
+    val configured: Boolean = false, val provider: String? = null, val base_url: String? = null, val model: String? = null,
+    val reachable: Boolean? = null, val ai_permissions: List<String> = emptyList(),
+)
+@Serializable data class AIChat(val messages: List<Map<String, String>>, val project_id: String? = null, val files: List<String> = emptyList())
+@Serializable data class AIReply(val content: String = "", val model: String? = null)

@@ -1,0 +1,225 @@
+package id.codingserver.android
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Http
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Monitor
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.compose.rememberNavController
+import id.codingserver.android.data.api.FileEntry
+import id.codingserver.android.ui.AppViewModel
+import id.codingserver.android.ui.AuthState
+import id.codingserver.android.ui.EditorTab
+import id.codingserver.android.ui.dashboard.DashboardScreen
+import id.codingserver.android.ui.database.DatabaseScreen
+import id.codingserver.android.ui.editor.EditorController
+import id.codingserver.android.ui.editor.EditorScreen
+import id.codingserver.android.ui.git.GitScreen
+import id.codingserver.android.ui.http.HttpScreen
+import id.codingserver.android.ui.monitor.MonitorScreen
+import id.codingserver.android.ui.output.OutputScreen
+import id.codingserver.android.ui.projects.ExplorerScreen
+import id.codingserver.android.ui.projects.ProjectsScreen
+import id.codingserver.android.ui.servers.LoginScreen
+import id.codingserver.android.ui.servers.ServersScreen
+import id.codingserver.android.ui.settings.SettingsScreen
+import id.codingserver.android.ui.terminal.TerminalController
+import id.codingserver.android.ui.terminal.TerminalScreen
+import id.codingserver.android.ui.theme.CodingServerTheme
+import kotlinx.coroutines.launch
+
+private data class Dest(val route: String, val label: String, val icon: ImageVector)
+
+private val DESTS = listOf(
+    Dest("dashboard", "Dashboard", Icons.Default.Dashboard),
+    Dest("projects", "Proyek", Icons.Default.Folder),
+    Dest("explorer", "Project Explorer", Icons.Default.FolderOpen),
+    Dest("editor", "Code Editor", Icons.Default.Code),
+    Dest("terminal", "Terminal", Icons.Default.Terminal),
+    Dest("output", "Build Output", Icons.AutoMirrored.Filled.Article),
+    Dest("database", "Database", Icons.Default.Storage),
+    Dest("git", "Git", Icons.Default.AccountTree),
+    Dest("http", "HTTP Client", Icons.Default.Http),
+    Dest("monitor", "Server Monitor", Icons.Default.Monitor),
+    Dest("servers", "Koneksi Server", Icons.Default.Dns),
+    Dest("settings", "Pengaturan", Icons.Default.Settings),
+)
+
+class MainActivity : ComponentActivity() {
+    private val vm: AppViewModel by viewModels()
+    private val editor by lazy { EditorController(this) }
+    private val terminal by lazy { TerminalController(this) }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            CodingServerTheme(dark = true) { App(vm, editor, terminal) }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalController) {
+    val nav = rememberNavController()
+    val auth by vm.auth.collectAsState()
+    val online by vm.online.collectAsState()
+    val project by vm.project.collectAsState()
+    val drawer = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+    val snack = remember { SnackbarHostState() }
+    val entry by nav.currentBackStackEntryAsState()
+    val route = entry?.destination?.route
+
+    LaunchedEffect(Unit) { vm.messages.collect { snack.showSnackbar(it) } }
+    LaunchedEffect(auth) {
+        val target = when (auth) {
+            AuthState.NO_SERVER -> "servers"
+            AuthState.LOGGED_OUT -> "login"
+            AuthState.LOGGED_IN -> if (route == null || route == "login" || route == "servers") "dashboard" else null
+        }
+        if (target != null && target != route) nav.navigate(target) { popUpTo(0) }
+    }
+
+    fun go(r: String) {
+        scope.launch { drawer.close() }
+        if (r != route) nav.navigate(r) { launchSingleTop = true; popUpTo("dashboard") }
+    }
+
+    val loggedIn = auth == AuthState.LOGGED_IN
+    ModalNavigationDrawer(
+        drawerState = drawer,
+        gesturesEnabled = loggedIn && route != "editor" && route != "terminal",
+        drawerContent = {
+            ModalDrawerSheet {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("CODING_SERVER", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+                    Text("Proyek: ${project?.name ?: "-"}", modifier = Modifier.padding(horizontal = 16.dp),
+                         style = MaterialTheme.typography.bodySmall)
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    DESTS.forEach { d ->
+                        NavigationDrawerItem(label = { Text(d.label) }, icon = { Icon(d.icon, null) },
+                            selected = route == d.route, onClick = { go(d.route) }, modifier = Modifier.padding(horizontal = 8.dp))
+                    }
+                    Spacer(Modifier.height(16.dp))
+                }
+            }
+        },
+    ) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snack) },
+            topBar = {
+                if (loggedIn) Column {
+                    TopAppBar(
+                        title = {
+                            Text(DESTS.firstOrNull { it.route == route }?.label ?: "Coding Server", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        },
+                        navigationIcon = { IconButton(onClick = { scope.launch { drawer.open() } }) { Icon(Icons.Default.Menu, "Menu") } },
+                    )
+                    if (online == false) Text(
+                        "Server OFFLINE — data tidak bisa dimuat. Mencoba menghubungkan ulang…",
+                        color = MaterialTheme.colorScheme.onError,
+                        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.error).padding(6.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+        ) { pad ->
+            NavGraph(nav, vm, editor, terminal, Modifier.padding(pad).fillMaxSize())
+        }
+    }
+}
+
+@Composable
+private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorController, terminal: TerminalController, modifier: Modifier) {
+    fun openFile(e: FileEntry) {
+        val p = vm.project.value ?: return
+        vm.addOrFocusTab(EditorTab(p.id, e.path, null, language = e.language))
+        nav.navigate("editor") { launchSingleTop = true }
+    }
+    NavHost(nav, startDestination = "servers", modifier = modifier) {
+        composable("servers") {
+            ServersScreen(vm) {
+                if (vm.auth.value == AuthState.LOGGED_IN) nav.navigate("dashboard") { popUpTo(0) }
+            }
+        }
+        composable("login") { LoginScreen(vm, onLoggedIn = {}, onChangeServer = { vm.disconnect() }) }
+        composable("dashboard") {
+            DashboardScreen(vm) { p -> vm.openProject(p); nav.navigate("explorer") { launchSingleTop = true } }
+        }
+        composable("projects") { ProjectsScreen(vm) { nav.navigate("explorer") { launchSingleTop = true } } }
+        composable("explorer") {
+            val scope = rememberCoroutineScope()
+            ExplorerScreen(vm, onOpenFile = ::openFile, onRun = { e ->
+                vm.toast("Menjalankan ${e.name}…")
+                scope.launch {
+                    vm.execute(e, build = false).onSuccess { nav.navigate("output") { launchSingleTop = true } }
+                        .onFailure { vm.toast(it.message ?: "Gagal") }
+                }
+            })
+        }
+        composable("editor") { EditorScreen(vm, editor) { nav.navigate("output") { launchSingleTop = true } } }
+        composable("terminal") { TerminalScreen(vm, terminal) }
+        composable("output") { OutputScreen(vm, editor) { nav.navigate("editor") { launchSingleTop = true } } }
+        composable("database") { DatabaseScreen(vm) }
+        composable("git") { GitScreen(vm) }
+        composable("http") { HttpScreen(vm) }
+        composable("monitor") { MonitorScreen(vm) }
+        composable("settings") { SettingsScreen(vm) { nav.navigate("servers") } }
+    }
+}
