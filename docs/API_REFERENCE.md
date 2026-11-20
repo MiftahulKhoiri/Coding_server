@@ -48,9 +48,20 @@ Error: `{"error":{"code","message","details"}}`.
 | POST | /http/request | execute | anti-SSRF |
 | GET/POST/DELETE | /http/collections[/{id}] | login / write | |
 | GET/POST | /backup · GET /backup/{name}/verify · POST /backup/restore | admin | |
-| GET | /ai/status · POST /ai/chat · /ai/proposals · /ai/proposals/{id}/decide | read / write | fondasi AI |
+| GET | /ai/status | login | status model (idle/loading/ready/error), koneksi, parameter |
+| GET | /ai/presets · /ai/connections | login | templat & koneksi (API key tidak pernah dikirim) |
+| POST/PUT/DELETE | /ai/connections[/{id}] | admin | kelola koneksi lokal/online |
+| GET | /ai/connections/{id}/models | execute | daftar model (status muat untuk llama-server) |
+| POST | /ai/apply {connection_id, model, wait?} · /ai/unload | admin | terapkan / bongkar model |
+| PUT | /ai/settings | admin | system prompt, temperature, max_tokens, idle_unload_minutes, history_messages |
+| GET/POST/PATCH/DELETE | /ai/conversations[/{id}] | read | riwayat chat per pengguna |
+| POST | /ai/chat | execute | chat tanpa streaming |
+| POST/GET | /ai/proposals · /ai/proposals/{id}/decide | read / write | proposal perubahan file oleh AI |
 
 ## WebSocket
+- `/ws/ai/chat?token=` — klien: `{type:"send", content, conversation_id?, project_id?, files?, editor_text?, editor_name?}`,
+  `{type:"stop"}`; server: `{type:"conversation",id}`, `{type:"start",model}`, `{type:"reasoning",text}`,
+  `{type:"delta",text}`, `{type:"done",message_id,seconds}`, `{type:"error",code,message}`, `{type:"stopped"}`.
 - `/ws/execution/{process_id}?token=` — server: `{type:"status",status}`, `{type:"phase",phase,argv}`,
   `{type:"stdout"|"stderr",data}`, `{type:"end",job}`; klien: `{type:"stdin",data,eof?}`, `{type:"stop"}`.
 - `/ws/terminal/{session_id}?token=` — klien: `{type:"input",data}`, `{type:"resize",cols,rows}`,

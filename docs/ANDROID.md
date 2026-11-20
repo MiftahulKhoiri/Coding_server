@@ -16,6 +16,8 @@ Terminal = WebView `assets/web/terminal.html` (xterm.js). minSdk 26 (Android 8.0
 | Code Editor | banyak tab, simpan (deteksi konflik SHA-256), simpan sebagai, run, build, undo/redo, cari & ganti, ke baris, simbol, ke definisi, fold, word wrap, font, tema, riwayat versi/restore |
 | Terminal | banyak sesi PTY, xterm.js, tombol ESC/TAB/Ctrl-C/D/Z/L/panah, tutup sesi |
 | Build Output | status, fase build/run, stdout/stderr real-time berwarna, stdin, Stop, exit code, durasi, lokasi artefak, error compiler yang bisa diklik (lompat ke baris + diagnostics di editor), riwayat eksekusi, pratinjau HTML |
+| AI Chat | chat streaming dengan model aktif, "Berpikir…", proses berpikir bisa dibuka, riwayat percakapan, sertakan file editor, salin / sisipkan kode ke editor |
+| Model AI | Lokal/Online → koneksi (tambah/ubah/hapus, API key) → daftar model (status termuat) → Terapkan; status muat, Bongkar model, parameter chat |
 | Database | DB pengguna / DB di proyek, buat DB, skema, query mode baca/tulis, tabel hasil, konfirmasi operasi destruktif |
 | Git | init, status, commit, pull, push, diff, branch, checkout, remote, token Git (disimpan terenkripsi di server), log |
 | HTTP Client | method, URL, header, query, body (json/form/raw), status/waktu/header/body (JSON dirapikan), koleksi tersimpan |

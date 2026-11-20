@@ -8,6 +8,7 @@ Semua penyedia punya antarmuka sama:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import AsyncIterator
 
@@ -187,10 +188,16 @@ class LlamaRouterProvider(OpenAIProvider):
         if not r.is_success and r.status_code != 400:
             raise _err(r, r.text)
 
-    async def unload(self, model: str) -> None:
+    async def unload(self, model: str, wait: float = 15.0) -> None:
         r = await self._post("/models/unload", model)
         if not r.is_success and r.status_code != 400:  # 400 = memang tidak termuat
             raise _err(r, r.text)
+        # Pembongkaran di llama-server bersifat asinkron: tunggu sampai benar-benar lepas dari RAM.
+        end = asyncio.get_running_loop().time() + wait
+        while asyncio.get_running_loop().time() < end:
+            if await self.model_status(model) in ("unloaded", None):
+                return
+            await asyncio.sleep(0.5)
 
 
 class AnthropicProvider(Provider):
