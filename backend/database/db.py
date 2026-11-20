@@ -84,6 +84,20 @@ CREATE TABLE IF NOT EXISTS git_credentials (
     user_id INTEGER NOT NULL, host TEXT NOT NULL, username TEXT NOT NULL, secret TEXT NOT NULL,
     created_at REAL NOT NULL, PRIMARY KEY (user_id, host)
 );
+CREATE TABLE IF NOT EXISTS ai_connections (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, location TEXT NOT NULL,
+    base_url TEXT NOT NULL, api_key TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ai_conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, title TEXT NOT NULL DEFAULT 'Percakapan baru',
+    connection_id TEXT, model TEXT, created_at REAL NOT NULL, updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_aiconv_user ON ai_conversations(user_id, updated_at);
+CREATE TABLE IF NOT EXISTS ai_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, conversation_id INTEGER NOT NULL, role TEXT NOT NULL,
+    content TEXT NOT NULL, reasoning TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_aimsg_conv ON ai_messages(conversation_id, id);
 CREATE TABLE IF NOT EXISTS ai_proposals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL, user_id INTEGER NOT NULL, path TEXT NOT NULL, action TEXT NOT NULL,

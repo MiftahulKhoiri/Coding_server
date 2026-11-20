@@ -32,7 +32,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         svc = app.state.services
         svc.terminal.start_reaper()
-        tasks = [asyncio.create_task(svc.backup.scheduler())]
+        tasks = [asyncio.create_task(svc.backup.scheduler()), asyncio.create_task(svc.ai.idle_loop())]
+        await svc.ai.restore_on_start()
         log.info("CODING_SERVER %s siap di %s:%s (sandbox=%s)", VERSION, settings.host, settings.port,
                  "bwrap" if settings.sandbox_enabled else "none")
         yield
@@ -60,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.include_router(r.router, prefix=API_PREFIX)
     app.include_router(execution.ws_router)
     app.include_router(terminal.ws_router)
+    app.include_router(ai.ws_router)
     app.include_router(preview.router)
 
     @app.get("/", include_in_schema=False)

@@ -327,6 +327,32 @@ class AIChat(BaseModel):
     max_tokens: int | None = None
 
 
+class AIConnectionIn(BaseModel):
+    name: str = Field(default="", max_length=80)
+    kind: Literal["llama_router", "openai", "anthropic", "gemini"]
+    location: Literal["local", "online"]
+    base_url: str = Field(min_length=8, max_length=300)
+    api_key: str | None = Field(default=None, max_length=500)
+
+
+class AIApply(BaseModel):
+    connection_id: str
+    model: str = Field(min_length=1, max_length=300)
+    wait: bool = False
+
+
+class AISettingsIn(BaseModel):
+    system_prompt: str | None = Field(default=None, max_length=20000)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int | None = Field(default=None, ge=16, le=65536)
+    idle_unload_minutes: int | None = Field(default=None, ge=0, le=1440)
+    history_messages: int | None = Field(default=None, ge=0, le=200)
+
+
+class AIConversationIn(BaseModel):
+    title: str = Field(default="Percakapan baru", max_length=120)
+
+
 class AIProposal(BaseModel):
     project_id: str
     path: str
