@@ -3,7 +3,7 @@
 import { EditorState, Compartment, EditorSelection } from "@codemirror/state";
 import {
   EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection,
-  dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine,
+  dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, placeholder,
 } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo, undoDepth, redoDepth } from "@codemirror/commands";
 import {
@@ -17,6 +17,11 @@ import {
 import { lintKeymap, setDiagnostics, lintGutter } from "@codemirror/lint";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { detectLanguage, languageExtension, SYMBOL_PATTERNS } from "./languages.js";
+
+// Android WebView: CodeMirror memakai API EditContext bila tersedia. Pada sebagian WebView/keyboard
+// (Gboard, SwiftKey) input lewat EditContext tidak sampai ke editor sehingga "tidak bisa mengetik".
+// Paksa jalur contenteditable biasa yang sudah teruji di semua WebView.
+EditorView.EDIT_CONTEXT = false;
 
 const bridge = window.AndroidBridge || {
   onReady() {}, onChange() {}, onSave() {}, onRun() {}, onCursor() {}, onLog(m) { console.log(m); },
@@ -43,7 +48,7 @@ function fontTheme(size) {
 }
 const lightTheme = EditorView.theme({ "&": { backgroundColor: "#ffffff", color: "#1e1e1e" } }, { dark: false });
 
-function baseExtensions(lang) {
+function baseExtensions(lang, editable = true) {
   return [
     lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), foldGutter(), drawSelection(),
     dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(),
@@ -63,7 +68,8 @@ function baseExtensions(lang) {
     themeConf.of(settings.theme === "dark" ? oneDark : lightTheme),
     wrapConf.of(settings.wordWrap ? EditorView.lineWrapping : []),
     fontConf.of(fontTheme(settings.fontSize)),
-    readOnlyConf.of(EditorState.readOnly.of(false)),
+    readOnlyConf.of([EditorState.readOnly.of(!editable), EditorView.editable.of(editable)]),
+    editable ? [] : placeholderExt,
     indentConf.of([indentUnit.of(" ".repeat(settings.tabSize)), EditorState.tabSize.of(settings.tabSize)]),
     EditorView.updateListener.of((u) => {
       if (u.docChanged && !suppress && current) {
@@ -80,8 +86,10 @@ function baseExtensions(lang) {
   ];
 }
 
+const placeholderExt = placeholder("Belum ada file terbuka. Buka file dari Project Explorer atau tekan + untuk membuat file baru.");
+
 const view = new EditorView({
-  state: EditorState.create({ doc: "", extensions: baseExtensions("text") }),
+  state: EditorState.create({ doc: "", extensions: baseExtensions("text", false) }),
   parent: document.getElementById("editor"),
 });
 
@@ -176,7 +184,7 @@ window.CS = {
       current = null;
       const next = tabs.keys().next();
       if (!next.done) this.switchTab(next.value);
-      else { suppress = true; view.setState(EditorState.create({ doc: "", extensions: baseExtensions("text") })); suppress = false; }
+      else { suppress = true; view.setState(EditorState.create({ doc: "", extensions: baseExtensions("text", false) })); suppress = false; }
     }
     return true;
   },
@@ -224,7 +232,8 @@ window.CS = {
   setFontSize(px) { settings.fontSize = Math.max(8, Math.min(40, Number(px) || 14)); reconfigureAll(); },
   setWordWrap(on) { settings.wordWrap = !!on; reconfigureAll(); },
   setTabSize(n) { settings.tabSize = Math.max(1, Math.min(8, Number(n) || 4)); reconfigureAll(); },
-  setReadOnly(on) { view.dispatch({ effects: readOnlyConf.reconfigure(EditorState.readOnly.of(!!on)) }); },
+  setReadOnly(on) { view.dispatch({ effects: readOnlyConf.reconfigure([EditorState.readOnly.of(!!on), EditorView.editable.of(!on)]) }); },
+  hasFocus() { return view.hasFocus; },
   configure(json) { Object.assign(settings, typeof json === "string" ? JSON.parse(json) : json); reconfigureAll(); },
   undo() { return undo(view); },
   redo() { return redo(view); },
@@ -256,5 +265,7 @@ window.CS = {
   clearDiagnostics() { view.dispatch(setDiagnostics(view.state, [])); },
 };
 
+// Ketukan di area kosong di bawah teks tetap memberi fokus (memunculkan keyboard).
+document.getElementById("editor").addEventListener("touchend", () => { if (current && !view.hasFocus) view.focus(); });
 document.body.className = settings.theme;
 bridge.onReady();

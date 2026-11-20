@@ -138,9 +138,9 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
         ai?.let { a ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("AI Agent (fondasi)", style = MaterialTheme.typography.titleMedium)
-                    Text(if (a.configured) "Provider: ${a.provider} · ${a.base_url} · model ${a.model ?: "-"} · ${if (a.reachable == true) "terhubung" else "tidak terjangkau"}"
-                         else "Belum dikonfigurasi (CS_AI_BASE_URL di server)")
+                    Text("AI", style = MaterialTheme.typography.titleMedium)
+                    Text(if (a.status == "ready") "Model aktif: ${a.model} (${a.connection?.name ?: "-"})"
+                         else "Belum ada model aktif — atur di menu Model AI")
                     Text("Hak AI: ${a.ai_permissions.joinToString()}", style = MaterialTheme.typography.bodySmall)
                 }
             }

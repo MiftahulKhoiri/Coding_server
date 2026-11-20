@@ -104,4 +104,17 @@ interface CodingApi {
     // AI
     @GET("api/v1/ai/status") suspend fun aiStatus(): AIStatus
     @POST("api/v1/ai/chat") suspend fun aiChat(@Body body: AIChat): AIReply
+    @GET("api/v1/ai/presets") suspend fun aiPresets(): AIPresets
+    @GET("api/v1/ai/connections") suspend fun aiConnections(): AIConnections
+    @POST("api/v1/ai/connections") suspend fun aiAddConnection(@Body body: AIConnectionIn): AIConnection
+    @PUT("api/v1/ai/connections/{id}") suspend fun aiUpdateConnection(@Path("id") id: String, @Body body: AIConnectionIn): AIConnection
+    @DELETE("api/v1/ai/connections/{id}") suspend fun aiDeleteConnection(@Path("id") id: String): OkResponse
+    @GET("api/v1/ai/connections/{id}/models") suspend fun aiModels(@Path("id") id: String): AIModels
+    @POST("api/v1/ai/apply") suspend fun aiApply(@Body body: AIApply): AIStatus
+    @POST("api/v1/ai/unload") suspend fun aiUnload(): AIStatus
+    @PUT("api/v1/ai/settings") suspend fun aiSettings(@Body body: AISettings): AIStatus
+    @GET("api/v1/ai/conversations") suspend fun aiConversations(): AIConversations
+    @GET("api/v1/ai/conversations/{id}") suspend fun aiConversation(@Path("id") id: Int): AIConversationDetail
+    @PATCH("api/v1/ai/conversations/{id}") suspend fun aiRenameConversation(@Path("id") id: Int, @Body body: AIConversationIn): AIConversationDetail
+    @DELETE("api/v1/ai/conversations/{id}") suspend fun aiDeleteConversation(@Path("id") id: Int): OkResponse
 }

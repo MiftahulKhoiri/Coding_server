@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -23,7 +25,9 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Http
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Monitor
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.AccountTree
@@ -63,6 +67,8 @@ import id.codingserver.android.data.api.FileEntry
 import id.codingserver.android.ui.AppViewModel
 import id.codingserver.android.ui.AuthState
 import id.codingserver.android.ui.EditorTab
+import id.codingserver.android.ui.ai.AiChatScreen
+import id.codingserver.android.ui.ai.AiModelScreen
 import id.codingserver.android.ui.dashboard.DashboardScreen
 import id.codingserver.android.ui.database.DatabaseScreen
 import id.codingserver.android.ui.editor.EditorController
@@ -90,6 +96,8 @@ private val DESTS = listOf(
     Dest("editor", "Code Editor", Icons.Default.Code),
     Dest("terminal", "Terminal", Icons.Default.Terminal),
     Dest("output", "Build Output", Icons.AutoMirrored.Filled.Article),
+    Dest("ai_chat", "AI Chat", Icons.Default.SmartToy),
+    Dest("ai_models", "Model AI", Icons.Default.Psychology),
     Dest("database", "Database", Icons.Default.Storage),
     Dest("git", "Git", Icons.Default.AccountTree),
     Dest("http", "HTTP Client", Icons.Default.Http),
@@ -144,13 +152,16 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
     val loggedIn = auth == AuthState.LOGGED_IN
     ModalNavigationDrawer(
         drawerState = drawer,
-        gesturesEnabled = loggedIn && route != "editor" && route != "terminal",
+        gesturesEnabled = loggedIn && route != "editor" && route != "terminal" && route != "ai_chat",
         drawerContent = {
             ModalDrawerSheet {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text("CODING_SERVER", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
                     Text("Proyek: ${project?.name ?: "-"}", modifier = Modifier.padding(horizontal = 16.dp),
                          style = MaterialTheme.typography.bodySmall)
+                    // Info versi APK juga ada di Pengaturan > Pembaruan aplikasi.
+                    Text("Aplikasi v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                         modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                     DESTS.forEach { d ->
                         NavigationDrawerItem(label = { Text(d.label) }, icon = { Icon(d.icon, null) },
@@ -180,7 +191,9 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
                 }
             },
         ) { pad ->
-            NavGraph(nav, vm, editor, terminal, Modifier.padding(pad).fillMaxSize())
+            // imePadding: dengan edge-to-edge (Android 15) adjustResize tidak lagi mengecilkan jendela,
+            // jadi konten (editor/terminal) harus diberi padding keyboard agar baris yang diketik tidak tertutup.
+            NavGraph(nav, vm, editor, terminal, Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize())
         }
     }
 }
@@ -215,7 +228,15 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
         }
         composable("editor") { EditorScreen(vm, editor) { nav.navigate("output") { launchSingleTop = true } } }
         composable("terminal") { TerminalScreen(vm, terminal) }
-        composable("output") { OutputScreen(vm, editor) { nav.navigate("editor") { launchSingleTop = true } } }
+        composable("output") {
+            OutputScreen(vm, editor, onGotoEditor = { nav.navigate("editor") { launchSingleTop = true } },
+                         onAskAi = { nav.navigate("ai_chat") { launchSingleTop = true } })
+        }
+        composable("ai_chat") {
+            AiChatScreen(vm, editor, onOpenModels = { nav.navigate("ai_models") { launchSingleTop = true } },
+                         onOpenEditor = { nav.navigate("editor") { launchSingleTop = true } })
+        }
+        composable("ai_models") { AiModelScreen(vm) { nav.navigate("ai_chat") { launchSingleTop = true } } }
         composable("database") { DatabaseScreen(vm) }
         composable("git") { GitScreen(vm) }
         composable("http") { HttpScreen(vm) }

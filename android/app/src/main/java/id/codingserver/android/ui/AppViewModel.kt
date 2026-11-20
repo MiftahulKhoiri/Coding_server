@@ -90,6 +90,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private var healthLoop: CoJob? = null
 
+    /** Chat AI (state bertahan saat pindah layar). */
+    val aiChat = id.codingserver.android.ui.ai.AiChatController(viewModelScope) { _client.value }
+
     init {
         viewModelScope.launch {
             val active = serverStore.current()
@@ -108,6 +111,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             toast("Sesi berakhir, silakan login lagi")
         }
         _client.value = c
+        aiChat.newConversation()
         _tabs.value = emptyList()
         _activeTab.value = null
         _project.value = null

@@ -67,7 +67,7 @@ fun statusColor(s: String) = when (s) {
 
 /** Build Output: status, output real-time, stdin, stop, durasi, lokasi artefak, error yang bisa diklik, riwayat. */
 @Composable
-fun OutputScreen(vm: AppViewModel, editor: EditorController, onGotoEditor: () -> Unit) {
+fun OutputScreen(vm: AppViewModel, editor: EditorController, onGotoEditor: () -> Unit, onAskAi: () -> Unit) {
     val run by vm.run.collectAsState()
     val client by vm.client.collectAsState()
     val project by vm.project.collectAsState()
@@ -138,6 +138,14 @@ fun OutputScreen(vm: AppViewModel, editor: EditorController, onGotoEditor: () ->
             if (!finished) Button(onClick = { vm.stopRun() }) { Text("Stop") }
         }
         if (r.job.error.isNotBlank()) Text(r.job.error, color = ErrRed, modifier = Modifier.padding(horizontal = 8.dp))
+        if (finished && r.status != "COMPLETED") OutlinedButton(onClick = {
+            val out = outputText.takeLast(6000)
+            vm.aiChat.newConversation()
+            vm.aiChat.setDraft("Program ${r.job.file} (${r.job.language}) ${r.status.lowercase()} dengan exit code ${r.job.exit_code ?: "-"}. " +
+                               "Jelaskan penyebabnya dan berikan perbaikannya.\n\nOutput:\n```\n$out\n```")
+            vm.addOrFocusTab(EditorTab(r.job.project_id, r.job.file, null))
+            onAskAi()
+        }, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Tanya AI tentang error ini") }
         r.job.preview_path?.let { path ->
             OutlinedButton(onClick = {
                 val c = client ?: return@OutlinedButton

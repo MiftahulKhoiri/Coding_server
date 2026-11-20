@@ -61,7 +61,13 @@ class TerminalController(context: Context) {
         private set
     private val main = Handler(Looper.getMainLooper())
 
-    val webView: WebView = WebView(context.applicationContext).apply {
+    val webView: WebView = WebView(context).apply {
+        isFocusable = true
+        isFocusableInTouchMode = true
+        setOnTouchListener { v, ev ->
+            if (ev.action == android.view.MotionEvent.ACTION_UP && !v.hasFocus()) v.requestFocus()
+            false
+        }
         settings.javaScriptEnabled = true
         settings.allowFileAccess = false
         webViewClient = object : WebViewClient() {

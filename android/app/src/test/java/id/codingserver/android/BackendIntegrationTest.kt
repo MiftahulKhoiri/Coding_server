@@ -85,6 +85,9 @@ class BackendIntegrationTest {
 
             a.saveHttp(HttpSaved(name = "it", url = "https://example.com"))
             assertTrue(a.httpCollections().collections.isNotEmpty())
+            assertTrue(a.aiConnections().connections.isNotEmpty())
+            assertTrue(a.aiPresets().presets.any { it.kind == "anthropic" })
+            a.aiConversations()
             a.aiStatus(); a.backups(); a.recent(); a.history(p.id)
             Unit
         } finally {

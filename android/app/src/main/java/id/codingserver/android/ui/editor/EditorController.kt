@@ -53,7 +53,15 @@ class EditorController(context: Context) {
     val cursorFlow: StateFlow<Pair<Int, Int>> get() = cursor
     private val main = Handler(Looper.getMainLooper())
 
-    val webView: WebView = WebView(context.applicationContext).apply {
+    // Pakai context Activity (bukan applicationContext): koneksi keyboard (IME) WebView lebih andal.
+    val webView: WebView = WebView(context).apply {
+        isFocusable = true
+        isFocusableInTouchMode = true
+        // Pastikan WebView mendapat fokus saat disentuh supaya keyboard muncul & ketikan masuk ke editor.
+        setOnTouchListener { v, ev ->
+            if (ev.action == android.view.MotionEvent.ACTION_UP && !v.hasFocus()) v.requestFocus()
+            false
+        }
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.allowFileAccess = false

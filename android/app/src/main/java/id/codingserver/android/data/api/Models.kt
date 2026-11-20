@@ -190,9 +190,42 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class BackupCreate(val label: String = "manual")
 
 // ---------- AI ----------
-@Serializable data class AIStatus(
-    val configured: Boolean = false, val provider: String? = null, val base_url: String? = null, val model: String? = null,
-    val reachable: Boolean? = null, val ai_permissions: List<String> = emptyList(),
+@Serializable data class AIConnection(
+    val id: String, val name: String, val kind: String, val location: String, val base_url: String,
+    val has_key: Boolean = false, val created_at: Double = 0.0,
 )
+@Serializable data class AIConnections(val connections: List<AIConnection> = emptyList())
+@Serializable data class AIPreset(
+    val key: String, val name: String, val kind: String, val location: String, val base_url: String,
+    val needs_key: Boolean = false, val note: String = "",
+)
+@Serializable data class AIPresets(val presets: List<AIPreset> = emptyList())
+@Serializable data class AIConnectionIn(
+    val name: String, val kind: String, val location: String, val base_url: String, val api_key: String? = null,
+)
+@Serializable data class AIModel(val id: String, val status: String? = null, val context_length: Long? = null)
+@Serializable data class AIModels(val models: List<AIModel> = emptyList())
+@Serializable data class AIApply(val connection_id: String, val model: String, val wait: Boolean = false)
+@Serializable data class AISettings(
+    val system_prompt: String = "", val temperature: Double = 0.7, val max_tokens: Int = 2048,
+    val idle_unload_minutes: Int = 15, val history_messages: Int = 20,
+)
+@Serializable data class AISelected(val connection_id: String? = null, val model: String? = null)
+@Serializable data class AIStatus(
+    val status: String = "idle", val connection_id: String? = null, val model: String? = null, val message: String = "",
+    val loaded_by_us: Boolean = false, val target: String? = null, val configured: Boolean = false,
+    val connection: AIConnection? = null, val settings: AISettings = AISettings(), val selected: AISelected = AISelected(),
+    val ai_permissions: List<String> = emptyList(),
+)
+@Serializable data class AIConversationSummary(
+    val id: Int, val title: String = "", val model: String? = null, val updated_at: Double = 0.0, val messages: Int = 0,
+)
+@Serializable data class AIConversations(val conversations: List<AIConversationSummary> = emptyList())
+@Serializable data class AIMessage(
+    val id: Int = 0, val role: String, val content: String, val reasoning: String = "", val model: String = "",
+    val created_at: Double = 0.0,
+)
+@Serializable data class AIConversationDetail(val id: Int, val title: String = "", val messages: List<AIMessage> = emptyList())
+@Serializable data class AIConversationIn(val title: String = "Percakapan baru")
 @Serializable data class AIChat(val messages: List<Map<String, String>>, val project_id: String? = null, val files: List<String> = emptyList())
-@Serializable data class AIReply(val content: String = "", val model: String? = null)
+@Serializable data class AIReply(val content: String = "", val reasoning: String = "", val model: String? = null)

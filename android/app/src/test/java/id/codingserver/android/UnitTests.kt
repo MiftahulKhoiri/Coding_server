@@ -4,6 +4,7 @@ import id.codingserver.android.data.api.ApiJson
 import id.codingserver.android.data.api.Job
 import id.codingserver.android.data.api.normalizeBaseUrl
 import id.codingserver.android.data.update.AppUpdater
+import id.codingserver.android.ui.ai.splitMarkdown
 import id.codingserver.android.ui.editor.DiagnosticParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -48,5 +49,15 @@ class UnitTests {
         val j = ApiJson.decodeFromString(Job.serializer(), raw)
         assertTrue(j.finished)
         assertEquals("hi\n", j.stdout)
+    }
+
+    @Test fun markdownCodeBlocks() {
+        val parts = splitMarkdown("Ini kode:\n```python\nprint(1)\n```\nSelesai")
+        assertEquals(3, parts.size)
+        assertTrue(parts[1].code)
+        assertEquals("python", parts[1].lang)
+        assertEquals("print(1)", parts[1].text)
+        // blok kode yang belum ditutup (masih streaming) tetap jadi kode
+        assertTrue(splitMarkdown("```js\nlet a").last().code)
     }
 }

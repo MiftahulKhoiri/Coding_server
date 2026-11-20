@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Build
@@ -70,6 +71,8 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
     var symbols by remember { mutableStateOf<List<Symbol>?>(null) }
     var history by remember { mutableStateOf<List<HistoryEntry>?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    var newFile by remember { mutableStateOf(false) }
+    val project by vm.project.collectAsState()
     val active = tabs.firstOrNull { it.id == activeId }
 
     suspend fun save(tab: EditorTab, force: Boolean = false): Boolean {
@@ -147,6 +150,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
         }
         // toolbar
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(enabled = project != null, onClick = { newFile = true }) { Icon(Icons.AutoMirrored.Filled.NoteAdd, "File baru") }
             IconButton(enabled = active != null, onClick = { scope.launch { active?.let { save(it) } } }) { Icon(Icons.Default.Save, "Simpan") }
             IconButton(enabled = active != null, onClick = { scope.launch { runActive(false) } }) { Icon(Icons.Default.PlayArrow, "Jalankan") }
             IconButton(enabled = active != null, onClick = { scope.launch { runActive(true) } }) { Icon(Icons.Default.Build, "Build") }
@@ -198,7 +202,11 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
         }
         loadError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
         if (tabs.isEmpty()) {
-            Text("Belum ada file terbuka. Buka file dari Project Explorer.", Modifier.padding(16.dp))
+            Text(
+                if (project == null) "Belum ada proyek terbuka. Pilih proyek di menu Proyek dulu."
+                else "Belum ada file terbuka. Tekan ikon + (File baru) atau buka file dari Project Explorer.",
+                Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium,
+            )
         }
         Box(Modifier.fillMaxSize()) {
             AndroidView(factory = { editor.detach(); editor.webView }, modifier = Modifier.fillMaxSize())
@@ -239,6 +247,16 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                 }.onFailure { vm.toast(it.message ?: "Gagal") }
             }
         }, onDismiss = { saveAs = false })
+    }
+    if (newFile) project?.let { p ->
+        InputDialog("File baru di ${p.name}", "Nama file (mis. main.py)", confirmText = "Buat", onConfirm = { path ->
+            val c = client
+            if (c != null) scope.launch {
+                apiCall { c.api.create(id.codingserver.android.data.api.FileCreate(p.id, path, "file")) }
+                    .onSuccess { w -> vm.addOrFocusTab(EditorTab(p.id, w.path, null)) }
+                    .onFailure { vm.toast(it.message ?: "Gagal membuat file") }
+            }
+        }, onDismiss = { newFile = false })
     }
     if (gotoLine) InputDialog("Ke baris", "Nomor baris", onConfirm = { n ->
         n.toIntOrNull()?.let { scope.launch { editor.gotoLine(it) } }
