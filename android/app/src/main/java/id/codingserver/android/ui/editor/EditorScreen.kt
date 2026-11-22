@@ -64,6 +64,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
     val activeId by vm.activeTab.collectAsState()
     val prefs by vm.editorPrefs.collectAsState()
     val cursor by editor.cursorFlow.collectAsState()
+    val editorDiagnostic by editor.diagnostic.collectAsState()
     val scope = rememberCoroutineScope()
     var menu by remember { mutableStateOf(false) }
     var conflict by remember { mutableStateOf<EditorTab?>(null) }
@@ -216,6 +217,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
             }
         }
         loadError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
+        Text(editorDiagnostic, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
         if (tabs.isEmpty()) {
             Text(
                 if (project == null) "Belum ada proyek terbuka. Pilih proyek di menu Proyek dulu."
