@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from backend.core.exceptions import ServiceUnavailable
+
 
 @lru_cache
 def bwrap_path() -> str | None:
@@ -35,6 +37,18 @@ def bwrap_available() -> bool:
         return r.returncode == 0
     except Exception:
         return False
+
+
+
+def require_sandbox(settings) -> None:
+    """Fail closed: never silently run user code without isolation in auto/bwrap modes."""
+    if settings.sandbox == "none":
+        return
+    if not bwrap_available():
+        raise ServiceUnavailable(
+            "Bubblewrap sandbox tidak tersedia. Instal/aktifkan bwrap; mode tanpa sandbox hanya boleh dipilih secara eksplisit (CS_SANDBOX=none).",
+            code="sandbox_unavailable",
+        )
 
 
 def runtime_root(executable: str) -> Path | None:
