@@ -31,6 +31,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,6 +73,10 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
     var history by remember { mutableStateOf<List<HistoryEntry>?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var newFile by remember { mutableStateOf(false) }
+    var colorDialog by remember { mutableStateOf(false) }
+    var textColorInput by remember(prefs) { mutableStateOf(prefs.textColor) }
+    var backgroundColorInput by remember(prefs) { mutableStateOf(prefs.backgroundColor) }
+    var colorError by remember { mutableStateOf<String?>(null)
     val project by vm.project.collectAsState()
     val active = tabs.firstOrNull { it.id == activeId }
 
@@ -126,7 +131,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                 }
         } else editor.switchTab(tab.id)
     }
-    LaunchedEffect(prefs) { editor.applyPrefs(prefs.darkTheme, prefs.fontSize, prefs.wordWrap, prefs.tabSize) }
+    LaunchedEffect(prefs) { editor.applyPrefs(prefs.darkTheme, prefs.fontSize, prefs.wordWrap, prefs.tabSize, prefs.textColor, prefs.backgroundColor) }
     LaunchedEffect(Unit) {
         editor.eventsFlow.collect { ev ->
             when (ev) {
@@ -187,6 +192,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                         onClick = { vm.setEditorPrefs(prefs.copy(fontSize = (prefs.fontSize + 1).coerceAtMost(32))) })
                     DropdownMenuItem({ Text("Font lebih kecil (${prefs.fontSize - 1})") },
                         onClick = { vm.setEditorPrefs(prefs.copy(fontSize = (prefs.fontSize - 1).coerceAtLeast(9))) })
+                    DropdownMenuItem({ Text("Pengaturan warna editor") }, onClick = { menu = false; textColorInput = prefs.textColor; backgroundColorInput = prefs.backgroundColor; colorError = null; colorDialog = true })
                     DropdownMenuItem({ Text(if (prefs.darkTheme) "Tema terang" else "Tema gelap") },
                         onClick = { menu = false; vm.setEditorPrefs(prefs.copy(darkTheme = !prefs.darkTheme)) })
                     DropdownMenuItem({ Text("Riwayat versi file") }, enabled = active != null, onClick = {
@@ -220,6 +226,25 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
         Box(Modifier.fillMaxSize()) {
             AndroidView(factory = { editor.detach(); editor.webView }, modifier = Modifier.fillMaxSize())
         }
+    }
+
+    if (colorDialog) {
+        AlertDialog(
+            onDismissRequest = { colorDialog = false },
+            title = { Text("Warna editor") },
+            text = { Column {
+                Text("Kosong = warna otomatis. Format HEX: #FFFFFF")
+                OutlinedTextField(value = textColorInput, onValueChange = { textColorInput = it.trim(); colorError = null }, label = { Text("Warna teks") }, placeholder = { Text("#FFFFFF") }, singleLine = true)
+                OutlinedTextField(value = backgroundColorInput, onValueChange = { backgroundColorInput = it.trim(); colorError = null }, label = { Text("Warna latar") }, placeholder = { Text("#282C34") }, singleLine = true)
+                colorError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            } },
+            confirmButton = { TextButton(onClick = {
+                val hex = Regex("^#([0-9a-fA-F]{6})$")
+                if ((textColorInput.isNotBlank() && !hex.matches(textColorInput)) || (backgroundColorInput.isNotBlank() && !hex.matches(backgroundColorInput))) colorError = "HEX tidak valid. Contoh: #AABBCC"
+                else { vm.setEditorPrefs(prefs.copy(textColor = textColorInput, backgroundColor = backgroundColorInput)); colorDialog = false }
+            }) { Text("Terapkan") } },
+            dismissButton = { TextButton(onClick = { textColorInput = ""; backgroundColorInput = ""; colorError = null; vm.setEditorPrefs(prefs.copy(textColor = "", backgroundColor = "")); colorDialog = false }) { Text("Reset") } },
+        )
     }
 
     conflict?.let { t ->
