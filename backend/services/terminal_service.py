@@ -23,7 +23,7 @@ from backend.config import Settings
 from backend.core.exceptions import NotFound, ServiceUnavailable
 from backend.core.logging import get_logger
 from backend.core.process_manager import kill_tree
-from backend.core.sandbox import Limits, SandboxSpec, wrap
+from backend.core.sandbox import Limits, SandboxSpec, require_sandbox, wrap
 from backend.engines.registry import get_registry
 
 log = get_logger("terminal")
@@ -92,6 +92,7 @@ class TerminalService:
         running = [s for s in self.sessions.values() if s.status == "running"]
         if len(running) >= self.s.max_terminal_sessions:
             raise ServiceUnavailable("Jumlah sesi terminal maksimum tercapai", code="too_many_sessions")
+        require_sandbox(self.s)
         registry = get_registry()
         ro, rw = [], [project_dir.resolve(), self.s.cache_dir / "lang"]
         for e in registry.all():
@@ -154,6 +155,8 @@ class TerminalService:
             pass
 
     def resize(self, sess: TerminalSession, cols: int, rows: int) -> None:
+        cols = max(10, min(int(cols), 300))
+        rows = max(2, min(int(rows), 100))
         self._resize(sess.fd, cols, rows)
         try:
             os.kill(sess.pid, signal.SIGWINCH)
@@ -206,6 +209,8 @@ class TerminalService:
     def write(self, sess: TerminalSession, data: str) -> None:
         if sess.status != "running":
             return
+        if len(data.encode("utf-8")) > 65536:
+            raise ValueError("Input terminal maksimum 64 KiB per pesan")
         sess.last_activity = time.time()
         for ch in data:  # catat riwayat perintah (perkiraan dari input baris)
             if ch in "\r\n":
