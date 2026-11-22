@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import id.codingserver.android.data.api.ApiException
 import id.codingserver.android.data.api.FileEntry
+import id.codingserver.android.data.api.FileCreate
 import id.codingserver.android.data.api.FileWrite
 import id.codingserver.android.data.api.HistoryEntry
 import id.codingserver.android.data.api.RestoreRequest
@@ -288,7 +289,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
         InputDialog("File baru di ${p.name}", "Nama file (mis. main.py)", confirmText = "Buat", onConfirm = { path ->
             val c = client
             if (c != null) scope.launch {
-                apiCall { c.api.create(id.codingserver.android.data.api.FileCreate(p.id, path, "file")) }
+                apiCall { c.api.create(FileCreate(p.id, path, "file")) }
                     .onSuccess { w -> vm.addOrFocusTab(EditorTab(p.id, w.path, null)) }
                     .onFailure { vm.toast(it.message ?: "Gagal membuat file") }
             }
