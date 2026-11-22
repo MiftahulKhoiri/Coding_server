@@ -37,7 +37,6 @@ class EditorBridge(private val c: EditorController) {
     @JavascriptInterface fun onSave(tabId: String?) { tabId?.let { c.events.tryEmit(EditorEvent.SaveRequested(it)) } }
     @JavascriptInterface fun onRun(tabId: String?) { tabId?.let { c.events.tryEmit(EditorEvent.RunRequested(it)) } }
     @JavascriptInterface fun onCursor(line: Int, col: Int) { c.cursor.value = line to col }
-    @JavascriptInterface fun onLog(msg: String?) { val text = msg ?: ""; android.util.Log.d("CodingServerEditor", text); if (text.startsWith("EDITOR_DIAG:")) c.diagnostic.value = text.removePrefix("EDITOR_DIAG:") }
 }
 
 /**
@@ -78,8 +77,7 @@ class EditorController(context: Context) {
             override fun onConsoleMessage(message: android.webkit.ConsoleMessage?): Boolean {
                 message?.let {
                     val detail = "${it.message()} (${it.lineNumber()})"
-                    android.util.Log.d("CodingServerWebView", detail)
-                    if (it.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) diagnostic.value = "JavaScript error: $detail"
+                    
                 }
                 return true
             }
@@ -92,7 +90,6 @@ class EditorController(context: Context) {
             // pada CSS yang tertanam di bundle editor. Ini membantu diagnosis teks putih/kosong.
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                diagnostic.value = "WebView: HTML selesai dimuat; memeriksa editor…"
                 view?.evaluateJavascript("""
                     (function() {
                       if (document.getElementById('cs-editor-visibility-fix')) return;
@@ -106,7 +103,6 @@ class EditorController(context: Context) {
                       document.head.appendChild(style);
                     })();
                 """.trimIndent(), null)
-                view?.evaluateJavascript("(function(){var root=document.getElementById('editor');var cm=document.querySelector('.cm-editor');var content=document.querySelector('.cm-content');var msg='EDITOR_DIAG:DOM=' + !!root + ', CodeMirror=' + !!cm + ', content=' + !!content + ', CS=' + !!window.CS;if(content){var r=content.getBoundingClientRect();msg+=', ukuran=' + r.width + 'x' + r.height;}if(window.AndroidBridge&&AndroidBridge.onLog)AndroidBridge.onLog(msg);})()", null)
             }
         }
         addJavascriptInterface(EditorBridge(this@EditorController), "AndroidBridge")
