@@ -135,6 +135,34 @@ gradle.taskGraph.whenReady {
     }
 }
 
+// CodeMirror/xterm assets are generated from web_editor. A clean checkout may not
+// contain android/app/src/main/assets/web/*.html, which leaves the Android WebView blank.
+// Build them automatically when missing; CI already performs npm ci + npm run build.
+val webEditorDir = rootProject.projectDir.parentFile.resolve("web_editor")
+val webEditorAssets = projectDir.resolve("src/main/assets/web")
+val buildWebEditorAssets = tasks.register("buildWebEditorAssets") {
+    doLast {
+        val editorHtml = webEditorAssets.resolve("editor.html")
+        val terminalHtml = webEditorAssets.resolve("terminal.html")
+        if (!editorHtml.isFile || !terminalHtml.isFile) {
+            if (!webEditorDir.resolve("node_modules/esbuild").exists()) {
+                exec {
+                    workingDir(webEditorDir)
+                    commandLine("npm", "ci", "--no-audit", "--no-fund")
+                }
+            }
+            exec {
+                workingDir(webEditorDir)
+                commandLine("npm", "run", "build")
+            }
+        }
+        if (!editorHtml.isFile || !terminalHtml.isFile) {
+            throw GradleException("Aset WebView editor/terminal tidak berhasil dibuat: ${webEditorAssets.absolutePath}")
+        }
+    }
+}
+tasks.named("preBuild").configure { dependsOn(buildWebEditorAssets) }
+
 if (localArm64) {
     tasks.matching { it.name.startsWith("check") && it.name.endsWith("AarMetadata") }.configureEach { enabled = false }
 }
