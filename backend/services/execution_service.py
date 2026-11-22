@@ -341,9 +341,16 @@ class ExecutionService:
             return job.public(include_output=False)
         job.handle.cancel_event.set()
         if job.status == "QUEUED" and job.task:
+            # Let _run own the state transition. If cancellation arrived before
+            # the coroutine's first instruction, finalize here as a fallback.
             job.task.cancel()
-            job.error = "Dibatalkan sebelum berjalan"
-            await self._finish(job, "CANCELLED")
+            try:
+                await job.task
+            except asyncio.CancelledError:
+                pass
+            if job.status not in TERMINAL_STATES:
+                job.error = "Dibatalkan sebelum berjalan"
+                await self._finish(job, "CANCELLED")
         return job.public(include_output=False)
 
     async def send_input(self, process_id: str, data: str, eof: bool = False) -> bool:
