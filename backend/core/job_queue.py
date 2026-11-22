@@ -1,4 +1,4 @@
-"""Antrean job dengan batas jumlah job bersamaan dan pemeriksaan RAM bebas."""
+"""Antrean job bounded dengan accounting cancellation-safe."""
 from __future__ import annotations
 
 import asyncio
@@ -14,26 +14,21 @@ class JobQueue:
         self.max_queued = max(0, max_queued)
         self.min_free_memory_mb = max(0, min_free_memory_mb)
         self._sem = asyncio.Semaphore(self.max_concurrent)
+        self._admission_lock = asyncio.Lock()
         self.waiting = 0
         self.running = 0
-        self._admission_lock = asyncio.Lock()
-
-    def check_admission(self) -> None:
-        if self.waiting >= self.max_queued:
-            raise ServiceUnavailable(
-                f"Antrean penuh ({self.waiting} job menunggu). Coba lagi nanti.", code="queue_full"
-            )
 
     @staticmethod
     def free_memory_mb() -> int:
         return int(psutil.virtual_memory().available / 1024 / 1024)
 
     async def acquire(self, wait_memory_seconds: float = 30.0) -> None:
-        # Lock menjaga admission count dan pengecekan kapasitas tetap atomik.
+        # Reserve a bounded waiting slot atomically. Running slots are excluded.
         async with self._admission_lock:
-            if self.waiting >= self.max_queued and self._sem.locked():
+            if self._sem.locked() and self.waiting >= self.max_queued:
                 raise ServiceUnavailable(
-                    f"Antrean penuh ({self.waiting} job menunggu). Coba lagi nanti.", code="queue_full"
+                    f"Antrean penuh ({self.waiting} job menunggu). Coba lagi nanti.",
+                    code="queue_full",
                 )
             self.waiting += 1
 
@@ -49,8 +44,9 @@ class JobQueue:
                         "Job ditolak agar Raspberry Pi tetap stabil.",
                         code="low_memory",
                     )
-                await asyncio.sleep(min(1.0, max(0.0, wait_memory_seconds - waited)))
-                waited += 1.0
+                delay = min(1.0, wait_memory_seconds - waited)
+                await asyncio.sleep(delay)
+                waited += delay
             self.running += 1
         except BaseException:
             if acquired:
@@ -58,10 +54,9 @@ class JobQueue:
             raise
         finally:
             async with self._admission_lock:
-                self.waiting = max(0, self.waiting - 1)
+                self.waiting -= 1
 
     def release(self) -> None:
-        # Pemanggil hanya boleh release setelah acquire berhasil.
         if self.running <= 0:
             raise RuntimeError("JobQueue.release() tanpa acquire aktif")
         self.running -= 1
