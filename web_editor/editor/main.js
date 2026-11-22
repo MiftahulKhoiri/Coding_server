@@ -284,37 +284,6 @@ window.CS = {
   clearDiagnostics() { view.dispatch(setDiagnostics(view.state, [])); },
 };
 
-// Diagnostik input Android: status fokus, DOM editor, dan event IME.
-function editorRuntimeDiag(eventName) {
-  const root = document.getElementById("editor");
-  const cm = document.querySelector(".cm-editor");
-  const scroller = document.querySelector(".cm-scroller");
-  const content = document.querySelector(".cm-content");
-  const editable = document.querySelector(".cm-content[contenteditable='true']");
-  const text = view.state.doc.toString();
-  const dimensions = (el) => {
-    if (!el) return "none";
-    const r = el.getBoundingClientRect();
-    return Math.round(r.width) + "x" + Math.round(r.height);
-  };
-  const status = "EDITOR_DIAG:runtime event=" + (eventName || "check") +
-    ", viewport=" + window.innerWidth + "x" + window.innerHeight +
-    ", html=" + dimensions(document.documentElement) +
-    ", body=" + dimensions(document.body) +
-    ", root=" + dimensions(root) +
-    ", cm=" + dimensions(cm) +
-    ", scroller=" + dimensions(scroller) +
-    ", content=" + !!content + ", editable=" + !!editable +
-    ", focus=" + view.hasFocus + ", active=" + (document.activeElement ? document.activeElement.className : "none") +
-    ", chars=" + text.length;
-  bridge.onLog(status);
-  return status;
-}
-document.addEventListener("focusin", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("focusin"); }, true);
-document.addEventListener("beforeinput", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("beforeinput:" + e.inputType); }, true);
-document.addEventListener("input", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("input"); }, true);
-document.addEventListener("keydown", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("keydown:" + e.key); }, true);
-
 // WebView tertentu melaporkan viewport yang valid tetapi ukuran CSS html/body = 0.
 // Tetapkan tinggi eksplisit dari viewport aktual agar rantai layout tidak bergantung
 // pada percentage-height dari containing block yang tidak terukur.
@@ -342,7 +311,6 @@ function syncEditorViewport() {
     view.dom.style.setProperty("min-height", "0px", "important");
     view.dom.style.setProperty("width", "100%", "important");
   }
-  editorRuntimeDiag("viewport-sync");
 }
 window.addEventListener("resize", syncEditorViewport, { passive: true });
 if (window.visualViewport) {
