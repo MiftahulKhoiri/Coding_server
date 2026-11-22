@@ -54,7 +54,19 @@ const lightTheme = EditorView.theme({
   ".cm-gutters": { backgroundColor: "#f5f5f5", color: "#666666", borderRight: "1px solid #dddddd" },
 }, { dark: false });
 
-function customColorsTheme() {\n  const fg = settings.textColor || (settings.theme === "dark" ? "#abb2bf" : "#202124");\n  const bg = settings.backgroundColor || (settings.theme === "dark" ? "#282c34" : "#ffffff");\n  return EditorView.theme({\n    "&": { color: fg, backgroundColor: bg },\n    ".cm-scroller": { backgroundColor: bg },\n    ".cm-content, .cm-line, .cm-content *": { color: fg },\n    ".cm-gutters": { backgroundColor: bg },\n    ".cm-cursor": { borderLeftColor: fg },\n  }, { dark: settings.theme === "dark" });\n}\n\nfunction baseExtensions(lang, editable = true) {
+function customColorsTheme() {
+  const fg = settings.textColor || (settings.theme === "dark" ? "#abb2bf" : "#202124");
+  const bg = settings.backgroundColor || (settings.theme === "dark" ? "#282c34" : "#ffffff");
+  return EditorView.theme({
+    "&": { color: fg, backgroundColor: bg },
+    ".cm-scroller": { backgroundColor: bg },
+    ".cm-content, .cm-line, .cm-content *": { color: fg },
+    ".cm-gutters": { backgroundColor: bg },
+    ".cm-cursor": { borderLeftColor: fg },
+  }, { dark: settings.theme === "dark" });
+}
+
+function baseExtensions(lang, editable = true) {
   return [
     lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), foldGutter(), drawSelection(),
     dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(),
@@ -234,7 +246,8 @@ window.CS = {
     if (t) t.lang = lang;
     view.dispatch({ effects: langConf.reconfigure(languageExtension(lang)) });
   },
-  setTheme(theme) { settings.theme = theme === "light" ? "light" : "dark"; reconfigureAll(); },\n  setColors(textColor, backgroundColor) { settings.textColor = textColor || ""; settings.backgroundColor = backgroundColor || ""; reconfigureAll(); },
+  setTheme(theme) { settings.theme = theme === "light" ? "light" : "dark"; reconfigureAll(); },
+  setColors(textColor, backgroundColor) { settings.textColor = textColor || ""; settings.backgroundColor = backgroundColor || ""; reconfigureAll(); },
   setFontSize(px) { settings.fontSize = Math.max(8, Math.min(40, Number(px) || 14)); reconfigureAll(); },
   setWordWrap(on) { settings.wordWrap = !!on; reconfigureAll(); },
   setTabSize(n) { settings.tabSize = Math.max(1, Math.min(8, Number(n) || 4)); reconfigureAll(); },
