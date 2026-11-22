@@ -105,16 +105,25 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
         val c = client ?: return@LaunchedEffect
         loadError = null
         if (!editor.hasTab(tab.id)) {
+            loadError = "Memuat file: " + tab.path
             apiCall { c.api.read(tab.projectId, tab.path) }
                 .onSuccess { f ->
+                    if (activeId != tab.id) return@onSuccess
                     if (f.binary || f.content == null) {
-                        loadError = "File biner tidak bisa dibuka di editor"; vm.closeTab(tab.id)
+                        loadError = "File tidak dapat ditampilkan sebagai teks: " + tab.path
                     } else {
+                        android.util.Log.d("CodingServerEditor", "File diterima: " + tab.path + ", " + f.content.length + " karakter")
                         editor.openTab(tab.id, f.content, f.name)
                         vm.updateTab(tab.id) { it.copy(sha256 = f.sha256, language = f.language, dirty = false) }
+                        loadError = null
                     }
                 }
-                .onFailure { loadError = it.message; vm.closeTab(tab.id) }
+                .onFailure {
+                    if (activeId == tab.id) {
+                        loadError = "Gagal membaca " + tab.path + ": " + (it.message ?: "kesalahan tidak diketahui")
+                        android.util.Log.e("CodingServerEditor", loadError, it)
+                    }
+                }
         } else editor.switchTab(tab.id)
     }
     LaunchedEffect(prefs) { editor.applyPrefs(prefs.darkTheme, prefs.fontSize, prefs.wordWrap, prefs.tabSize) }
