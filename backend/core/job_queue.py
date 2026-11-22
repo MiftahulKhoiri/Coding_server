@@ -23,7 +23,8 @@ class JobQueue:
         return int(psutil.virtual_memory().available / 1024 / 1024)
 
     async def acquire(self, wait_memory_seconds: float = 30.0) -> None:
-        # Reserve a bounded waiting slot atomically. Running slots are excluded.
+        # A running task is not counted as queued; only tasks blocked for a slot
+        # consume max_queued capacity. Reserve the slot atomically.
         async with self._admission_lock:
             if self._sem.locked() and self.waiting >= self.max_queued:
                 raise ServiceUnavailable(
