@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import binascii
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
@@ -71,13 +72,37 @@ async def ws_terminal(ws: WebSocket, session_id: str, token: str | None = None):
     try:
         while True:
             msg = await ws.receive_json()
+            if not isinstance(msg, dict):
+                await ws.send_json({"type": "error", "message": "Pesan terminal harus berupa objek"})
+                continue
             t = msg.get("type")
             if t == "input":
-                svc.terminal.write(sess, str(msg.get("data", "")))
+                data = msg.get("data", "")
+                if not isinstance(data, str) or len(data.encode("utf-8")) > 65536:
+                    await ws.send_json({"type": "error", "message": "Input terminal maksimum 64 KiB per pesan"})
+                    continue
+                svc.terminal.write(sess, data)
             elif t == "input_b64":
-                svc.terminal.write(sess, base64.b64decode(msg.get("data", "")).decode("utf-8", errors="replace"))
+                encoded = msg.get("data", "")
+                if not isinstance(encoded, str) or len(encoded) > 90000:
+                    await ws.send_json({"type": "error", "message": "Input base64 terlalu besar"})
+                    continue
+                try:
+                    decoded = base64.b64decode(encoded, validate=True)
+                except (binascii.Error, ValueError):
+                    await ws.send_json({"type": "error", "message": "Input base64 tidak valid"})
+                    continue
+                if len(decoded) > 65536:
+                    await ws.send_json({"type": "error", "message": "Input terminal maksimum 64 KiB per pesan"})
+                    continue
+                svc.terminal.write(sess, decoded.decode("utf-8", errors="replace"))
             elif t == "resize":
-                svc.terminal.resize(sess, int(msg.get("cols", 80)), int(msg.get("rows", 24)))
+                try:
+                    cols, rows = int(msg.get("cols", 80)), int(msg.get("rows", 24))
+                except (TypeError, ValueError):
+                    await ws.send_json({"type": "error", "message": "Dimensi terminal tidak valid"})
+                    continue
+                svc.terminal.resize(sess, cols, rows)
             elif t == "signal":
                 svc.terminal.signal(sess, str(msg.get("signal", "")))
             elif t == "ping":
