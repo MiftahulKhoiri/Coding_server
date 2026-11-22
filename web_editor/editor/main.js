@@ -284,6 +284,26 @@ window.CS = {
   clearDiagnostics() { view.dispatch(setDiagnostics(view.state, [])); },
 };
 
+// Diagnostik input Android: status fokus, DOM editor, dan event IME.
+function editorRuntimeDiag(eventName) {
+  const root = document.getElementById("editor");
+  const cm = document.querySelector(".cm-editor");
+  const content = document.querySelector(".cm-content");
+  const editable = document.querySelector(".cm-content[contenteditable='true']");
+  const text = view.state.doc.toString();
+  const rect = cm ? cm.getBoundingClientRect() : null;
+  const status = "EDITOR_DIAG:runtime event=" + (eventName || "check") +
+    ", cm=" + !!cm + ", content=" + !!content + ", editable=" + !!editable +
+    ", focus=" + view.hasFocus + ", active=" + (document.activeElement ? document.activeElement.className : "none") +
+    ", chars=" + text.length + ", size=" + (rect ? Math.round(rect.width) + "x" + Math.round(rect.height) : "none");
+  bridge.onLog(status);
+  return status;
+}
+document.addEventListener("focusin", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("focusin"); }, true);
+document.addEventListener("beforeinput", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("beforeinput:" + e.inputType); }, true);
+document.addEventListener("input", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("input"); }, true);
+document.addEventListener("keydown", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("keydown:" + e.key); }, true);
+
 // Ketukan di area kosong di bawah teks tetap memberi fokus (memunculkan keyboard).
 document.getElementById("editor").addEventListener("touchend", () => { if (current && !view.hasFocus) view.focus(); });
 document.body.className = settings.theme;
