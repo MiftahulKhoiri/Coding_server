@@ -90,14 +90,8 @@ class EditorController(context: Context) {
                       style.id = 'cs-editor-visibility-fix';
                       style.textContent = [
                         'html,body,#editor,.cm-editor,.cm-scroller { visibility: visible !important; opacity: 1 !important; }',
-                        '.cm-content,.cm-line { color: #202124 !important; opacity: 1 !important; visibility: visible !important; }',
-                        '.cm-content span { color: #202124 !important; opacity: 1 !important; visibility: visible !important; }',
-                        'body.light .cm-editor,body.light .cm-scroller { background: #ffffff !important; }',
-                        'body.light .cm-content,body.light .cm-line,body.light .cm-content span { color: #202124 !important; }',
-                        'body.dark .cm-editor,body.dark .cm-scroller { background: #282c34 !important; }',
-                        'body.dark .cm-content,body.dark .cm-line,body.dark .cm-content span { color: #abb2bf !important; }',
-                        '.cm-content { caret-color: #000000 !important; font-size: inherit !important; }',
-                        'body.dark .cm-content { caret-color: #ffffff !important; }'
+                        '.cm-content,.cm-line,.cm-content span { opacity: 1 !important; visibility: visible !important; }',
+                        '.cm-content { font-size: inherit !important; }'
                       ].join('');
                       document.head.appendChild(style);
                     })();
@@ -138,8 +132,8 @@ class EditorController(context: Context) {
     suspend fun foldAll() { eval("CS.foldAll()") }
     suspend fun unfoldAll() { eval("CS.unfoldAll()") }
     suspend fun insert(text: String) { eval("CS.insert(${q(text)})") }
-    suspend fun applyPrefs(dark: Boolean, font: Int, wrap: Boolean, tab: Int) {
-        eval("CS.configure({theme:${q(if (dark) "dark" else "light")},fontSize:$font,wordWrap:$wrap,tabSize:$tab})")
+    suspend fun applyPrefs(dark: Boolean, font: Int, wrap: Boolean, tab: Int, textColor: String = "", backgroundColor: String = "") {
+        eval("CS.configure({theme:${q(if (dark) "dark" else "light")},fontSize:$font,wordWrap:$wrap,tabSize:$tab,textColor:${q(textColor)},backgroundColor:${q(backgroundColor)}})")
     }
     suspend fun symbols(): List<Symbol> {
         val raw = decodeString(eval("CS.symbols()")) ?: return emptyList()
