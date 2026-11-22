@@ -66,6 +66,8 @@ function customColorsTheme() {
   }, { dark: settings.theme === "dark" });
 }
 
+const placeholderExt = placeholder("Belum ada file terbuka. Buka file dari Project Explorer atau tekan + untuk membuat file baru.");
+
 function baseExtensions(lang, editable = true) {
   return [
     lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), foldGutter(), drawSelection(),
@@ -103,8 +105,6 @@ function baseExtensions(lang, editable = true) {
     }),
   ];
 }
-
-const placeholderExt = placeholder("Belum ada file terbuka. Buka file dari Project Explorer atau tekan + untuk membuat file baru.");
 
 const view = new EditorView({
   state: EditorState.create({ doc: "", extensions: baseExtensions("text", false) }),
