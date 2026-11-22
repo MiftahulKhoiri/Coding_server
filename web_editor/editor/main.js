@@ -34,7 +34,7 @@ const fontConf = new Compartment();
 const readOnlyConf = new Compartment();
 const indentConf = new Compartment();
 
-let settings = { theme: "dark", fontSize: 14, wordWrap: false, tabSize: 4 };
+let settings = { theme: "dark", fontSize: 14, wordWrap: false, tabSize: 4, textColor: "", backgroundColor: "" };
 const tabs = new Map(); // id -> { state, lang, filename, savedVersion }
 let current = null;
 let suppress = false;
@@ -54,7 +54,7 @@ const lightTheme = EditorView.theme({
   ".cm-gutters": { backgroundColor: "#f5f5f5", color: "#666666", borderRight: "1px solid #dddddd" },
 }, { dark: false });
 
-function baseExtensions(lang, editable = true) {
+function customColorsTheme() {\n  const fg = settings.textColor || (settings.theme === "dark" ? "#abb2bf" : "#202124");\n  const bg = settings.backgroundColor || (settings.theme === "dark" ? "#282c34" : "#ffffff");\n  return EditorView.theme({\n    "&": { color: fg, backgroundColor: bg },\n    ".cm-scroller": { backgroundColor: bg },\n    ".cm-content, .cm-line, .cm-content *": { color: fg },\n    ".cm-gutters": { backgroundColor: bg },\n    ".cm-cursor": { borderLeftColor: fg },\n  }, { dark: settings.theme === "dark" });\n}\n\nfunction baseExtensions(lang, editable = true) {
   return [
     lineNumbers(), highlightActiveLineGutter(), highlightSpecialChars(), history(), foldGutter(), drawSelection(),
     dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(),
@@ -71,7 +71,7 @@ function baseExtensions(lang, editable = true) {
       ...completionKeymap, ...lintKeymap,
     ]),
     langConf.of(languageExtension(lang)),
-    themeConf.of(settings.theme === "dark" ? oneDark : lightTheme),
+    themeConf.of([settings.theme === "dark" ? oneDark : lightTheme, customColorsTheme()]),
     wrapConf.of(settings.wordWrap ? EditorView.lineWrapping : []),
     fontConf.of(fontTheme(settings.fontSize)),
     readOnlyConf.of([EditorState.readOnly.of(!editable), EditorView.editable.of(editable)]),
@@ -113,7 +113,7 @@ function isDirty(id) {
 function reconfigureAll() {
   view.dispatch({
     effects: [
-      themeConf.reconfigure(settings.theme === "dark" ? oneDark : lightTheme),
+      themeConf.reconfigure([settings.theme === "dark" ? oneDark : lightTheme, customColorsTheme()]),
       wrapConf.reconfigure(settings.wordWrap ? EditorView.lineWrapping : []),
       fontConf.reconfigure(fontTheme(settings.fontSize)),
       indentConf.reconfigure([indentUnit.of(" ".repeat(settings.tabSize)), EditorState.tabSize.of(settings.tabSize)]),
@@ -234,7 +234,7 @@ window.CS = {
     if (t) t.lang = lang;
     view.dispatch({ effects: langConf.reconfigure(languageExtension(lang)) });
   },
-  setTheme(theme) { settings.theme = theme === "light" ? "light" : "dark"; reconfigureAll(); },
+  setTheme(theme) { settings.theme = theme === "light" ? "light" : "dark"; reconfigureAll(); },\n  setColors(textColor, backgroundColor) { settings.textColor = textColor || ""; settings.backgroundColor = backgroundColor || ""; reconfigureAll(); },
   setFontSize(px) { settings.fontSize = Math.max(8, Math.min(40, Number(px) || 14)); reconfigureAll(); },
   setWordWrap(on) { settings.wordWrap = !!on; reconfigureAll(); },
   setTabSize(n) { settings.tabSize = Math.max(1, Math.min(8, Number(n) || 4)); reconfigureAll(); },
