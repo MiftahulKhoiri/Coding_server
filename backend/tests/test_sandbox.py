@@ -59,3 +59,16 @@ def test_terminal_sandboxed(client, auth, token, project):
                 break
     client.delete(f"/api/v1/terminal/sessions/{sid}", headers=auth)
     assert "TANPA_SSH" in got
+
+
+def test_sandbox_auto_fails_closed_when_bubblewrap_missing(monkeypatch):
+    from types import SimpleNamespace
+    from backend.core.exceptions import ServiceUnavailable
+    import backend.core.sandbox as sandbox
+
+    monkeypatch.setattr(sandbox, "bwrap_available", lambda: False)
+    with pytest.raises(ServiceUnavailable) as exc:
+        sandbox.require_sandbox(SimpleNamespace(sandbox="auto"))
+    assert exc.value.code == "sandbox_unavailable"
+    # Explicit opt-out is honored; it is not silently selected by auto mode.
+    sandbox.require_sandbox(SimpleNamespace(sandbox="none"))

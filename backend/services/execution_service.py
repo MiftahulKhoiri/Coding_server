@@ -13,7 +13,7 @@ from backend.core.exceptions import AppError, NotFound
 from backend.core.job_queue import JobQueue
 from backend.core.logging import get_logger
 from backend.core.process_manager import RunningProcess, run_step
-from backend.core.sandbox import Limits, SandboxSpec, make_preexec, wrap
+from backend.core.sandbox import Limits, SandboxSpec, make_preexec, require_sandbox, wrap
 from backend.database.db import Database
 from backend.engines.base_engine import EngineContext
 from backend.engines.registry import EngineRegistry
@@ -210,6 +210,7 @@ class ExecutionService:
             await self._finish(job, "COMPLETED")
             return job
 
+        require_sandbox(self.s)
         build_dir = self.s.cache_dir / "builds" / project_id / engine.language_id / src.stem
         build_dir.mkdir(parents=True, exist_ok=True)
         ctx = EngineContext(

@@ -66,7 +66,7 @@ class Settings:
     max_file_size_bytes: int = 10_000_000
     sandbox: str = "auto"  # auto | bwrap | none
     sandbox_network: bool = False  # akses jaringan untuk program yang dijalankan
-    terminal_network: bool = True
+    terminal_network: bool = False
     terminal_idle_timeout: int = 1800
     max_terminal_sessions: int = 6
 
