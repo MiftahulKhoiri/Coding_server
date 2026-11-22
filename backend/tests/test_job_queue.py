@@ -28,8 +28,7 @@ async def test_cancelled_waiter_does_not_leak_queue_capacity(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_memory_rejection_releases_acquired_slot(monkeypatch):
-    values = iter([0, 0, 0])
-    monkeypatch.setattr(JobQueue, "free_memory_mb", staticmethod(lambda: next(values, 0)))
+    monkeypatch.setattr(JobQueue, "free_memory_mb", staticmethod(lambda: 0))
     queue = JobQueue(max_concurrent=1, max_queued=1, min_free_memory_mb=10)
 
     with pytest.raises(ServiceUnavailable) as exc:
