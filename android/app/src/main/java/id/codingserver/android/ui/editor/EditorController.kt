@@ -60,7 +60,13 @@ class EditorController(context: Context) {
         isFocusableInTouchMode = true
         // Pastikan WebView mendapat fokus saat disentuh supaya keyboard muncul & ketikan masuk ke editor.
         setOnTouchListener { v, ev ->
-            if (ev.action == android.view.MotionEvent.ACTION_UP && !v.hasFocus()) v.requestFocus()
+            if (ev.action == android.view.MotionEvent.ACTION_UP) {
+                v.requestFocus()
+                post {
+                    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                    imm.showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
             false
         }
         settings.javaScriptEnabled = true
