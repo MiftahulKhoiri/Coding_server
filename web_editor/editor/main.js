@@ -315,6 +315,42 @@ document.addEventListener("beforeinput", e => { if (e.target && e.target.closest
 document.addEventListener("input", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("input"); }, true);
 document.addEventListener("keydown", e => { if (e.target && e.target.closest && e.target.closest(".cm-content")) editorRuntimeDiag("keydown:" + e.key); }, true);
 
+// WebView tertentu melaporkan viewport yang valid tetapi ukuran CSS html/body = 0.
+// Tetapkan tinggi eksplisit dari viewport aktual agar rantai layout tidak bergantung
+// pada percentage-height dari containing block yang tidak terukur.
+function syncEditorViewport() {
+  const vv = window.visualViewport;
+  const height = Math.max(1, Math.round((vv && vv.height) || window.innerHeight || document.documentElement.clientHeight || 1));
+  const width = Math.max(1, Math.round((vv && vv.width) || window.innerWidth || document.documentElement.clientWidth || 1));
+  const html = document.documentElement;
+  const body = document.body;
+  const root = document.getElementById("editor");
+  html.style.setProperty("height", height + "px", "important");
+  html.style.setProperty("min-height", height + "px", "important");
+  html.style.setProperty("width", width + "px", "important");
+  body.style.setProperty("height", height + "px", "important");
+  body.style.setProperty("min-height", height + "px", "important");
+  body.style.setProperty("width", width + "px", "important");
+  if (root) {
+    root.style.setProperty("height", height + "px", "important");
+    root.style.setProperty("min-height", "0px", "important");
+    root.style.setProperty("width", width + "px", "important");
+    root.style.setProperty("flex", "0 0 " + height + "px", "important");
+  }
+  if (view && view.dom) {
+    view.dom.style.setProperty("height", height + "px", "important");
+    view.dom.style.setProperty("min-height", "0px", "important");
+    view.dom.style.setProperty("width", "100%", "important");
+  }
+  editorRuntimeDiag("viewport-sync");
+}
+window.addEventListener("resize", syncEditorViewport, { passive: true });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", syncEditorViewport, { passive: true });
+}
+document.addEventListener("DOMContentLoaded", syncEditorViewport, { once: true });
+syncEditorViewport();
+
 // Ketukan di area kosong di bawah teks tetap memberi fokus (memunculkan keyboard).
 document.getElementById("editor").addEventListener("touchend", () => { if (current && !view.hasFocus) view.focus(); });
 document.body.className = settings.theme;
