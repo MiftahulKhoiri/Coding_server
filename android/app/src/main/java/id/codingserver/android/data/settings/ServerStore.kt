@@ -30,6 +30,8 @@ data class EditorPrefs(
     val fontSize: Int = 14,
     val wordWrap: Boolean = false,
     val tabSize: Int = 4,
+    val textColor: String = "",
+    val backgroundColor: String = "",
 )
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "coding_server")
