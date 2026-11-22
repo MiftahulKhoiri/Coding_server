@@ -13,7 +13,7 @@ from backend.config import Settings
 from backend.core.exceptions import AppError
 from backend.core.logging import redact
 from backend.core.process_manager import RunningProcess, run_step
-from backend.core.sandbox import Limits, SandboxSpec, make_preexec, wrap
+from backend.core.sandbox import Limits, SandboxSpec, make_preexec, require_sandbox, wrap
 from backend.database.db import Database
 from backend.engines.base_engine import find_executable
 from backend.services.secret_store import SecretStore
@@ -83,6 +83,7 @@ class GitService:
     # ---------- eksekusi ----------
     async def _git(self, repo: Path, args: list[str], *, user: dict, network: bool = False, host: str | None = None,
                    timeout: int = 120, writable: list[Path] | None = None) -> dict:
+        require_sandbox(self.s)
         git = find_executable("git")
         if not git:
             raise AppError("git belum terpasang di server", code="engine_unavailable", status_code=503)
