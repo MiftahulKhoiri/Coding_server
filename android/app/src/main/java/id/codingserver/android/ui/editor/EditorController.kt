@@ -100,6 +100,7 @@ class EditorController(context: Context) {
                       document.head.appendChild(style);
                     })();
                 """.trimIndent(), null)
+                view?.evaluateJavascript("(function(){var root=document.getElementById('editor');var cm=document.querySelector('.cm-editor');var content=document.querySelector('.cm-content');var msg='EDITOR_DIAG:DOM=' + !!root + ', CodeMirror=' + !!cm + ', content=' + !!content + ', CS=' + !!window.CS;if(content){var r=content.getBoundingClientRect();msg+=', ukuran=' + r.width + 'x' + r.height;}if(window.AndroidBridge&&AndroidBridge.onLog)AndroidBridge.onLog(msg);})()", null)
             }
         }
         addJavascriptInterface(EditorBridge(this@EditorController), "AndroidBridge")
