@@ -76,7 +76,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
     var colorDialog by remember { mutableStateOf(false) }
     var textColorInput by remember(prefs) { mutableStateOf(prefs.textColor) }
     var backgroundColorInput by remember(prefs) { mutableStateOf(prefs.backgroundColor) }
-    var colorError by remember { mutableStateOf<String?>(null)
+    var colorError by remember { mutableStateOf<String?>(null) }
     val project by vm.project.collectAsState()
     val active = tabs.firstOrNull { it.id == activeId }
 
