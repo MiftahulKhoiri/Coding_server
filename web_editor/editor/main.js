@@ -288,14 +288,25 @@ window.CS = {
 function editorRuntimeDiag(eventName) {
   const root = document.getElementById("editor");
   const cm = document.querySelector(".cm-editor");
+  const scroller = document.querySelector(".cm-scroller");
   const content = document.querySelector(".cm-content");
   const editable = document.querySelector(".cm-content[contenteditable='true']");
   const text = view.state.doc.toString();
-  const rect = cm ? cm.getBoundingClientRect() : null;
+  const dimensions = (el) => {
+    if (!el) return "none";
+    const r = el.getBoundingClientRect();
+    return Math.round(r.width) + "x" + Math.round(r.height);
+  };
   const status = "EDITOR_DIAG:runtime event=" + (eventName || "check") +
-    ", cm=" + !!cm + ", content=" + !!content + ", editable=" + !!editable +
+    ", viewport=" + window.innerWidth + "x" + window.innerHeight +
+    ", html=" + dimensions(document.documentElement) +
+    ", body=" + dimensions(document.body) +
+    ", root=" + dimensions(root) +
+    ", cm=" + dimensions(cm) +
+    ", scroller=" + dimensions(scroller) +
+    ", content=" + !!content + ", editable=" + !!editable +
     ", focus=" + view.hasFocus + ", active=" + (document.activeElement ? document.activeElement.className : "none") +
-    ", chars=" + text.length + ", size=" + (rect ? Math.round(rect.width) + "x" + Math.round(rect.height) : "none");
+    ", chars=" + text.length;
   bridge.onLog(status);
   return status;
 }
