@@ -9,7 +9,15 @@
   body.dark { background: #282c34; }
   body.light { background: #ffffff; }
   #editor { height: 100vh; }
+  /* Explicit contrast for Android WebView: prevent editor text from blending into its background. */
+  body.dark .cm-editor, body.dark .cm-scroller { background-color: #282c34 !important; }
+  body.dark .cm-content { color: #abb2bf !important; caret-color: #ffffff !important; }
+  body.dark .cm-gutters { background-color: #21252b !important; color: #636d83 !important; border-right: 1px solid #3a3f4b !important; }
+  body.light .cm-editor, body.light .cm-scroller { background-color: #ffffff !important; }
+  body.light .cm-content { color: #202124 !important; caret-color: #000000 !important; }
+  body.light .cm-gutters { background-color: #f5f5f5 !important; color: #666666 !important; border-right: 1px solid #dddddd !important; }
   .cm-editor { height: 100%; }
+
   .cm-panels { font-size: 14px; }
   .cm-panel.cm-search input, .cm-panel.cm-search button { font-size: 14px; padding: 4px 6px; }
 </style>
