@@ -60,7 +60,7 @@ function customColorsTheme() {
   return EditorView.theme({
     "&": { color: fg, backgroundColor: bg },
     ".cm-scroller": { backgroundColor: bg },
-    ".cm-content, .cm-line, .cm-content *": { color: fg },
+    ".cm-content": { color: fg },
     ".cm-gutters": { backgroundColor: bg },
     ".cm-cursor": { borderLeftColor: fg },
   }, { dark: settings.theme === "dark" });
