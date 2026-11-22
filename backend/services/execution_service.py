@@ -227,12 +227,20 @@ class ExecutionService:
         return job
 
     async def _run(self, job: Job, engine, ctx: EngineContext, steps, stdin, interactive) -> None:
+        acquired = False
         try:
             await self.queue.acquire()
+            acquired = True
+        except asyncio.CancelledError:
+            # A queued job may be cancelled while waiting for a semaphore slot.
+            job.error = "Dibatalkan sebelum berjalan"
+            await self._finish(job, "CANCELLED")
+            return
         except AppError as e:
             job.error = e.message
             await self._finish(job, "FAILED")
             return
+
         try:
             if job.handle.cancel_event.is_set():
                 await self._finish(job, "CANCELLED")
@@ -243,6 +251,10 @@ class ExecutionService:
             ctx.cache_dir.mkdir(parents=True, exist_ok=True)
             final_status = "COMPLETED"
             for i, step in enumerate(steps):
+                if job.handle.cancel_event.is_set():
+                    job.error = "Dihentikan oleh pengguna"
+                    final_status = "CANCELLED"
+                    break
                 if job.status != "RUNNING":
                     await self._set_status(job, "RUNNING")
                 await self._emit(job, {"type": "phase", "phase": step.phase, "index": i, "argv": step.argv})
@@ -281,14 +293,29 @@ class ExecutionService:
                     final_status = "FAILED"
                     break
             if job.error:
-                await self._output(job, "stderr", f"\n[{job.error}]\n")
+                await self._output(job, "stderr", f"\\n[{job.error}]\\n")
             await self._finish(job, final_status)
+        except asyncio.CancelledError:
+            # Cancellation after acquiring must still terminate any child process
+            # and persist a terminal state before releasing the queue slot.
+            job.handle.cancel_event.set()
+            if job.handle.proc and job.handle.proc.returncode is None:
+                from backend.core.process_manager import kill_tree
+                kill_tree(job.handle.proc.pid)
+                try:
+                    await asyncio.wait_for(job.handle.proc.wait(), timeout=3)
+                except asyncio.TimeoutError:
+                    pass
+            job.error = "Dibatalkan sebelum proses selesai"
+            await self._finish(job, "CANCELLED")
+            raise
         except Exception as e:  # jangan biarkan job menggantung
             log.exception("Job %s error", job.id)
             job.error = f"Kesalahan internal: {e}"
             await self._finish(job, "FAILED")
         finally:
-            self.queue.release()
+            if acquired:
+                self.queue.release()
 
     async def _finish(self, job: Job, status: str) -> None:
         job.end_time = time.time()
