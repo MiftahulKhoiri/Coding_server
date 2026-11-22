@@ -42,13 +42,15 @@ class ServerStore(private val context: Context) {
     private val kFont = intPreferencesKey("editor_font")
     private val kWrap = booleanPreferencesKey("editor_wrap")
     private val kTab = intPreferencesKey("editor_tab")
+    private val kTextColor = stringPreferencesKey("editor_text_color")
+    private val kBackgroundColor = stringPreferencesKey("editor_background_color")
     private val kLastProject = stringPreferencesKey("last_project")
 
     val servers: Flow<List<ServerProfile>> = context.dataStore.data.map { decode(it[kServers]) }
     val activeId: Flow<String?> = context.dataStore.data.map { it[kActive] }
     val lastProject: Flow<String?> = context.dataStore.data.map { it[kLastProject] }
     val editorPrefs: Flow<EditorPrefs> = context.dataStore.data.map {
-        EditorPrefs(it[kDark] ?: true, it[kFont] ?: 14, it[kWrap] ?: false, it[kTab] ?: 4)
+        EditorPrefs(it[kDark] ?: true, it[kFont] ?: 14, it[kWrap] ?: false, it[kTab] ?: 4, it[kTextColor] ?: "", it[kBackgroundColor] ?: "")
     }
 
     private fun decode(raw: String?): List<ServerProfile> =
@@ -87,6 +89,8 @@ class ServerStore(private val context: Context) {
             it[kFont] = p.fontSize
             it[kWrap] = p.wordWrap
             it[kTab] = p.tabSize
+            it[kTextColor] = p.textColor
+            it[kBackgroundColor] = p.backgroundColor
         }
     }
 }
