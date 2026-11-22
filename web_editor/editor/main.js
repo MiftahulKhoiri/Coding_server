@@ -46,7 +46,13 @@ function fontTheme(size) {
     ".cm-content": { paddingBottom: "40vh" },
   });
 }
-const lightTheme = EditorView.theme({ "&": { backgroundColor: "#ffffff", color: "#1e1e1e" } }, { dark: false });
+const lightTheme = EditorView.theme({
+  "&": { backgroundColor: "#ffffff", color: "#202124" },
+  ".cm-scroller": { backgroundColor: "#ffffff" },
+  ".cm-content": { color: "#202124", caretColor: "#000000" },
+  ".cm-line": { color: "#202124" },
+  ".cm-gutters": { backgroundColor: "#f5f5f5", color: "#666666", borderRight: "1px solid #dddddd" },
+}, { dark: false });
 
 function baseExtensions(lang, editable = true) {
   return [
