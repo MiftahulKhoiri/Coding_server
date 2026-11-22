@@ -67,10 +67,42 @@ class EditorController(context: Context) {
         settings.allowFileAccess = false
         settings.allowContentAccess = false
         settings.builtInZoomControls = false
-        webChromeClient = WebChromeClient()
+        webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(message: android.webkit.ConsoleMessage?): Boolean {
+                message?.let {
+                    android.util.Log.d("CodingServerWebView", "${it.message()} (${it.lineNumber()})")
+                }
+                return true
+            }
+        }
         webViewClient = object : WebViewClient() {
             // Editor tidak boleh membuka halaman lain.
             override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?) = true
+
+            // Terapkan fallback rendering langsung dari native WebView, tidak bergantung
+            // pada CSS yang tertanam di bundle editor. Ini membantu diagnosis teks putih/kosong.
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                view?.evaluateJavascript("""
+                    (function() {
+                      if (document.getElementById('cs-editor-visibility-fix')) return;
+                      var style = document.createElement('style');
+                      style.id = 'cs-editor-visibility-fix';
+                      style.textContent = [
+                        'html,body,#editor,.cm-editor,.cm-scroller { visibility: visible !important; opacity: 1 !important; }',
+                        '.cm-content,.cm-line { color: #202124 !important; opacity: 1 !important; visibility: visible !important; }',
+                        '.cm-content span { color: #202124 !important; opacity: 1 !important; visibility: visible !important; }',
+                        'body.light .cm-editor,body.light .cm-scroller { background: #ffffff !important; }',
+                        'body.light .cm-content,body.light .cm-line,body.light .cm-content span { color: #202124 !important; }',
+                        'body.dark .cm-editor,body.dark .cm-scroller { background: #282c34 !important; }',
+                        'body.dark .cm-content,body.dark .cm-line,body.dark .cm-content span { color: #abb2bf !important; }',
+                        '.cm-content { caret-color: #000000 !important; font-size: inherit !important; }',
+                        'body.dark .cm-content { caret-color: #ffffff !important; }'
+                      ].join('');
+                      document.head.appendChild(style);
+                    })();
+                """.trimIndent(), null)
+            }
         }
         addJavascriptInterface(EditorBridge(this@EditorController), "AndroidBridge")
         loadUrl("file:///android_asset/web/editor.html")
