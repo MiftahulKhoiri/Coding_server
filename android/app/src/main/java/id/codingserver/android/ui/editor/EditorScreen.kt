@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -226,7 +227,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                 Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium,
             )
         }
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxWidth().weight(1f, fill = true)) {
             AndroidView(factory = { editor.detach(); editor.webView }, modifier = Modifier.fillMaxSize())
         }
     }
