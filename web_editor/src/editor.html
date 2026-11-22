@@ -1,29 +1,31 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<title>CODING_SERVER Editor</title>
-<style>
-  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
-  body.dark { background: #282c34; }
-  body.light { background: #ffffff; }
-  #editor { height: 100vh; }
-  /* Explicit contrast for Android WebView: prevent editor text from blending into its background. */
-  body.dark .cm-editor, body.dark .cm-scroller { background-color: #282c34 !important; }
-  body.dark .cm-content { color: #abb2bf !important; caret-color: #ffffff !important; }
-  body.dark .cm-gutters { background-color: #21252b !important; color: #636d83 !important; border-right: 1px solid #3a3f4b !important; }
-  body.light .cm-editor, body.light .cm-scroller { background-color: #ffffff !important; }
-  body.light .cm-content { color: #202124 !important; caret-color: #000000 !important; }
-  body.light .cm-gutters { background-color: #f5f5f5 !important; color: #666666 !important; border-right: 1px solid #dddddd !important; }
-  .cm-editor { height: 100%; }
-
-  .cm-panels { font-size: 14px; }
-  .cm-panel.cm-search input, .cm-panel.cm-search button { font-size: 14px; padding: 4px 6px; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>CODING_SERVER Editor</title>
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    body.dark { background-color: #282c34; }
+    body.light { background-color: #ffffff; }
+    #editor { height: 100vh; }
+    .cm-editor { height: 100%; }
+    .cm-panels { font-size: 14px; }
+    .cm-panel.cm-search input, .cm-panel.cm-search button { font-size: 14px; padding: 4px 6px; }
+  </style>
 </head>
 <body class="dark">
-<div id="editor"></div>
-<script>/*__JS__*/</script>
+  <div id="editor"></div>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@6.5.1/lib/codemirror.js" integrity="sha512-lW9qM/7bQxP2C3bF6XJ6VqYkz5fOyC9BxwYlLZ8UQw9Vz3Y8xgj+U2P4tF3s0N6OjTQJ6KZJzqNwvP0wH8z3x1YJ5zQWZ0w=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@6.5.1/mode/clike/clike.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@6.5.1/mode/javascript/javascript.js"></script>
+  <script>
+    const editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
+      mode: 'javascript',
+      theme: 'monokai',
+      lineNumbers: true,
+      lineWrapping: true
+    });
+  </script>
 </body>
 </html>
