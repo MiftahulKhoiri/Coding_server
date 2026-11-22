@@ -137,14 +137,17 @@ gradle.taskGraph.whenReady {
 
 // CodeMirror/xterm assets are generated from web_editor. A clean checkout may not
 // contain android/app/src/main/assets/web/*.html, which leaves the Android WebView blank.
-// Build them automatically when missing; CI already performs npm ci + npm run build.
+// Rebuild if files are absent OR empty/truncated (an empty editor.html was found in main).
 val webEditorDir = rootProject.projectDir.parentFile.resolve("web_editor")
 val webEditorAssets = projectDir.resolve("src/main/assets/web")
 val buildWebEditorAssets = tasks.register("buildWebEditorAssets") {
     doLast {
         val editorHtml = webEditorAssets.resolve("editor.html")
         val terminalHtml = webEditorAssets.resolve("terminal.html")
-        if (!editorHtml.isFile || !terminalHtml.isFile) {
+        // Generated CodeMirror/xterm HTML includes large self-contained JS bundles.
+        // Empty or tiny files are not valid editor assets even if they exist.
+        if (!editorHtml.isFile || editorHtml.length() < 10_000 ||
+            !terminalHtml.isFile || terminalHtml.length() < 10_000) {
             if (!webEditorDir.resolve("node_modules/esbuild").exists()) {
                 exec {
                     workingDir(webEditorDir)
@@ -156,8 +159,9 @@ val buildWebEditorAssets = tasks.register("buildWebEditorAssets") {
                 commandLine("npm", "run", "build")
             }
         }
-        if (!editorHtml.isFile || !terminalHtml.isFile) {
-            throw GradleException("Aset WebView editor/terminal tidak berhasil dibuat: ${webEditorAssets.absolutePath}")
+        if (!editorHtml.isFile || editorHtml.length() < 10_000 ||
+            !terminalHtml.isFile || terminalHtml.length() < 10_000) {
+            throw GradleException("Aset WebView editor/terminal tidak lengkap atau kosong: ${webEditorAssets.absolutePath}")
         }
     }
 }
