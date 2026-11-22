@@ -226,8 +226,8 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                 Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium,
             )
         }
-        Box(Modifier.fillMaxWidth().weight(1f, fill = true)) {
-            AndroidView(factory = { editor.detach(); editor.webView }, modifier = Modifier.fillMaxSize())
+        Box(Modifier.fillMaxWidth().weight(1f, fill = true).heightIn(min = 300.dp)) {
+            AndroidView(factory = { editor.detach(); editor.webView }, modifier = Modifier.fillMaxSize().heightIn(min = 300.dp))
         }
     }
 
