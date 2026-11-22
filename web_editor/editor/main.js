@@ -24,7 +24,7 @@ import { detectLanguage, languageExtension, SYMBOL_PATTERNS } from "./languages.
 EditorView.EDIT_CONTEXT = false;
 
 const bridge = window.AndroidBridge || {
-  onReady() {}, onChange() {}, onSave() {}, onRun() {}, onCursor() {}, onLog(m) { console.log(m); },
+  onReady() {}, onChange() {}, onSave() {}, onRun() {}, onCursor() {},
 };
 
 const langConf = new Compartment();
