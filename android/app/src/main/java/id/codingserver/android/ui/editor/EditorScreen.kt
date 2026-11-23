@@ -216,7 +216,8 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                 }
             }
         }
-        loadError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }if (tabs.isEmpty()) {
+        loadError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
+        if (tabs.isEmpty()) {
             Text(
                 if (project == null) "Belum ada proyek terbuka. Pilih proyek di menu Proyek dulu."
                 else "Belum ada file terbuka. Tekan ikon + (File baru) atau buka file dari Project Explorer.",
