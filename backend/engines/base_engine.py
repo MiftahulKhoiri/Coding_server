@@ -9,6 +9,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 
 class EngineStatus:
@@ -26,6 +27,9 @@ class Step:
     env: dict[str, str] = field(default_factory=dict)
     address_space_limit: bool = False
     network: bool = False
+    # Bila ada: argv dihitung tepat sebelum langkah dijalankan (mis. binary hasil make/cmake baru
+    # diketahui setelah build). Boleh melempar AppError dengan pesan yang jelas.
+    resolve: Callable[[], list[str]] | None = None
 
 
 @dataclass
@@ -137,6 +141,10 @@ class BaseEngine(ABC):
 
             raise ServiceUnavailable(f"Engine {self.name} belum terpasang di server (NOT_INSTALLED)", code="engine_unavailable")
         return exe
+
+    def prepare_context(self, ctx: EngineContext) -> EngineContext:
+        """Kesempatan engine menyesuaikan konteks (mis. build dir per proyek) sebelum langkah dibuat."""
+        return ctx
 
     @abstractmethod
     def build_steps(self, ctx: EngineContext) -> list[Step]: ...

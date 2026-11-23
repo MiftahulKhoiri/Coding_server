@@ -219,6 +219,8 @@ class ExecutionService:
             build_timeout=self.s.build_timeout, memory_mb=self.s.memory_limit_mb, network=self.s.sandbox_network,
         )
         try:
+            ctx = engine.prepare_context(ctx)
+            ctx.build_dir.mkdir(parents=True, exist_ok=True)
             steps = engine.build_steps(ctx) if action == "build" else engine.run_steps(ctx)
         except AppError:
             self.jobs.pop(job.id, None)
@@ -258,6 +260,14 @@ class ExecutionService:
                     break
                 if job.status != "RUNNING":
                     await self._set_status(job, "RUNNING")
+                if step.resolve is not None:
+                    try:
+                        step.argv = step.resolve()
+                    except AppError as e:
+                        job.error = e.message
+                        final_status = "FAILED"
+                        break
+                    job.command = [s.argv for s in steps]
                 await self._emit(job, {"type": "phase", "phase": step.phase, "index": i, "argv": step.argv})
                 spec = SandboxSpec(
                     cwd=step.cwd,
@@ -294,7 +304,7 @@ class ExecutionService:
                     final_status = "FAILED"
                     break
             if job.error:
-                await self._output(job, "stderr", f"\\n[{job.error}]\\n")
+                await self._output(job, "stderr", f"\n[{job.error}]\n")
             await self._finish(job, final_status)
         except asyncio.CancelledError:
             # Cancellation after acquiring must still terminate any child process
