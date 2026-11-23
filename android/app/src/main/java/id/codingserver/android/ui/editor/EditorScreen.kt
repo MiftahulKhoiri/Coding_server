@@ -118,7 +118,6 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                     if (f.binary || f.content == null) {
                         loadError = "File tidak dapat ditampilkan sebagai teks: " + tab.path
                     } else {
-                        android.util.Log.d("CodingServerEditor", "File diterima: " + tab.path + ", " + f.content.length + " karakter")
                         editor.openTab(tab.id, f.content, f.name)
                         vm.updateTab(tab.id) { it.copy(sha256 = f.sha256, language = f.language, dirty = false) }
                         loadError = null

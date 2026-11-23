@@ -32,7 +32,7 @@ sealed interface EditorEvent {
 
 /** Jembatan JS -> Kotlin. Dipanggil dari thread WebView, diteruskan lewat flow. */
 class EditorBridge(private val c: EditorController) {
-    @JavascriptInterface fun onReady() { c.diagnostic.value = "WebView: JavaScript editor siap"; c.ready.complete(Unit) }
+    @JavascriptInterface fun onReady() { c.ready.complete(Unit) }
     @JavascriptInterface fun onChange(tabId: String?, dirty: Boolean) { tabId?.let { c.events.tryEmit(EditorEvent.Changed(it, dirty)) } }
     @JavascriptInterface fun onSave(tabId: String?) { tabId?.let { c.events.tryEmit(EditorEvent.SaveRequested(it)) } }
     @JavascriptInterface fun onRun(tabId: String?) { tabId?.let { c.events.tryEmit(EditorEvent.RunRequested(it)) } }
@@ -50,7 +50,6 @@ class EditorController(context: Context) {
     val eventsFlow: SharedFlow<EditorEvent> get() = events
     val cursor = MutableStateFlow(1 to 1)
     val cursorFlow: StateFlow<Pair<Int, Int>> get() = cursor
-    val diagnostic = MutableStateFlow("WebView: menunggu JavaScript editor…")
     private val main = Handler(Looper.getMainLooper())
 
     // Pakai context Activity (bukan applicationContext): koneksi keyboard (IME) WebView lebih andal.
@@ -73,21 +72,12 @@ class EditorController(context: Context) {
         settings.allowFileAccess = false
         settings.allowContentAccess = false
         settings.builtInZoomControls = false
-        webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(message: android.webkit.ConsoleMessage?): Boolean {
-                message?.let {
-                    val detail = "${it.message()} (${it.lineNumber()})"
-                    
-                }
-                return true
-            }
-        }
+        webChromeClient = WebChromeClient()
         webViewClient = object : WebViewClient() {
             // Editor tidak boleh membuka halaman lain.
             override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?) = true
 
-            // Terapkan fallback rendering langsung dari native WebView, tidak bergantung
-            // pada CSS yang tertanam di bundle editor. Ini membantu diagnosis teks putih/kosong.
+            // Paksa teks editor terlihat walau CSS bundel gagal termuat (mencegah editor putih/kosong).
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 view?.evaluateJavascript("""
@@ -107,7 +97,6 @@ class EditorController(context: Context) {
         }
         addJavascriptInterface(EditorBridge(this@EditorController), "AndroidBridge")
         loadUrl("file:///android_asset/web/editor.html")
-        android.util.Log.d("CodingServerEditor", "WebView loadUrl editor.html dipanggil")
     }
 
     fun detach() { (webView.parent as? ViewGroup)?.removeView(webView) }
@@ -124,7 +113,7 @@ class EditorController(context: Context) {
         if (raw == null || raw == "null") null else runCatching { ApiJson.decodeFromString(String.serializer(), raw) }.getOrNull()
 
     suspend fun hasTab(id: String) = eval("CS.hasTab(${q(id)})") == "true"
-    suspend fun openTab(id: String, text: String, filename: String) { val result = eval("CS.openTab(${q(id)}, ${q(text)}, ${q(filename)})"); diagnostic.value = "Editor: file ${filename} diterima (${text.length} karakter), hasil JS=$result"; android.util.Log.d("CodingServerEditor", diagnostic.value) }
+    suspend fun openTab(id: String, text: String, filename: String) { eval("CS.openTab(${q(id)}, ${q(text)}, ${q(filename)})") }
     suspend fun switchTab(id: String) = eval("CS.switchTab(${q(id)})") == "true"
     suspend fun closeTab(id: String) { eval("CS.closeTab(${q(id)})") }
     suspend fun renameTab(old: String, new: String, filename: String) { eval("CS.renameTab(${q(old)}, ${q(new)}, ${q(filename)})") }
