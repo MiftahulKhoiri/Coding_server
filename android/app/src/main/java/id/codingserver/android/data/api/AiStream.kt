@@ -23,6 +23,8 @@ sealed interface AiEvent {
     data class Reasoning(val text: String) : AiEvent
     data class Delta(val text: String) : AiEvent
     data class Done(val messageId: Int, val seconds: Double) : AiEvent
+    /** Perubahan file yang diusulkan/diterapkan AI dari jawaban terakhir. */
+    data class Edits(val messageId: Int, val items: List<AIProposalItem>) : AiEvent
     data class Error(val code: String, val message: String) : AiEvent
     data object Stopped : AiEvent
 }
@@ -34,6 +36,8 @@ data class AiRequest(
     val files: List<String> = emptyList(),
     val editorText: String? = null,
     val editorName: String? = null,
+    /** Terapkan langsung editan file dari jawaban AI (tetap tercatat & bisa dibatalkan). */
+    val autoApply: Boolean = false,
 )
 
 /** Chat AI streaming lewat WebSocket /ws/ai/chat (satu koneksi per pertanyaan). */
@@ -51,6 +55,7 @@ class AiStream(private val client: ApiClient) {
                     if (req.files.isNotEmpty()) put("files", kotlinx.serialization.json.JsonArray(req.files.map { JsonPrimitive(it) }))
                     req.editorText?.let { put("editor_text", it) }
                     req.editorName?.let { put("editor_name", it) }
+                    if (req.autoApply) put("auto_apply", true)
                 }
                 webSocket.send(payload.toString())
             }
@@ -66,6 +71,11 @@ class AiStream(private val client: ApiClient) {
                     "done" -> AiEvent.Done(o["message_id"]?.jsonPrimitive?.intOrNull ?: 0, o["seconds"]?.jsonPrimitive?.doubleOrNull ?: 0.0)
                     "error" -> AiEvent.Error(str("code"), str("message"))
                     "stopped" -> AiEvent.Stopped
+                    "edits" -> runCatching {
+                        AiEvent.Edits(o["message_id"]?.jsonPrimitive?.intOrNull ?: 0,
+                                      ApiJson.decodeFromJsonElement(kotlinx.serialization.builtins.ListSerializer(AIProposalItem.serializer()),
+                                                                    o["items"] ?: kotlinx.serialization.json.JsonArray(emptyList())))
+                    }.getOrNull()
                     else -> null
                 }
                 if (ev != null) trySend(ev)

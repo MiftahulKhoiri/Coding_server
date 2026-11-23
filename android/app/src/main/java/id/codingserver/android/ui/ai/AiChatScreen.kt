@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -36,7 +37,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -55,6 +58,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
+import id.codingserver.android.data.api.AIProposalItem
 import id.codingserver.android.data.api.AIStatus
 import id.codingserver.android.data.api.apiCall
 import id.codingserver.android.ui.AppViewModel
@@ -111,6 +115,25 @@ fun AiChatScreen(vm: AppViewModel, editor: EditorController, onOpenModels: () ->
         if (ui.messages.isNotEmpty()) listState.animateScrollToItem(ui.messages.size - 1)
     }
 
+    // File diubah AI / dibatalkan -> muat ulang tab editor yang membuka file itu (kecuali ada ketikan belum disimpan).
+    LaunchedEffect(Unit) {
+        chat.changed.collect { ch ->
+            val c = vm.client.value ?: return@collect
+            for (path in ch.paths) {
+                val tab = vm.tabs.value.firstOrNull { it.projectId == ch.projectId && it.path == path } ?: continue
+                if (!editor.hasTab(tab.id)) continue
+                if (editor.isDirty(tab.id)) { vm.toast("$path punya perubahan belum disimpan — tidak dimuat ulang"); continue }
+                apiCall { c.api.read(ch.projectId, path) }.onSuccess { f ->
+                    if (!f.binary && f.content != null) {
+                        editor.setDoc(tab.id, f.content, true)
+                        vm.updateTab(tab.id) { it.copy(sha256 = f.sha256, dirty = false) }
+                    }
+                }
+            }
+            vm.toast(if (ch.paths.size == 1) "${ch.paths[0]} diperbarui" else "${ch.paths.size} file diperbarui")
+        }
+    }
+
     fun insertToEditor(code: String) {
         if (active == null) { vm.toast("Buka file di editor dulu"); return }
         scope.launch { editor.insert(code) }
@@ -139,15 +162,27 @@ fun AiChatScreen(vm: AppViewModel, editor: EditorController, onOpenModels: () ->
             if (ui.messages.isEmpty()) item {
                 Text(
                     "Tanya apa saja tentang kode. Centang \"Sertakan file editor\" agar AI membaca file yang sedang dibuka. " +
-                        "Blok kode di jawaban bisa disalin atau langsung disisipkan ke editor.",
+                        "Bila proyek terbuka, AI bisa langsung mengubah file: perubahan muncul sebagai kartu dengan diff " +
+                        "(Terapkan / Tolak / Batalkan), atau diterapkan otomatis bila sakelar di bawah aktif.",
                     Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium,
                 )
             }
-            itemsIndexed(ui.messages) { _, m -> MessageBubble(m, onCopy = { clipboard.setText(AnnotatedString(it)); vm.toast("Disalin") },
-                                                               onInsert = ::insertToEditor) }
+            itemsIndexed(ui.messages) { _, m ->
+                MessageBubble(m, onCopy = { clipboard.setText(AnnotatedString(it)); vm.toast("Disalin") }, onInsert = ::insertToEditor)
+                m.edits.forEach { e ->
+                    EditCard(e, busy = e.id in ui.pending,
+                             onApply = { chat.decide(e, true) { vm.toast(it) } },
+                             onReject = { chat.decide(e, false) { vm.toast(it) } },
+                             onRevert = { chat.revert(e) { vm.toast(it) } })
+                }
+            }
         }
         // input
         Column(Modifier.fillMaxWidth().padding(6.dp)) {
+            if (project != null) Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Terapkan editan AI otomatis ke ${project?.name}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Switch(ui.autoApply, { chat.setAutoApply(it) })
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = attach && active != null, enabled = active != null, onCheckedChange = { attach = it })
                 Text(if (active != null) "Sertakan file editor (${active.name})" else "Sertakan file editor (tidak ada file terbuka)",
@@ -176,7 +211,7 @@ fun AiChatScreen(vm: AppViewModel, editor: EditorController, onOpenModels: () ->
                 if (ui.conversations.isEmpty()) item { Text("Belum ada percakapan") }
                 itemsIndexed(ui.conversations) { _, c ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f).clickable { chat.open(c.id); showHistory = false }.padding(vertical = 6.dp)) {
+                        Column(Modifier.weight(1f).clickable { chat.open(c.id, project?.id); showHistory = false }.padding(vertical = 6.dp)) {
                             Text(c.title, maxLines = 1)
                             Text("${c.messages} pesan · ${c.model ?: "-"} · ${formatTime(c.updated_at)}", style = MaterialTheme.typography.labelSmall)
                         }
@@ -235,6 +270,64 @@ private fun MessageBubble(m: ChatMessage, onCopy: (String) -> Unit, onInsert: (S
                 }
             }
             if (!mine && m.model.isNotBlank() && !m.streaming) Text(m.model, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        }
+    }
+}
+
+/** Kartu perubahan file usulan AI: diff + aksi sesuai status. */
+@Composable
+private fun EditCard(e: AIProposalItem, busy: Boolean, onApply: () -> Unit, onReject: () -> Unit, onRevert: () -> Unit) {
+    var showDiff by remember(e.id) { mutableStateOf(e.status == "pending") }
+    val (label, color) = when (e.status) {
+        "pending" -> "menunggu" to WarnAmber
+        "approved" -> "diterapkan" to OkGreen
+        "rejected" -> "ditolak" to Color.Gray
+        "reverted" -> "dibatalkan" to Color.Gray
+        else -> "gagal" to ErrRed
+    }
+    Column(
+        Modifier.fillMaxWidth().padding(start = 12.dp)
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f), RoundedCornerShape(10.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).clickable(enabled = !e.diff.isNullOrBlank()) { showDiff = !showDiff }) {
+                Text((if (e.new_file) "✚ " else "✎ ") + e.path, style = MaterialTheme.typography.labelLarge, maxLines = 2)
+                if (e.status != "failed") Text("+${e.additions}  −${e.deletions}" + if (e.new_file) "  · file baru" else "",
+                                                 style = MaterialTheme.typography.labelSmall)
+            }
+            Text(label, color = color, style = MaterialTheme.typography.labelMedium)
+        }
+        if (!e.error.isNullOrBlank()) Text(e.error, color = ErrRed, style = MaterialTheme.typography.bodySmall)
+        if (showDiff && !e.diff.isNullOrBlank()) DiffView(e.diff)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (e.status) {
+                "pending" -> {
+                    androidx.compose.material3.Button(onClick = onApply, enabled = !busy) { Text("Terapkan") }
+                    OutlinedButton(onClick = onReject, enabled = !busy) { Text("Tolak") }
+                }
+                "approved" -> OutlinedButton(onClick = onRevert, enabled = !busy) { Text("Batalkan perubahan") }
+            }
+            if (!e.diff.isNullOrBlank()) TextButton(onClick = { showDiff = !showDiff }) { Text(if (showDiff) "Sembunyikan diff" else "Lihat diff") }
+        }
+    }
+}
+
+@Composable
+private fun DiffView(diff: String) {
+    Column(
+        Modifier.fillMaxWidth().heightIn(max = 320.dp).background(Color(0xFF1E1E1E), RoundedCornerShape(6.dp))
+            .verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(6.dp),
+    ) {
+        diff.lineSequence().filterNot { it.startsWith("---") || it.startsWith("+++") }.forEach { line ->
+            val c = when {
+                line.startsWith("+") -> Color(0xFF81C784)
+                line.startsWith("-") -> Color(0xFFEF9A9A)
+                line.startsWith("@@") -> Color(0xFF64B5F6)
+                else -> Color(0xFFBDBDBD)
+            }
+            Text(line.ifEmpty { " " }, style = Mono, color = c, softWrap = false)
         }
     }
 }

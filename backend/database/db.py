@@ -9,7 +9,18 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Kolom tambahan (migrasi ringan, idempoten): tabel -> [(kolom, definisi)]
+MIGRATIONS: dict[str, list[tuple[str, str]]] = {
+    "ai_proposals": [
+        ("conversation_id", "INTEGER"), ("message_id", "INTEGER"),
+        ("base_sha256", "TEXT"), ("new_sha256", "TEXT"), ("old_content", "TEXT"),
+        ("existed", "INTEGER NOT NULL DEFAULT 1"), ("diff", "TEXT NOT NULL DEFAULT ''"),
+        ("additions", "INTEGER NOT NULL DEFAULT 0"), ("deletions", "INTEGER NOT NULL DEFAULT 0"),
+        ("error", "TEXT NOT NULL DEFAULT ''"),
+    ],
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -115,8 +126,17 @@ class Database:
         self._local = threading.local()
         with self._lock:
             self._conn().executescript(SCHEMA)
+            self._migrate()
         with self.tx() as c:
             c.execute("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)", (str(SCHEMA_VERSION),))
+
+    def _migrate(self) -> None:
+        conn = self._conn()
+        for table, cols in MIGRATIONS.items():
+            have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            for name, decl in cols:
+                if name not in have:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
 
     def _conn(self) -> sqlite3.Connection:
         conn = getattr(self._local, "conn", None)

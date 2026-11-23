@@ -363,4 +363,4 @@ class AIProposal(BaseModel):
 
 class AIDecision(BaseModel):
     project_id: str
-    approve: bool
+    approve: bool = True

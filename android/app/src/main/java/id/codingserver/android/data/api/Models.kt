@@ -228,4 +228,13 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class AIConversationDetail(val id: Int, val title: String = "", val messages: List<AIMessage> = emptyList())
 @Serializable data class AIConversationIn(val title: String = "Percakapan baru")
 @Serializable data class AIChat(val messages: List<Map<String, String>>, val project_id: String? = null, val files: List<String> = emptyList())
+/** Usulan perubahan file dari AI (tanpa isi penuh; cukup diff). status: pending|approved|rejected|reverted|failed */
+@Serializable data class AIProposalItem(
+    val id: Int, val path: String, val action: String = "write", val status: String = "pending",
+    val diff: String? = "", val additions: Int = 0, val deletions: Int = 0, val error: String? = "",
+    val new_file: Boolean = false, val message_id: Int? = null, val conversation_id: Int? = null,
+)
+@Serializable data class AIProposalList(val proposals: List<AIProposalItem> = emptyList())
+@Serializable data class AIDecisionIn(val project_id: String, val approve: Boolean = true)
+@Serializable data class AIDecisionResult(val id: Int, val status: String, val proposal: AIProposalItem? = null)
 @Serializable data class AIReply(val content: String = "", val reasoning: String = "", val model: String? = null)

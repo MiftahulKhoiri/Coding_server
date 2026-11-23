@@ -14,6 +14,7 @@ Konsep (seperti ai_asisten):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import secrets
 import time
@@ -25,6 +26,7 @@ from backend.core.exceptions import AppError, Conflict, Forbidden, NotFound
 from backend.core.logging import get_logger
 from backend.core.permissions import intersect_for_ai
 from backend.database.db import Database
+from backend.services.ai_edits import EDIT_PROTOCOL, Edit, EditError, apply_replace, looks_truncated, parse_edits, unified_diff
 from backend.services.ai_providers import PRESETS, Provider, make_provider, normalize_base
 from backend.services.file_service import FileService
 from backend.services.secret_store import SecretStore
@@ -325,6 +327,10 @@ class AIService:
     def _context_block(self, project_dir: Path | None, files: list[str] | None, editor_text: str | None,
                        editor_name: str | None) -> str:
         parts = []
+        if project_dir is not None:
+            listing = self._project_listing(project_dir)
+            if listing:
+                parts.append("### Struktur proyek (path relatif)\n" + listing)
         if project_dir is not None and files:
             for rel in files[:10]:
                 try:
@@ -337,11 +343,27 @@ class AIService:
             parts.append(f"### File di editor: {editor_name or 'tanpa nama'}\n```\n{editor_text[:30000]}\n```")
         return "\n\n".join(parts)
 
-    def build_messages(self, conv_id: int | None, content: str, context: str) -> list[dict]:
+    def _project_listing(self, root: Path, limit: int = 300) -> str:
+        skip = {".git", "node_modules", "__pycache__", ".venv", "venv", "build", "dist", ".gradle", "target", "bin", "obj"}
+        out: list[str] = []
+        for p in sorted(root.rglob("*")):
+            rel = p.relative_to(root)
+            if any(part in skip or part.startswith(".cs_") for part in rel.parts) or p.is_dir() or p.is_symlink():
+                continue
+            out.append(str(rel))
+            if len(out) >= limit:
+                out.append("…")
+                break
+        return "\n".join(out)
+
+    def build_messages(self, conv_id: int | None, content: str, context: str, edit_mode: bool = False) -> list[dict]:
         conf = self.settings()
         msgs: list[dict] = []
-        if conf.get("system_prompt"):
-            msgs.append({"role": "system", "content": conf["system_prompt"]})
+        system = conf.get("system_prompt") or ""
+        if edit_mode:
+            system = (system + "\n\n" + EDIT_PROTOCOL).strip()
+        if system:
+            msgs.append({"role": "system", "content": system})
         history: list[dict] = []
         if conv_id:
             n = int(conf.get("history_messages") or 20)
@@ -356,8 +378,12 @@ class AIService:
 
     async def chat_stream(self, user: dict, conv_id: int | None, content: str, *, project_dir: Path | None = None,
                           files: list[str] | None = None, editor_text: str | None = None,
-                          editor_name: str | None = None) -> AsyncIterator[dict]:
-        """Hasil: {type: conversation|start|reasoning|delta|done|error}. Pesan & jawaban disimpan."""
+                          editor_name: str | None = None, project_id: str | None = None,
+                          auto_apply: bool = False) -> AsyncIterator[dict]:
+        """Hasil: {type: conversation|start|reasoning|delta|edits|done|error}. Pesan & jawaban disimpan.
+
+        Bila ada proyek dan AI punya hak tulis, jawaban yang berisi blok file= diubah menjadi proposal
+        (event 'edits'); dengan auto_apply proposal langsung diterapkan (tetap tercatat & bisa dibatalkan)."""
         if "read" not in intersect_for_ai(user["perms"]):
             raise Forbidden("AI tidak punya hak baca untuk pengguna ini")
         content = (content or "").strip()
@@ -369,8 +395,9 @@ class AIService:
         else:
             conv_id = self.create_conversation(user, content.splitlines()[0][:60])["id"]
             yield {"type": "conversation", "id": conv_id}
+        edit_mode = project_dir is not None and project_id is not None and "write" in intersect_for_ai(user["perms"])
         context = self._context_block(project_dir, files, editor_text, editor_name)
-        messages = self.build_messages(conv_id, content, context)
+        messages = self.build_messages(conv_id, content, context, edit_mode=edit_mode)
         self._add_message(conv_id, "user", content)
         self.db.execute("UPDATE ai_conversations SET connection_id=?, model=? WHERE id=?", (row["id"], model, conv_id))
         conf = self.settings()
@@ -395,6 +422,10 @@ class AIService:
             text = "(Model hanya mengirim proses berpikir tanpa jawaban akhir — coba naikkan max_tokens.)"
         mid = self._add_message(conv_id, "assistant", text, "".join(reasoning), model)
         self.state["last_activity"] = time.time()
+        if edit_mode:
+            items = self.proposals_from_answer(user, project_id, project_dir, text, conv_id, mid, auto_apply=auto_apply)
+            if items:
+                yield {"type": "edits", "message_id": mid, "items": items}
         yield {"type": "done", "message_id": mid, "conversation_id": conv_id, "model": model,
                "seconds": round(time.time() - started, 2)}
 
@@ -419,41 +450,171 @@ class AIService:
         return {"content": "".join(out), "reasoning": "".join(reasoning), "model": model}
 
     # ---------- proposal perubahan (agent) ----------
-    def propose(self, user: dict, project_id: str, path: str, action: str, content: str | None, reason: str) -> dict:
+    @staticmethod
+    def public_proposal(row: dict) -> dict:
+        """Tanpa isi file penuh (bisa besar); klien cukup melihat diff."""
+        return {k: row.get(k) for k in ("id", "project_id", "path", "action", "reason", "status", "created_at",
+                                        "decided_at", "conversation_id", "message_id", "diff", "additions",
+                                        "deletions", "error")} | {"new_file": not row.get("existed", 1)}
+
+    def _insert_proposal(self, **f) -> dict:
+        f.setdefault("created_at", time.time())
+        cols = ", ".join(f)
+        cur = self.db.execute(f"INSERT INTO ai_proposals({cols}) VALUES({', '.join('?' * len(f))})", tuple(f.values()))
+        return self.db.one("SELECT * FROM ai_proposals WHERE id=?", (cur.lastrowid,))
+
+    def _current(self, root: Path, path: str) -> tuple[bool, str, str | None]:
+        """(ada?, isi, sha256) file saat ini."""
+        p = self.files.resolve(root, path, allow_root=False)
+        if not p.exists():
+            return False, "", None
+        f = self.files.read(root, path)
+        if f.get("binary"):
+            raise AppError("File biner tidak bisa diubah AI", code="binary_file")
+        return True, f["content"], f["sha256"]
+
+    def propose_edit(self, user: dict, project_id: str, root: Path, edit: Edit, conv_id: int | None = None,
+                     message_id: int | None = None, reason: str = "") -> dict:
+        """Hitung isi baru dari editan AI -> proposal 'pending' (atau 'failed' + alasan bila tak bisa diterapkan)."""
+        base = {"project_id": project_id, "user_id": user["id"], "action": "write", "reason": reason[:500],
+                "conversation_id": conv_id, "message_id": message_id}
+        try:
+            path = FileService.normalize(edit.path)
+            existed, old, sha = self._current(root, path)
+            if edit.kind == "replace":
+                if not existed and any(s.strip() for s, _ in edit.blocks):
+                    raise EditError("File belum ada, padahal blok SEARCH merujuk isi lama")
+                new = apply_replace(old, edit.blocks)
+            else:
+                new = edit.content
+                if existed and looks_truncated(new) and len(new) < len(old) * 0.8:
+                    raise EditError("Isi file dari AI tampak disingkat (\"... kode lain tetap sama\"). "
+                                    "Minta AI menulis isi lengkap atau memakai blok SEARCH/REPLACE.")
+            if existed and new == old:
+                raise EditError("Tidak ada perubahan terhadap isi file saat ini")
+            diff, adds, dels = unified_diff(path, old, new)
+            return self._insert_proposal(**base, path=path, content=new, status="pending", base_sha256=sha,
+                                         old_content=old if existed else None, existed=1 if existed else 0,
+                                         diff=diff, additions=adds, deletions=dels)
+        except (EditError, AppError) as e:
+            msg = e.message if isinstance(e, AppError) else str(e)
+            return self._insert_proposal(**base, path=edit.path[:500], content=None, status="failed", error=msg)
+
+    def proposals_from_answer(self, user: dict, project_id: str, root: Path, answer: str, conv_id: int | None,
+                              message_id: int | None, auto_apply: bool = False) -> list[dict]:
+        edits = parse_edits(answer)
+        # gabungkan beberapa editan ke file yang sama menjadi satu proposal (berurutan)
+        merged: dict[str, Edit] = {}
+        for e in edits:
+            prev = merged.get(e.path)
+            if prev is None:
+                merged[e.path] = e
+            elif e.kind == "full":
+                merged[e.path] = e
+            elif prev.kind == "replace":
+                prev.blocks.extend(e.blocks)
+            else:  # full lalu replace: terapkan replace ke isi full
+                try:
+                    prev.content = apply_replace(prev.content, e.blocks)
+                except EditError:
+                    pass
+        items = []
+        for e in merged.values():
+            row = self.propose_edit(user, project_id, root, e, conv_id, message_id, reason="dari jawaban AI")
+            if auto_apply and row["status"] == "pending":
+                try:
+                    self.decide(user, project_id, root, row["id"], True)
+                except AppError as err:
+                    self.db.execute("UPDATE ai_proposals SET status='failed', error=? WHERE id=?", (err.message, row["id"]))
+                row = self.db.one("SELECT * FROM ai_proposals WHERE id=?", (row["id"],))
+            items.append(self.public_proposal(row))
+        if items:
+            self.db.audit("ai_edits", user=user, target=project_id,
+                          detail={"message_id": message_id, "files": [i["path"] for i in items],
+                                  "status": [i["status"] for i in items]})
+        return items
+
+    def propose(self, user: dict, project_id: str, path: str, action: str, content: str | None, reason: str,
+                root: Path | None = None) -> dict:
         perms = intersect_for_ai(user["perms"])
         if action not in ("write", "delete"):
             raise AppError("Aksi harus write/delete", code="bad_action")
         if action == "write" and "write" not in perms:
             raise Forbidden("AI tidak punya hak tulis")
+        if action == "delete" and "delete" not in perms:
+            raise Forbidden("AI tidak punya hak hapus")
         path = FileService.normalize(path)
-        cur = self.db.execute(
-            "INSERT INTO ai_proposals(project_id, user_id, path, action, content, reason, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
-            (project_id, user["id"], path, action, content, reason, "pending", time.time()),
-        )
-        return self.db.one("SELECT * FROM ai_proposals WHERE id=?", (cur.lastrowid,))
+        if action == "write" and root is not None:
+            row = self.propose_edit(user, project_id, root, Edit(path, "full", content=content or ""), reason=reason)
+            if row["status"] == "failed":
+                raise AppError(row["error"], code="bad_edit")
+            return row
+        existed, old, sha = self._current(root, path) if root is not None else (True, None, None)
+        return self._insert_proposal(project_id=project_id, user_id=user["id"], path=path, action=action,
+                                     content=content, reason=reason, status="pending", base_sha256=sha,
+                                     old_content=old, existed=1 if existed else 0)
 
-    def proposals(self, project_id: str, status: str | None = None) -> list[dict]:
+    def proposals(self, project_id: str, status: str | None = None, conversation_id: int | None = None) -> list[dict]:
+        sql, args = "SELECT * FROM ai_proposals WHERE project_id=?", [project_id]
         if status:
-            return self.db.all("SELECT * FROM ai_proposals WHERE project_id=? AND status=? ORDER BY id DESC", (project_id, status))
-        return self.db.all("SELECT * FROM ai_proposals WHERE project_id=? ORDER BY id DESC LIMIT 200", (project_id,))
+            sql += " AND status=?"; args.append(status)
+        if conversation_id is not None:
+            sql += " AND conversation_id=?"; args.append(conversation_id)
+        return [self.public_proposal(r) for r in self.db.all(sql + " ORDER BY id DESC LIMIT 200", tuple(args))]
 
-    def decide(self, user: dict, project_id: str, project_dir: Path, proposal_id: int, approve: bool) -> dict:
+    def _proposal(self, project_id: str, proposal_id: int) -> dict:
         row = self.db.one("SELECT * FROM ai_proposals WHERE id=? AND project_id=?", (proposal_id, project_id))
         if not row:
             raise NotFound("Proposal tidak ditemukan")
+        return row
+
+    def decide(self, user: dict, project_id: str, project_dir: Path, proposal_id: int, approve: bool) -> dict:
+        row = self._proposal(project_id, proposal_id)
         if row["status"] != "pending":
-            raise Conflict("Proposal sudah diputuskan")
+            raise Conflict(f"Proposal sudah {row['status']}")
         result = None
         if approve:
+            note = f"AI #{proposal_id}: {(row['reason'] or '')[:100]}"
             if row["action"] == "write":
                 if "write" not in user["perms"]:
                     raise Forbidden("Tidak punya hak tulis")
-                result = self.files.write(project_id, project_dir, row["path"], row["content"] or "", actor=user,
-                                          actor_type="ai", note=f"proposal AI #{proposal_id}: {row['reason'][:100]}")
+                existed = bool(row.get("existed", 1))
+                try:
+                    result = self.files.write(project_id, project_dir, row["path"], row["content"] or "", actor=user,
+                                              actor_type="ai", note=note, expected_sha256=row.get("base_sha256"),
+                                              create_only=not existed)
+                except Conflict as e:
+                    raise Conflict("File sudah berubah sejak AI membuat usulan ini. Minta AI mengulang dengan isi terbaru.",
+                                   code="proposal_stale") from e
+                self.db.execute("UPDATE ai_proposals SET new_sha256=? WHERE id=?", (result["sha256"], proposal_id))
             else:
                 if "delete" not in user["perms"]:
                     raise Forbidden("Tidak punya hak hapus")
                 self.files.delete(project_id, project_dir, row["path"], actor=user, actor_type="ai")
-        self.db.execute("UPDATE ai_proposals SET status=?, decided_at=? WHERE id=?",
-                        ("approved" if approve else "rejected", time.time(), proposal_id))
-        return {"id": proposal_id, "status": "approved" if approve else "rejected", "result": result}
+        status = "approved" if approve else "rejected"
+        self.db.execute("UPDATE ai_proposals SET status=?, decided_at=? WHERE id=?", (status, time.time(), proposal_id))
+        return {"id": proposal_id, "status": status, "result": result,
+                "proposal": self.public_proposal(self._proposal(project_id, proposal_id))}
+
+    def revert(self, user: dict, project_id: str, project_dir: Path, proposal_id: int) -> dict:
+        """Batalkan editan AI yang sudah diterapkan: kembalikan isi lama (atau hapus file baru)."""
+        row = self._proposal(project_id, proposal_id)
+        if row["status"] != "approved" or row["action"] != "write":
+            raise Conflict("Hanya editan AI yang sudah diterapkan yang bisa dibatalkan")
+        if "write" not in user["perms"]:
+            raise Forbidden("Tidak punya hak tulis")
+        p = self.files.resolve(project_dir, row["path"], allow_root=False)
+        current = hashlib.sha256(p.read_bytes()).hexdigest() if p.is_file() else None
+        if row.get("new_sha256") and current != row["new_sha256"]:
+            raise Conflict("File sudah diubah lagi setelah editan AI; pulihkan lewat Riwayat file.", code="revert_conflict")
+        result = None
+        if row.get("existed", 1):
+            result = self.files.write(project_id, project_dir, row["path"], row.get("old_content") or "", actor=user,
+                                      actor_type="user", note=f"batalkan AI #{proposal_id}")
+        elif p.is_file():
+            if "delete" not in user["perms"]:
+                raise Forbidden("Tidak punya hak hapus")
+            self.files.delete(project_id, project_dir, row["path"], actor=user, actor_type="user")
+        self.db.execute("UPDATE ai_proposals SET status='reverted', decided_at=? WHERE id=?", (time.time(), proposal_id))
+        return {"id": proposal_id, "status": "reverted", "result": result,
+                "proposal": self.public_proposal(self._proposal(project_id, proposal_id))}

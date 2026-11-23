@@ -117,4 +117,8 @@ interface CodingApi {
     @GET("api/v1/ai/conversations/{id}") suspend fun aiConversation(@Path("id") id: Int): AIConversationDetail
     @PATCH("api/v1/ai/conversations/{id}") suspend fun aiRenameConversation(@Path("id") id: Int, @Body body: AIConversationIn): AIConversationDetail
     @DELETE("api/v1/ai/conversations/{id}") suspend fun aiDeleteConversation(@Path("id") id: Int): OkResponse
+    @GET("api/v1/ai/proposals") suspend fun aiProposals(@Query("project_id") projectId: String,
+                                                        @Query("conversation_id") conversationId: Int? = null): AIProposalList
+    @POST("api/v1/ai/proposals/{id}/decide") suspend fun aiDecide(@Path("id") id: Int, @Body body: AIDecisionIn): AIDecisionResult
+    @POST("api/v1/ai/proposals/{id}/revert") suspend fun aiRevert(@Path("id") id: Int, @Body body: AIDecisionIn): AIDecisionResult
 }

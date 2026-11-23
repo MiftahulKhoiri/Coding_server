@@ -109,8 +109,9 @@ async def chat(body: AIChat, user: dict = Depends(require("execute")), svc: Serv
 
 @ws_router.websocket("/ws/ai/chat")
 async def ws_chat(ws: WebSocket, token: str | None = None):
-    """Chat streaming. Klien: {type:'send', conversation_id?, content, project_id?, files?, editor_text?, editor_name?}
-    atau {type:'stop'}. Server: {type: conversation|start|reasoning|delta|done|error|stopped}."""
+    """Chat streaming. Klien: {type:'send', conversation_id?, content, project_id?, files?, editor_text?, editor_name?,
+    auto_apply?} atau {type:'stop'}. Server: {type: conversation|start|reasoning|delta|edits|done|error|stopped}.
+    'edits' = daftar proposal perubahan file dari jawaban AI (diterapkan langsung bila auto_apply)."""
     await ws.accept()
     svc: Services = ws.app.state.services
     try:
@@ -126,12 +127,15 @@ async def ws_chat(ws: WebSocket, token: str | None = None):
 
     async def run(msg: dict) -> None:
         try:
-            root = None
+            root, pid = None, None
             if msg.get("project_id"):
-                root = project_dir(svc, str(msg["project_id"]), user)
+                pid = str(msg["project_id"])
+                root = project_dir(svc, pid, user)
+            auto_apply = bool(msg.get("auto_apply")) and "write" in user["perms"]
             async for ev in svc.ai.chat_stream(
                 user, msg.get("conversation_id"), str(msg.get("content", "")), project_dir=root,
                 files=msg.get("files") or None, editor_text=msg.get("editor_text"), editor_name=msg.get("editor_name"),
+                project_id=pid, auto_apply=auto_apply,
             ):
                 await ws.send_json(ev)
         except asyncio.CancelledError:
@@ -165,16 +169,18 @@ async def ws_chat(ws: WebSocket, token: str | None = None):
 # ---------- proposal perubahan file oleh AI ----------
 @router.post("/proposals", status_code=201, summary="AI mengusulkan perubahan file (belum diterapkan)")
 def propose(body: AIProposal, user: dict = Depends(require("read")), svc: Services = Depends(services)):
-    project_dir(svc, body.project_id, user)
+    root = project_dir(svc, body.project_id, user)
     if not intersect_for_ai(user["perms"]):
         raise Forbidden("AI tidak punya hak apa pun untuk pengguna ini")
-    return svc.ai.propose(user, body.project_id, body.path, body.action, body.content, body.reason)
+    return svc.ai.public_proposal(svc.ai.propose(user, body.project_id, body.path, body.action, body.content,
+                                                 body.reason, root=root))
 
 
 @router.get("/proposals")
-def proposals(project_id: str, status: str | None = None, user: dict = Depends(require("read")), svc: Services = Depends(services)):
+def proposals(project_id: str, status: str | None = None, conversation_id: int | None = None,
+              user: dict = Depends(require("read")), svc: Services = Depends(services)):
     project_dir(svc, project_id, user)
-    return {"proposals": svc.ai.proposals(project_id, status)}
+    return {"proposals": svc.ai.proposals(project_id, status, conversation_id)}
 
 
 @router.post("/proposals/{proposal_id}/decide", summary="Setujui/tolak proposal AI (dicatat & bisa di-undo)")
@@ -182,4 +188,12 @@ def decide(proposal_id: int, body: AIDecision, user: dict = Depends(require("wri
     root = project_dir(svc, body.project_id, user)
     res = svc.ai.decide(user, body.project_id, root, proposal_id, body.approve)
     svc.db.audit("ai_proposal_decide", user=user, target=str(proposal_id), detail=res["status"])
+    return res
+
+
+@router.post("/proposals/{proposal_id}/revert", summary="Batalkan editan AI yang sudah diterapkan (kembalikan isi lama)")
+def revert(proposal_id: int, body: AIDecision, user: dict = Depends(require("write")), svc: Services = Depends(services)):
+    root = project_dir(svc, body.project_id, user)
+    res = svc.ai.revert(user, body.project_id, root, proposal_id)
+    svc.db.audit("ai_proposal_revert", user=user, target=str(proposal_id))
     return res
