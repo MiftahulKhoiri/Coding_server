@@ -85,6 +85,7 @@ import id.codingserver.android.ui.settings.SettingsScreen
 import id.codingserver.android.ui.terminal.TerminalController
 import id.codingserver.android.ui.terminal.TerminalScreen
 import id.codingserver.android.ui.theme.CodingServerTheme
+import id.codingserver.android.ui.theme.isAppDark
 import kotlinx.coroutines.launch
 
 private data class Dest(val route: String, val label: String, val icon: ImageVector)
@@ -116,7 +117,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            CodingServerTheme(dark = true) { App(vm, editor, terminal) }
+            val theme by vm.appTheme.collectAsState()
+            val dark = isAppDark(theme)
+            // Ikon status bar/navigasi mengikuti tema aplikasi (bukan tema sistem).
+            LaunchedEffect(dark) {
+                val transparent = android.graphics.Color.TRANSPARENT
+                val style = if (dark) androidx.activity.SystemBarStyle.dark(transparent)
+                            else androidx.activity.SystemBarStyle.light(transparent, transparent)
+                enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
+            }
+            CodingServerTheme(theme) { App(vm, editor, terminal) }
         }
     }
 }

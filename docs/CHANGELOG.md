@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.0 — 2026-11-23 (Android)
+### Ditambahkan
+- **Pilihan tema aplikasi** (Pengaturan → Tampilan): mode Ikuti sistem / Gelap / Terang, 11 warna aksen (Biru, Teal,
+  Hijau, Ungu, Nila, Oranye, Merah, Merah muda, Kuning, Abu-abu, **Dinamis** = Material You dari wallpaper, Android 12+),
+  dan latar **hitam pekat AMOLED**. Ikon status bar menyesuaikan tema. Disimpan di DataStore.
+- **Preset warna editor** di dialog Warna editor: One Dark, Dracula, Monokai, Nord, Solarized Gelap/Terang,
+  GitHub Gelap/Terang, Hitam AMOLED, Kertas (sekaligus memilih editor gelap/terang).
+- Unit test tema (`ThemeTest`).
+
 ## 1.1.1 — 2026-11-23
 ### Ditambahkan
 - `scripts/uninstall.sh`: hapus service systemd (system/user) + cron autostart, hentikan proses tersisa, bersihkan

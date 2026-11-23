@@ -32,6 +32,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -232,7 +233,12 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
         AlertDialog(
             onDismissRequest = { colorDialog = false },
             title = { Text("Warna editor") },
-            text = { Column {
+            text = { Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)) {
+                Text("Preset", style = MaterialTheme.typography.labelLarge)
+                EditorPresetRow { preset ->
+                    textColorInput = preset.text; backgroundColorInput = preset.background; colorError = null
+                    if (preset.dark != prefs.darkTheme) vm.setEditorPrefs(prefs.copy(darkTheme = preset.dark))
+                }
                 Text("Kosong = warna otomatis. Format HEX: #FFFFFF")
                 OutlinedTextField(value = textColorInput, onValueChange = { textColorInput = it.trim(); colorError = null }, label = { Text("Warna teks") }, placeholder = { Text("#FFFFFF") }, singleLine = true)
                 OutlinedTextField(value = backgroundColorInput, onValueChange = { backgroundColorInput = it.trim(); colorError = null }, label = { Text("Warna latar") }, placeholder = { Text("#282C34") }, singleLine = true)
@@ -341,5 +347,39 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
             },
             confirmButton = { TextButton(onClick = { history = null }) { Text("Tutup") } },
         )
+    }
+}
+
+/** Preset warna editor populer (teks + latar). Sorotan sintaks tetap dari tema CodeMirror. */
+data class EditorColorPreset(val name: String, val text: String, val background: String, val dark: Boolean)
+
+val EditorColorPresets = listOf(
+    EditorColorPreset("One Dark", "#ABB2BF", "#282C34", true),
+    EditorColorPreset("Dracula", "#F8F8F2", "#282A36", true),
+    EditorColorPreset("Monokai", "#F8F8F2", "#272822", true),
+    EditorColorPreset("Nord", "#D8DEE9", "#2E3440", true),
+    EditorColorPreset("Solarized Gelap", "#93A1A1", "#002B36", true),
+    EditorColorPreset("GitHub Gelap", "#C9D1D9", "#0D1117", true),
+    EditorColorPreset("Hitam AMOLED", "#E0E0E0", "#000000", true),
+    EditorColorPreset("GitHub Terang", "#24292F", "#FFFFFF", false),
+    EditorColorPreset("Solarized Terang", "#586E75", "#FDF6E3", false),
+    EditorColorPreset("Kertas", "#3B3B3B", "#F5F1E8", false),
+)
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun EditorPresetRow(onPick: (EditorColorPreset) -> Unit) {
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
+    ) {
+        EditorColorPresets.forEach { p ->
+            val bg = androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(p.background))
+            val fg = androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(p.text))
+            androidx.compose.material3.SuggestionChip(
+                onClick = { onPick(p) },
+                label = { Text(p.name, color = fg) },
+                colors = androidx.compose.material3.SuggestionChipDefaults.suggestionChipColors(containerColor = bg),
+            )
+        }
     }
 }

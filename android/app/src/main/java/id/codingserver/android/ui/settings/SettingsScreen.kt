@@ -80,6 +80,7 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
                 }
             }
         }
+        ThemeSettingsCard(vm)
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp)) {
                 Text("Editor", style = MaterialTheme.typography.titleMedium)

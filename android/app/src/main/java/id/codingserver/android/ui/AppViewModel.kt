@@ -1,5 +1,6 @@
 package id.codingserver.android.ui
 
+import id.codingserver.android.ui.theme.AppTheme
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -58,6 +59,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     val servers: StateFlow<List<ServerProfile>> = serverStore.servers.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val editorPrefs: StateFlow<EditorPrefs> = serverStore.editorPrefs.stateIn(viewModelScope, SharingStarted.Eagerly, EditorPrefs())
+    val appTheme: StateFlow<AppTheme> = serverStore.appTheme.stateIn(viewModelScope, SharingStarted.Eagerly, AppTheme())
 
     private val _client = MutableStateFlow<ApiClient?>(null)
     val client: StateFlow<ApiClient?> = _client.asStateFlow()
@@ -260,4 +262,5 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setEditorPrefs(p: EditorPrefs) { viewModelScope.launch { serverStore.setEditorPrefs(p) } }
+    fun setAppTheme(t: AppTheme) { viewModelScope.launch { serverStore.setAppTheme(t) } }
 }

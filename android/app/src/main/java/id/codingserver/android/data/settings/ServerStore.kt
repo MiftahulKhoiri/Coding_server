@@ -8,6 +8,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import id.codingserver.android.ui.theme.AccentPalette
+import id.codingserver.android.ui.theme.AppTheme
+import id.codingserver.android.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -47,12 +50,27 @@ class ServerStore(private val context: Context) {
     private val kTextColor = stringPreferencesKey("editor_text_color")
     private val kBackgroundColor = stringPreferencesKey("editor_background_color")
     private val kLastProject = stringPreferencesKey("last_project")
+    private val kThemeMode = stringPreferencesKey("app_theme_mode")
+    private val kThemeAccent = stringPreferencesKey("app_theme_accent")
+    private val kThemeAmoled = booleanPreferencesKey("app_theme_amoled")
 
     val servers: Flow<List<ServerProfile>> = context.dataStore.data.map { decode(it[kServers]) }
     val activeId: Flow<String?> = context.dataStore.data.map { it[kActive] }
     val lastProject: Flow<String?> = context.dataStore.data.map { it[kLastProject] }
     val editorPrefs: Flow<EditorPrefs> = context.dataStore.data.map {
         EditorPrefs(it[kDark] ?: true, it[kFont] ?: 14, it[kWrap] ?: false, it[kTab] ?: 4, it[kTextColor] ?: "", it[kBackgroundColor] ?: "")
+    }
+
+    val appTheme: Flow<AppTheme> = context.dataStore.data.map {
+        AppTheme(ThemeMode.fromKey(it[kThemeMode]), AccentPalette.fromKey(it[kThemeAccent]), it[kThemeAmoled] ?: false)
+    }
+
+    suspend fun setAppTheme(t: AppTheme) {
+        context.dataStore.edit {
+            it[kThemeMode] = t.mode.key
+            it[kThemeAccent] = t.accent.key
+            it[kThemeAmoled] = t.amoled
+        }
     }
 
     private fun decode(raw: String?): List<ServerProfile> =
