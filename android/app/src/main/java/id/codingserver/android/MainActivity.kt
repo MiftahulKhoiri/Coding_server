@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -185,7 +186,9 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
         Scaffold(
             snackbarHost = { SnackbarHost(snack) },
             topBar = {
-                if (loggedIn) Column {
+                // Tanpa AppBar (layar editor) jarak status bar harus diberikan sendiri; TopAppBar biasanya
+                // yang menanganinya, dan Scaffold tidak menambahkannya lagi selama topBar ada.
+                if (loggedIn) Column(if (route == "editor") Modifier.statusBarsPadding() else Modifier) {
                     // Layar editor punya baris menu+tab ringkas sendiri (area kode lebih luas).
                     if (route != "editor") TopAppBar(
                         title = {
