@@ -24,6 +24,8 @@ import kotlin.coroutines.resume
 sealed interface EditorEvent {
     data class Changed(val tabId: String, val dirty: Boolean) : EditorEvent
     data class SaveRequested(val tabId: String) : EditorEvent
+    /** Go-to-definition (LSP) menunjuk file lain di proyek. */
+    data class OpenFile(val path: String, val line: Int, val column: Int) : EditorEvent
     data class RunRequested(val tabId: String) : EditorEvent
 }
 
@@ -37,6 +39,12 @@ class EditorBridge(private val c: EditorController) {
     @JavascriptInterface fun onSave(tabId: String?) { tabId?.let { c.events.tryEmit(EditorEvent.SaveRequested(it)) } }
     @JavascriptInterface fun onRun(tabId: String?) { tabId?.let { c.events.tryEmit(EditorEvent.RunRequested(it)) } }
     @JavascriptInterface fun onCursor(line: Int, col: Int) { c.cursor.value = line to col }
+    /** Konfigurasi LSP dibaca JS setiap membuka koneksi (token selalu yang terbaru). */
+    @JavascriptInterface fun lspConfig(): String = runCatching { c.lspConfig() }.getOrDefault("")
+    @JavascriptInterface fun onLspStatus(text: String?) { c.lspStatus.value = text.orEmpty() }
+    @JavascriptInterface fun onOpenFile(path: String?, line: Int, col: Int) {
+        path?.let { c.events.tryEmit(EditorEvent.OpenFile(it, line, col)) }
+    }
 }
 
 /**
@@ -50,6 +58,9 @@ class EditorController(context: Context) {
     val eventsFlow: SharedFlow<EditorEvent> get() = events
     val cursor = MutableStateFlow(1 to 1)
     val cursorFlow: StateFlow<Pair<Int, Int>> get() = cursor
+    /** JSON {wsBase, token, projectId, enabled} untuk klien LSP di WebView; diisi MainActivity. */
+    @Volatile var lspConfig: () -> String = { "" }
+    val lspStatus = MutableStateFlow("")
     private val main = Handler(Looper.getMainLooper())
 
     // Pakai context Activity (bukan applicationContext): koneksi keyboard (IME) WebView lebih andal.
@@ -124,7 +135,11 @@ class EditorController(context: Context) {
     suspend fun undo() { eval("CS.undo()") }
     suspend fun redo() { eval("CS.redo()") }
     suspend fun openSearch() { eval("CS.openSearch()") }
-    suspend fun gotoLine(line: Int) { eval("CS.gotoLine($line)") }
+    suspend fun gotoLine(line: Int, column: Int = 1) { eval("CS.gotoLine($line, $column)") }
+    /** Info simbol di kursor (hover LSP), tampil sebagai panel di editor. */
+    suspend fun hover() { eval("CS.hover()") }
+    /** Sambung ulang language server (proyek/token/pengaturan berubah). */
+    suspend fun lspReset() { eval("CS.lspReset()") }
     suspend fun gotoDefinition() = eval("CS.gotoDefinition()") == "true"
     suspend fun foldAll() { eval("CS.foldAll()") }
     suspend fun unfoldAll() { eval("CS.unfoldAll()") }

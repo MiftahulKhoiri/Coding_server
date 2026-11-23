@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.0 — 2026-11-23
+### Ditambahkan
+- **Language server (LSP)**: clangd 22 (C/C++) dan pyright (Python) di Pi, lewat WebSocket `/ws/lsp`, di dalam
+  sandbox bubblewrap (proyek read-only, tanpa jaringan, path asli disamarkan). Editor: autocomplete dari LSP,
+  error/peringatan saat mengetik, **Info simbol di kursor**, **Ke definisi** lintas file (membuka file tujuan).
+  Sakelar di Pengaturan → Editor. Dipasang otomatis tanpa sudo oleh `install_runtimes.sh`.
+- **Build C/C++ multi-file**: CMake (Ninja, compile_commands.json), Makefile (`make run` / executable terbaru),
+  dan mode otomatis multi-file dengan deteksi `main()`.
+- **AI mengubah file proyek**: proposal dari jawaban AI (file utuh atau SEARCH/REPLACE toleran spasi/indentasi),
+  kartu diff Terapkan/Tolak/Batalkan di aplikasi, sakelar terapkan otomatis, tab editor dimuat ulang, proposal basi
+  ditolak, editan bisa dibatalkan.
+### Diperbaiki
+- Pesan error job tampil sebagai `\n` literal di output.
+
 ## 1.2.0 — 2026-11-23 (Android)
 ### Ditambahkan
 - **Pilihan tema aplikasi** (Pengaturan → Tampilan): mode Ikuti sistem / Gelap / Terang, 11 warna aksen (Biru, Teal,

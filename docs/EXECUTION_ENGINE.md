@@ -18,6 +18,20 @@
 Status `AVAILABLE` hanya diberikan setelah perintah versi benar-benar berhasil dijalankan
 (`GET /api/v1/system/engines?refresh=true`, atau `scripts/health_check.py --engines`).
 
+## C/C++: satu file, multi-file, Makefile, CMake
+Untuk file `.c`/`.cpp` yang dijalankan, engine mencari dari folder file ke atas (maks. akar proyek):
+
+| Ditemukan | Build | Run |
+|---|---|---|
+| `CMakeLists.txt` (teratas) | `cmake -S … -B <cache>/_cmake_<hash> -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON` + `cmake --build` | executable ELF terbaru di build dir |
+| `Makefile` / `makefile` / `GNUmakefile` | `make -C <folder> -jN` | `make -s run ARGS=…` bila target `run:` ada, selain itu executable ELF terbaru |
+| tidak ada | `g++/gcc` semua sumber sebahasa di folder + subfolder (`-I` folder, `include/`, `inc/`) | `<cache>/app` |
+
+Mode otomatis: file lain yang juga punya `main()` tidak ikut dikompilasi (folder latihan berisi banyak program
+tetap jalan per file). Menjalankan file tanpa `main()` memakai satu-satunya `main()` yang ditemukan (naik ke folder
+induk bila perlu); bila ada beberapa, server meminta membuka file `main()` yang dimaksud (`multiple_mains`).
+`compile_commands.json` hasil CMake dipakai clangd untuk analisis editor.
+
 ## Sumber daya & keamanan per job
 - Antrean: `CS_MAX_CONCURRENT_JOBS` (2) berjalan bersamaan, `CS_MAX_QUEUED_JOBS` (20) menunggu; lebih dari itu → 503 `queue_full`.
 - RAM bebas < `CS_MIN_FREE_MEMORY_MB` (512) → job ditunda hingga 30 dtk lalu ditolak (`low_memory`).

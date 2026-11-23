@@ -29,6 +29,21 @@ if ! command -v php >/dev/null; then
     rm -f /tmp/php.tgz
   else c_warn "PHP tidak ada: sudo apt install php-cli"; fi
 else c_ok "PHP sudah ada"; fi
-for c in gcc g++ javac go node sqlite3; do
-  command -v $c >/dev/null && c_ok "$c tersedia" || c_warn "$c belum ada (sudo apt install: gcc g++ default-jdk golang nodejs sqlite3)"
+# Language server untuk editor (tanpa sudo): clangd (wheel resmi ARM64 dari PyPI) di venv server,
+# pyright (npm) di .lsp/. Keduanya ikut terhapus oleh uninstall.sh.
+if [ -x "$PY" ]; then
+  if "$PY" -c "import clangd" 2>/dev/null; then c_ok "clangd sudah ada ($("$VENV/bin/clangd" --version 2>/dev/null | head -1))"
+  else
+    c_info "Memasang clangd (LSP C/C++)..."
+    "$PY" -m pip install -q clangd && c_ok "$("$VENV/bin/clangd" --version | head -1)" || c_warn "clangd gagal dipasang (opsional)"
+  fi
+else c_warn "venv belum ada: clangd dilewati (jalankan install.sh)"; fi
+if [ -f "$BASE/.lsp/node_modules/pyright/langserver.index.js" ]; then c_ok "pyright sudah ada"
+elif command -v npm >/dev/null; then
+  c_info "Memasang pyright (LSP Python)..."
+  mkdir -p "$BASE/.lsp" && npm install --prefix "$BASE/.lsp" --no-audit --no-fund --silent pyright@1 \
+    && c_ok "pyright $("$BASE/.lsp/node_modules/.bin/pyright" --version 2>/dev/null | awk '{print $2}')" || c_warn "pyright gagal dipasang (opsional)"
+else c_warn "npm tidak ada: pyright dilewati (sudo apt install npm)"; fi
+for c in gcc g++ javac go node sqlite3 make cmake; do
+  command -v $c >/dev/null && c_ok "$c tersedia" || c_warn "$c belum ada (sudo apt install: gcc g++ default-jdk golang nodejs sqlite3 make cmake ninja-build)"
 done

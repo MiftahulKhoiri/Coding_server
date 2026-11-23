@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import (ai, auth, backup, database, execution, files, git, http_client, monitor, preview, projects,
+from backend.api import (ai, auth, lsp, backup, database, execution, files, git, http_client, monitor, preview, projects,
                          system, terminal)
 from backend.config import VERSION, Settings, get_settings
 from backend.core.exceptions import install_handlers
@@ -57,11 +57,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in settings.cors_origins.split(",")],
                            allow_methods=["*"], allow_headers=["*"])
-    for r in (auth, system, monitor, projects, files, execution, terminal, database, git, http_client, backup, ai):
+    for r in (auth, system, monitor, projects, files, execution, terminal, database, git, http_client, backup, ai, lsp):
         app.include_router(r.router, prefix=API_PREFIX)
     app.include_router(execution.ws_router)
     app.include_router(terminal.ws_router)
     app.include_router(ai.ws_router)
+    app.include_router(lsp.ws_router)
     app.include_router(preview.router)
 
     @app.get("/", include_in_schema=False)

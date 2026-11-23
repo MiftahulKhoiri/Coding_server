@@ -22,14 +22,18 @@ Raspberry Pi 5 — FastAPI (Python 3)
 - **Sandbox nyata** (bubblewrap): sistem read-only, `$HOME` diganti tmpfs (kunci SSH/token tidak terlihat), hanya folder proyek yang bisa ditulis, jaringan diputus (bisa diaktifkan), PID/IPC terpisah.
 - **Terminal interaktif** (PTY + WebSocket), banyak sesi, di dalam sandbox, idle timeout.
 - **File manager** aman: CRUD, rename/copy/move, cari nama & isi, favorit, file terakhir, tulis atomik, deteksi konflik (SHA-256), riwayat versi + undo/restore, proteksi path traversal & symlink.
-- **Editor CodeMirror 6** di WebView: syntax highlighting 18+ bahasa, nomor baris, auto indent, bracket matching, find/replace, banyak tab, undo/redo, code folding, word wrap, ukuran font, tema gelap/terang, autocomplete dasar, diagnostics dari output compiler, simbol dokumen & go-to-definition (berbasis pola).
-- **Database manager SQLite**, **Git manager**, **HTTP client/API tester** (anti-SSRF), **System monitor**, **Backup & restore** terverifikasi, **fondasi AI agent** (provider OpenAI-compatible, proposal perubahan yang perlu persetujuan).
+- **Editor CodeMirror 6** di WebView: syntax highlighting 18+ bahasa, nomor baris, auto indent, bracket matching, find/replace, banyak tab, undo/redo, code folding, word wrap, ukuran font, tema gelap/terang, autocomplete, diagnostics dari output compiler, simbol dokumen.
+- **Language server (LSP)**: clangd (C/C++) dan pyright (Python) di server, di dalam sandbox — autocomplete pintar, error/peringatan saat mengetik, info simbol, go-to-definition lintas file. Bahasa lain memakai pola regex.
+- **Build C/C++ multi-file**: CMake, Makefile, atau otomatis (semua sumber di folder + subfolder; folder latihan dengan banyak `main()` tetap jalan per file).
+- **AI coding agent**: chat dengan model lokal (llama-server) / online; bila proyek terbuka, AI mengubah file lewat blok `file=` / SEARCH-REPLACE → kartu diff **Terapkan / Tolak / Batalkan**, atau diterapkan otomatis. Semua perubahan tercatat di riwayat file & bisa dibatalkan.
+- **Database manager SQLite**, **Git manager**, **HTTP client/API tester** (anti-SSRF), **System monitor**, **Backup & restore** terverifikasi.
 - **Aplikasi Android** dibangun otomatis oleh GitHub Actions dan bisa memperbarui dirinya sendiri dari GitHub Releases.
 
 ## Persyaratan
 - Raspberry Pi 5 (diuji: 16 GB, Raspberry Pi OS / Debian 13 trixie, aarch64), Python ≥ 3.10.
 - Paket sistem: `git bubblewrap curl` (+ compiler yang ingin dipakai: `gcc g++ default-jdk golang nodejs sqlite3 php-cli`).
-- .NET SDK 8 dan PHP dipasang otomatis tanpa sudo oleh `scripts/install_runtimes.sh` bila belum ada.
+- .NET SDK 8, PHP, clangd (LSP C/C++, dari PyPI) dan pyright (LSP Python, npm) dipasang otomatis tanpa sudo oleh
+  `scripts/install_runtimes.sh` bila belum ada. Untuk build C/C++ proyek: `make cmake ninja-build`.
 
 ## Instalasi
 ```bash

@@ -263,4 +263,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setEditorPrefs(p: EditorPrefs) { viewModelScope.launch { serverStore.setEditorPrefs(p) } }
     fun setAppTheme(t: AppTheme) { viewModelScope.launch { serverStore.setAppTheme(t) } }
+
+    /** Konfigurasi klien LSP untuk editor WebView (dipanggil dari thread WebView). */
+    fun lspConfigJson(): String {
+        val c = _client.value ?: return ""
+        val p = _project.value ?: return ""
+        val o = kotlinx.serialization.json.buildJsonObject {
+            put("wsBase", kotlinx.serialization.json.JsonPrimitive(c.wsUrl("").substringBefore("?")))
+            put("token", kotlinx.serialization.json.JsonPrimitive(c.accessToken() ?: ""))
+            put("projectId", kotlinx.serialization.json.JsonPrimitive(p.id))
+            put("enabled", kotlinx.serialization.json.JsonPrimitive(editorPrefs.value.lsp))
+        }
+        return o.toString()
+    }
 }

@@ -66,3 +66,20 @@ Error: `{"error":{"code","message","details"}}`.
   `{type:"stdout"|"stderr",data}`, `{type:"end",job}`; klien: `{type:"stdin",data,eof?}`, `{type:"stop"}`.
 - `/ws/terminal/{session_id}?token=` — klien: `{type:"input",data}`, `{type:"resize",cols,rows}`,
   `{type:"signal",signal:"SIGINT"}`, `{type:"ping"}`; server: `{type:"output",data}`, `{type:"exit",exit_code}`.
+
+## Language server (LSP)
+- `GET /api/v1/lsp/status` → ketersediaan per bahasa (`c`, `cpp` → clangd; `python` → pyright) + sesi aktif.
+- `WS /ws/lsp?project_id=&language=cpp|c|python&token=` — satu pesan WS = satu pesan JSON-RPC LSP.
+  URI file memakai akar virtual `file:///workspace/<path>`; path asli server tidak pernah dikirim ke klien.
+  Server mengirim `cs/ready` setelah language server berjalan, `cs/error` (`lsp_unavailable`, `lsp_busy`,
+  `low_memory`, `permission_denied`) atau `cs/exit`. Butuh izin `read` + `execute`. Proses berjalan di sandbox
+  bubblewrap (proyek read-only, tanpa jaringan), maks. `CS_LSP_MAX_SESSIONS` (default 4), ditutup bila idle 20 menit.
+
+## AI: editan file
+- Chat WS `/ws/ai/chat` dengan `project_id` → model diberi protokol edit; jawaban berisi blok
+  ```` ```lang file=PATH ```` (isi lengkap) atau ```` ```edit file=PATH ```` (SEARCH/REPLACE) menghasilkan event
+  `{type:"edits", message_id, items:[{id, path, status, diff, additions, deletions, new_file, error}]}`.
+  `auto_apply: true` langsung menerapkan (butuh izin `write`).
+- `GET /api/v1/ai/proposals?project_id=&conversation_id=` · `POST /api/v1/ai/proposals/{id}/decide {project_id, approve}`
+  (409 `proposal_stale` bila file berubah sejak usulan dibuat) · `POST /api/v1/ai/proposals/{id}/revert {project_id}`
+  (kembalikan isi lama / hapus file baru; 409 bila file sudah diubah lagi).

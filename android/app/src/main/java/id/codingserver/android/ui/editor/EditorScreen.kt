@@ -106,6 +106,12 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
             .onFailure { vm.toast(it.message ?: "Gagal menjalankan") }
     }
 
+    // Lompat ke posisi setelah file tujuan go-to-definition dimuat.
+    var pendingGoto by remember { mutableStateOf<Triple<String, Int, Int>?>(null) }
+    val lspStatus by editor.lspStatus.collectAsState()
+    // Proyek / server / pengaturan LSP berubah -> sambung ulang language server.
+    LaunchedEffect(client, project?.id, prefs.lsp) { editor.lspReset() }
+
     // Muat isi file ke editor saat tab aktif berubah.
     LaunchedEffect(activeId, client) {
         val tab = active ?: return@LaunchedEffect
@@ -131,6 +137,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                     }
                 }
         } else editor.switchTab(tab.id)
+        pendingGoto?.let { (id, line, col) -> if (id == tab.id && editor.hasTab(id)) { editor.gotoLine(line, col); pendingGoto = null } }
     }
     LaunchedEffect(prefs) { editor.applyPrefs(prefs.darkTheme, prefs.fontSize, prefs.wordWrap, prefs.tabSize, prefs.textColor, prefs.backgroundColor) }
     LaunchedEffect(Unit) {
@@ -139,6 +146,14 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                 is EditorEvent.Changed -> vm.updateTab(ev.tabId) { it.copy(dirty = ev.dirty) }
                 is EditorEvent.SaveRequested -> vm.tabs.value.firstOrNull { it.id == ev.tabId }?.let { save(it) }
                 is EditorEvent.RunRequested -> runActive(false)
+                is EditorEvent.OpenFile -> {
+                    val pid = project?.id ?: vm.tabs.value.firstOrNull { it.id == activeId }?.projectId
+                    if (pid != null) {
+                        val tab = EditorTab(pid, ev.path, null)
+                        if (editor.hasTab(tab.id)) { vm.setActiveTab(tab.id); editor.switchTab(tab.id); editor.gotoLine(ev.line, ev.column) }
+                        else { pendingGoto = Triple(tab.id, ev.line, ev.column); vm.addOrFocusTab(tab) }
+                    }
+                }
             }
         }
     }
@@ -172,7 +187,11 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
             IconButton(enabled = active != null, onClick = { scope.launch { editor.undo() } }) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
             IconButton(enabled = active != null, onClick = { scope.launch { editor.redo() } }) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo") }
             IconButton(enabled = active != null, onClick = { scope.launch { editor.openSearch() } }) { Icon(Icons.Default.Search, "Cari & ganti") }
-            Text("${cursor.first}:${cursor.second}", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text("${cursor.first}:${cursor.second}", style = MaterialTheme.typography.labelSmall)
+                if (prefs.lsp && lspStatus.isNotBlank()) Text(lspStatus, style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                                                               color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Lainnya") }
                 DropdownMenu(menu, { menu = false }) {
@@ -184,6 +203,11 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
                     DropdownMenuItem({ Text("Ke definisi (kata di kursor)") }, enabled = active != null, onClick = {
                         menu = false; scope.launch { if (!editor.gotoDefinition()) vm.toast("Definisi tidak ditemukan di file ini") }
                     })
+                    DropdownMenuItem({ Text("Info simbol di kursor") }, enabled = active != null, onClick = {
+                        menu = false; scope.launch { editor.hover() }
+                    })
+                    DropdownMenuItem({ Text(if (prefs.lsp) "Matikan language server" else "Aktifkan language server") },
+                        onClick = { menu = false; vm.setEditorPrefs(prefs.copy(lsp = !prefs.lsp)) })
                     DropdownMenuItem({ Text("Lipat semua / buka semua") }, onClick = {
                         menu = false; scope.launch { editor.foldAll(); editor.unfoldAll() }
                     })

@@ -17,6 +17,7 @@ import {
 import { lintKeymap, setDiagnostics, lintGutter } from "@codemirror/lint";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { detectLanguage, languageExtension, SYMBOL_PATTERNS } from "./languages.js";
+import { LspManager, applyDiagnosticsTo } from "./lsp.js";
 
 // Android WebView: CodeMirror memakai API EditContext bila tersedia. Pada sebagian WebView/keyboard
 // (Gboard, SwiftKey) input lewat EditContext tidak sampai ke editor sehingga "tidak bisa mengetik".
@@ -26,6 +27,7 @@ EditorView.EDIT_CONTEXT = false;
 const bridge = window.AndroidBridge || {
   onReady() {}, onChange() {}, onSave() {}, onRun() {}, onCursor() {},
 };
+const callBridge = (name, ...args) => { try { return typeof bridge[name] === "function" ? bridge[name](...args) : undefined; } catch { return undefined; } };
 
 const langConf = new Compartment();
 const themeConf = new Compartment();
@@ -38,6 +40,55 @@ let settings = { theme: "dark", fontSize: 14, wordWrap: false, tabSize: 4, textC
 const tabs = new Map(); // id -> { state, lang, filename, savedVersion }
 let current = null;
 let suppress = false;
+
+// ---------- LSP (clangd / pyright di server) ----------
+function stateOf(id) {
+  if (id === current) return view.state;
+  const t = tabs.get(id);
+  return t ? t.state : null;
+}
+const lsp = new LspManager({
+  getConfig() {
+    const raw = callBridge("lspConfig");
+    try { return raw ? JSON.parse(raw) : null; } catch { return null; }
+  },
+  getState: stateOf,
+  applyDiagnostics(id, diags) {
+    if (id === current) { suppress = true; view.dispatch(setDiagnostics(view.state, diags)); suppress = false; tabs.get(id).state = view.state; return; }
+    const t = tabs.get(id);
+    if (t) t.state = applyDiagnosticsTo(t.state, diags);
+  },
+  onStatus(text) { callBridge("onLspStatus", text); },
+});
+
+// Completion: LSP bila tersedia untuk tab aktif, selain itu kata-kata di dokumen.
+async function lspCompletion(ctx) {
+  if (!current || !lsp.supports(current)) return null;
+  return lsp.completion(current, ctx.state, ctx.pos, ctx.explicit);
+}
+function wordCompletion(ctx) {
+  return current && lsp.supports(current) ? null : completeAnyWord(ctx);
+}
+
+// Panel info sederhana (hover/definisi) di bawah editor — WebView sentuh tidak punya "hover".
+function showInfo(text) {
+  let el = document.getElementById("cs-info");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "cs-info";
+    el.style.cssText = "position:fixed;left:6px;right:6px;bottom:6px;max-height:38vh;overflow:auto;z-index:50;" +
+      "padding:10px 12px;border-radius:10px;font:13px/1.45 'JetBrains Mono',monospace;white-space:pre-wrap;" +
+      "box-shadow:0 4px 18px rgba(0,0,0,.45)";
+    el.addEventListener("click", () => { el.style.display = "none"; });
+    document.body.appendChild(el);
+  }
+  const dark = settings.theme === "dark";
+  el.style.background = dark ? "#21252b" : "#f3f3f3";
+  el.style.color = dark ? "#d7dae0" : "#202124";
+  el.style.border = "1px solid " + (dark ? "#3e4451" : "#cccccc");
+  el.textContent = text + "\n\n(ketuk untuk menutup)";
+  el.style.display = "block";
+}
 
 function fontTheme(size) {
   return EditorView.theme({
@@ -74,7 +125,7 @@ function baseExtensions(lang, editable = true) {
     dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }), bracketMatching(), closeBrackets(),
     autocompletion({ override: null, activateOnTyping: true }),
-    EditorState.languageData.of(() => [{ autocomplete: completeAnyWord }]),
+    EditorState.languageData.of(() => [{ autocomplete: lspCompletion }, { autocomplete: wordCompletion }]),
     rectangularSelection(), crosshairCursor(), highlightActiveLine(), highlightSelectionMatches(), lintGutter(),
     search({ top: true }),
     keymap.of([
@@ -96,6 +147,7 @@ function baseExtensions(lang, editable = true) {
         const t = tabs.get(current);
         bridge.onChange(current, isDirty(current));
         if (t) t.state = u.state;
+        lsp.change(current);
       }
       if (u.selectionSet && current) {
         const pos = u.state.selection.main.head;
@@ -167,7 +219,28 @@ function wordAtCursor() {
   return w ? view.state.sliceDoc(w.from, w.to) : "";
 }
 
+async function lspDefinition() {
+  const id = current;
+  const def = await lsp.definition(id, view.state, view.state.selection.main.head);
+  if (!def) { if (!regexDefinition()) showInfo("Definisi tidak ditemukan"); return; }
+  if (def.sameFile) { gotoLine(def.line, def.column); return; }
+  if (def.path) { callBridge("onOpenFile", def.path, def.line, def.column); return; }
+  showInfo("Definisi ada di luar proyek:\n" + def.uri.replace("file://", "") + ":" + def.line);
+}
+
 function gotoDefinition() {
+  if (current && lsp.supports(current)) { lspDefinition(); return true; }
+  return regexDefinition();
+}
+
+async function hoverAtCursor() {
+  if (!current || !lsp.supports(current)) { showInfo("Info simbol butuh language server (C/C++/Python, proyek terbuka)."); return false; }
+  const text = await lsp.hover(current, view.state, view.state.selection.main.head);
+  showInfo(text || "Tidak ada info untuk simbol di kursor");
+  return true;
+}
+
+function regexDefinition() {
   const word = wordAtCursor();
   if (!word) return false;
   const hit = symbols(current).find((s) => s.name === word);
@@ -183,6 +256,7 @@ window.CS = {
     const state = EditorState.create({ doc: text || "", extensions: baseExtensions(language) });
     tabs.set(id, { state, lang: language, filename, savedText: text || "" });
     this.switchTab(id);
+    lsp.open(id, language, text || "");
     return language;
   },
   switchTab(id) {
@@ -197,6 +271,7 @@ window.CS = {
     return true;
   },
   closeTab(id) {
+    lsp.close(id);
     tabs.delete(id);
     if (current === id) {
       current = null;
@@ -224,6 +299,7 @@ window.CS = {
       t.state = t.state.update({ changes: { from: 0, to: t.state.doc.length, insert: text } }).state;
     }
     if (markSaved) t.savedText = text;
+    lsp.change(id);
     return true;
   },
   markSaved(id) {
@@ -235,10 +311,12 @@ window.CS = {
   renameTab(oldId, newId, filename) {
     const t = tabs.get(oldId);
     if (!t) return false;
+    lsp.close(oldId);
     tabs.delete(oldId);
     t.filename = filename;
     tabs.set(newId, t);
     if (current === oldId) current = newId;
+    lsp.open(newId, t.lang, (newId === current ? view.state : t.state).doc.toString());
     return true;
   },
   setLanguage(lang) {
@@ -264,6 +342,10 @@ window.CS = {
   unfoldAll() { unfoldAll(view); },
   gotoLine,
   gotoDefinition,
+  hover() { hoverAtCursor(); return true; },
+  showInfo,
+  lspReset() { lsp.reset(); return true; },
+  lspActive() { return !!(current && lsp.supports(current)); },
   symbols(id) { return JSON.stringify(symbols(id)); },
   insert(text) { view.dispatch(view.state.replaceSelection(text)); view.focus(); },
   focus() { view.focus(); },

@@ -1,0 +1,331 @@
+// Klien LSP ringan untuk CodeMirror 6 di WebView. Server: /ws/lsp di CODING_SERVER (clangd, pyright),
+// satu WebSocket per jenis server per proyek. URI file memakai akar virtual file:///workspace/.
+import { setDiagnostics } from "@codemirror/lint";
+
+const SERVER_OF = { c: "clangd", cpp: "clangd", python: "pyright" };
+const WS_LANG = { clangd: "cpp", pyright: "python" };
+const ROOT = "file:///workspace/";
+const KIND = {
+  1: "text", 2: "method", 3: "function", 4: "function", 5: "property", 6: "variable", 7: "class", 8: "interface",
+  9: "namespace", 10: "property", 11: "constant", 12: "enum", 13: "keyword", 14: "keyword", 15: "text",
+  17: "text", 19: "namespace", 20: "enum", 21: "constant", 22: "class", 23: "type", 25: "type",
+};
+const SEVERITY = { 1: "error", 2: "warning", 3: "info", 4: "hint" };
+
+export function uriOfPath(path) {
+  return ROOT + path.split("/").map(encodeURIComponent).join("/");
+}
+export function pathOfUri(uri) {
+  if (!uri || !uri.startsWith(ROOT)) return null;
+  return uri.slice(ROOT.length).split("/").map(decodeURIComponent).join("/");
+}
+
+// posisi CodeMirror <-> LSP (baris 0-based, karakter UTF-16 = indeks string JS)
+export function toLsp(doc, pos) {
+  const line = doc.lineAt(pos);
+  return { line: line.number - 1, character: pos - line.from };
+}
+export function fromLsp(doc, p) {
+  const n = Math.min(Math.max(p.line + 1, 1), doc.lines);
+  const line = doc.line(n);
+  return Math.min(line.from + Math.max(0, p.character), line.to);
+}
+
+class Connection {
+  constructor(mgr, server, cfg) {
+    this.mgr = mgr;
+    this.server = server;
+    this.projectId = cfg.projectId;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.ready = false;
+    this.closed = false;
+    this.queue = [];
+    this.capabilities = {};
+    const url = `${cfg.wsBase}ws/lsp?project_id=${encodeURIComponent(cfg.projectId)}&language=${WS_LANG[server]}` +
+      `&token=${encodeURIComponent(cfg.token || "")}`;
+    this.ws = new WebSocket(url);
+    this.ws.onmessage = (e) => this.onMessage(e.data);
+    this.ws.onclose = () => this.onClose();
+    this.ws.onerror = () => {};
+  }
+
+  rawSend(msg) {
+    if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
+  }
+  notify(method, params) {
+    const m = { jsonrpc: "2.0", method, params };
+    if (this.ready || method === "initialized") this.rawSend(m); else this.queue.push(m);
+  }
+  request(method, params, timeoutMs = 5000) {
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("timeout")); }, timeoutMs);
+      this.pending.set(id, { resolve, reject, timer });
+      const m = { jsonrpc: "2.0", id, method, params };
+      if (this.ready || method === "initialize") this.rawSend(m); else this.queue.push(m);
+    });
+  }
+
+  async onMessage(text) {
+    let msg;
+    try { msg = JSON.parse(text); } catch { return; }
+    if (msg.method === "cs/ready") { this.initialize(); return; }
+    if (msg.method === "cs/error" || msg.method === "cs/exit") {
+      this.mgr.status(`${this.server}: ${(msg.params && msg.params.message) || "tidak tersedia"}`);
+      this.failed = msg.method === "cs/error" && msg.params && msg.params.code === "lsp_unavailable";
+      return;
+    }
+    if (msg.id !== undefined && !msg.method) {
+      const p = this.pending.get(msg.id);
+      if (p) {
+        clearTimeout(p.timer);
+        this.pending.delete(msg.id);
+        if (msg.error) p.reject(new Error(msg.error.message || "error")); else p.resolve(msg.result);
+      }
+      return;
+    }
+    if (msg.id !== undefined && msg.method) {  // request server->klien yang tidak ditangani proxy
+      this.rawSend({ jsonrpc: "2.0", id: msg.id, result: null });
+      return;
+    }
+    if (msg.method === "textDocument/publishDiagnostics") this.mgr.onDiagnostics(msg.params);
+  }
+
+  async initialize() {
+    try {
+      const res = await this.request("initialize", {
+        capabilities: {
+          textDocument: {
+            synchronization: { didSave: false, dynamicRegistration: false },
+            publishDiagnostics: { relatedInformation: false },
+            completion: { completionItem: { snippetSupport: false, documentationFormat: ["plaintext"] }, contextSupport: true },
+            hover: { contentFormat: ["plaintext", "markdown"] },
+            definition: { linkSupport: false },
+            signatureHelp: { signatureInformation: { documentationFormat: ["plaintext"] } },
+          },
+          workspace: { configuration: true, workspaceFolders: true },
+          general: { positionEncodings: ["utf-16"] },
+        },
+        clientInfo: { name: "CODING_SERVER editor" },
+      }, 30000);
+      this.capabilities = (res && res.capabilities) || {};
+      this.rawSend({ jsonrpc: "2.0", method: "initialized", params: {} });
+      this.ready = true;
+      const q = this.queue; this.queue = [];
+      q.forEach((m) => this.rawSend(m));
+      this.mgr.status(`${this.server} aktif`);
+      this.mgr.reopenAll(this);
+    } catch (e) {
+      this.mgr.status(`${this.server}: gagal inisialisasi (${e.message})`);
+    }
+  }
+
+  onClose() {
+    this.closed = true;
+    this.ready = false;
+    for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error("closed")); }
+    this.pending.clear();
+    this.mgr.onConnectionClosed(this);
+  }
+
+  close() { this.closed = true; try { this.ws.close(); } catch { /* sudah tertutup */ } }
+}
+
+export class LspManager {
+  // host: { getConfig(): {wsBase, token, projectId, enabled}, getTab(id), getState(id), applyDiagnostics(id, diags),
+  //         onStatus(text) }
+  constructor(host) {
+    this.host = host;
+    this.conns = new Map();     // server -> Connection
+    this.docs = new Map();      // tabId -> {uri, lang, server, version, timer}
+    this.retries = new Map();   // server -> jumlah percobaan ulang
+  }
+
+  status(text) { try { this.host.onStatus(text); } catch { /* opsional */ } }
+
+  docFor(tabId) { return this.docs.get(tabId); }
+
+  supports(tabId) {
+    const d = this.docs.get(tabId);
+    if (!d) return false;
+    const c = this.conns.get(d.server);
+    return !!(c && c.ready);
+  }
+
+  connection(server) {
+    const cfg = this.host.getConfig();
+    if (!cfg || !cfg.enabled || !cfg.wsBase || !cfg.projectId) return null;
+    let c = this.conns.get(server);
+    if (c && c.projectId !== cfg.projectId) { c.close(); c = null; }
+    if (!c || (c.closed && !c.failed)) {
+      c = new Connection(this, server, cfg);
+      this.conns.set(server, c);
+    }
+    return c.failed ? null : c;
+  }
+
+  open(tabId, lang, text) {
+    const server = SERVER_OF[lang];
+    const cfg = this.host.getConfig();
+    if (!server || !cfg || !cfg.enabled || !cfg.projectId || !tabId.startsWith(cfg.projectId + ":")) return;
+    const path = tabId.slice(cfg.projectId.length + 1);
+    const doc = { uri: uriOfPath(path), lang, server, version: 1, timer: null };
+    this.docs.set(tabId, doc);
+    const c = this.connection(server);
+    if (c && c.ready) this.sendOpen(c, doc, text);
+  }
+
+  sendOpen(c, doc, text) {
+    c.notify("textDocument/didOpen", { textDocument: { uri: doc.uri, languageId: doc.lang, version: doc.version, text } });
+  }
+
+  reopenAll(c) {
+    for (const [id, d] of this.docs) {
+      if (d.server !== c.server) continue;
+      const st = this.host.getState(id);
+      if (st) this.sendOpen(c, d, st.doc.toString());
+    }
+  }
+
+  change(tabId) {
+    const d = this.docs.get(tabId);
+    if (!d) return;
+    clearTimeout(d.timer);
+    d.timer = setTimeout(() => this.flush(tabId), 350);
+  }
+
+  flush(tabId) {
+    const d = this.docs.get(tabId);
+    if (!d) return;
+    clearTimeout(d.timer);
+    d.timer = null;
+    const c = this.conns.get(d.server);
+    const st = this.host.getState(tabId);
+    if (!c || !c.ready || !st) return;
+    d.version += 1;
+    c.notify("textDocument/didChange", { textDocument: { uri: d.uri, version: d.version }, contentChanges: [{ text: st.doc.toString() }] });
+  }
+
+  close(tabId) {
+    const d = this.docs.get(tabId);
+    if (!d) return;
+    clearTimeout(d.timer);
+    this.docs.delete(tabId);
+    const c = this.conns.get(d.server);
+    if (c && c.ready) c.notify("textDocument/didClose", { textDocument: { uri: d.uri } });
+    if (![...this.docs.values()].some((x) => x.server === d.server) && c) {  // tidak ada file lagi: hemat RAM Pi
+      this.conns.delete(d.server);
+      c.close();
+    }
+  }
+
+  reset() {  // proyek/token berganti
+    for (const c of this.conns.values()) c.close();
+    this.conns.clear();
+    const tabs = [...this.docs.entries()];
+    this.docs.clear();
+    for (const [id, d] of tabs) {
+      const st = this.host.getState(id);
+      if (st) this.open(id, d.lang, st.doc.toString());
+    }
+  }
+
+  onConnectionClosed(c) {
+    if (this.conns.get(c.server) !== c) return;
+    this.conns.delete(c.server);
+    if (c.failed || ![...this.docs.values()].some((d) => d.server === c.server)) return;
+    const n = (this.retries.get(c.server) || 0) + 1;
+    this.retries.set(c.server, n);
+    if (n > 5) { this.status(`${c.server}: terputus`); return; }
+    setTimeout(() => {
+      const nc = this.connection(c.server);
+      if (nc) this.retries.set(c.server, nc.ready ? 0 : n);
+    }, Math.min(30000, 1500 * n));
+  }
+
+  onDiagnostics(params) {
+    for (const [id, d] of this.docs) {
+      if (d.uri !== params.uri) continue;
+      const st = this.host.getState(id);
+      if (!st) continue;
+      const doc = st.doc;
+      const diags = (params.diagnostics || []).map((x) => {
+        const from = fromLsp(doc, x.range.start);
+        const to = Math.max(from, fromLsp(doc, x.range.end));
+        const src = x.source ? `[${x.source}] ` : "";
+        return { from, to: to === from ? Math.min(from + 1, doc.length) : to,
+                 severity: SEVERITY[x.severity] === "hint" ? "info" : (SEVERITY[x.severity] || "error"),
+                 message: src + x.message };
+      });
+      this.host.applyDiagnostics(id, diags);
+    }
+  }
+
+  // ---------- fitur ----------
+  async completion(tabId, state, pos, explicit) {
+    const d = this.docs.get(tabId);
+    const c = d && this.conns.get(d.server);
+    if (!c || !c.ready) return null;
+    if (d.timer) this.flush(tabId);
+    const before = state.sliceDoc(Math.max(0, pos - 2), pos);
+    const word = /[\w$]*$/.exec(state.sliceDoc(Math.max(0, pos - 60), pos))[0];
+    const trigger = before.endsWith(".") || before.endsWith("->") || before.endsWith("::");
+    if (!explicit && !word && !trigger) return null;
+    let res;
+    try {
+      res = await c.request("textDocument/completion", {
+        textDocument: { uri: d.uri }, position: toLsp(state.doc, pos),
+        context: trigger && !word ? { triggerKind: 2, triggerCharacter: before.slice(-1) } : { triggerKind: 1 },
+      }, 4000);
+    } catch { return null; }
+    const items = Array.isArray(res) ? res : (res && res.items) || [];
+    const options = items.slice(0, 150).map((it, i) => {
+      const insert = (it.textEdit && it.textEdit.newText) || it.insertText || it.label;
+      return {
+        label: (it.label || "").trim(),
+        apply: insert.replace(/\$\{\d+:([^}]*)\}/g, "$1").replace(/\$\d+/g, ""),
+        type: KIND[it.kind] || "text",
+        detail: it.detail ? String(it.detail).slice(0, 60) : undefined,
+        info: it.documentation ? (typeof it.documentation === "string" ? it.documentation : it.documentation.value) : undefined,
+        // pertahankan urutan relevansi dari server (CodeMirror mengurutkan ulang per skor kecocokan)
+        boost: it.preselect ? 99 : Math.max(-99, 40 - Math.floor(i / 3)),
+      };
+    });
+    return { from: pos - word.length, options, validFor: /^[\w$]*$/ };
+  }
+
+  async hover(tabId, state, pos) {
+    const d = this.docs.get(tabId);
+    const c = d && this.conns.get(d.server);
+    if (!c || !c.ready) return null;
+    if (d.timer) this.flush(tabId);
+    try {
+      const r = await c.request("textDocument/hover", { textDocument: { uri: d.uri }, position: toLsp(state.doc, pos) }, 5000);
+      if (!r || !r.contents) return null;
+      const parts = Array.isArray(r.contents) ? r.contents : [r.contents];
+      return parts.map((p) => (typeof p === "string" ? p : p.value || "")).join("\n\n")
+        .replace(/```\w*\n?/g, "").replace(/\n{3,}/g, "\n\n").trim();
+    } catch { return null; }
+  }
+
+  async definition(tabId, state, pos) {
+    const d = this.docs.get(tabId);
+    const c = d && this.conns.get(d.server);
+    if (!c || !c.ready) return null;
+    if (d.timer) this.flush(tabId);
+    try {
+      const r = await c.request("textDocument/definition", { textDocument: { uri: d.uri }, position: toLsp(state.doc, pos) }, 6000);
+      const list = Array.isArray(r) ? r : r ? [r] : [];
+      if (!list.length) return null;
+      const loc = list[0];
+      const uri = loc.uri || loc.targetUri;
+      const range = loc.range || loc.targetSelectionRange || loc.targetRange;
+      return { uri, path: pathOfUri(uri), line: range.start.line + 1, column: range.start.character + 1, sameFile: uri === d.uri };
+    } catch { return null; }
+  }
+}
+
+export function applyDiagnosticsTo(state, diags) {
+  return state.update(setDiagnostics(state, diags)).state;
+}

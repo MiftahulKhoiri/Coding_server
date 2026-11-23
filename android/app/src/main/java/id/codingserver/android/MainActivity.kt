@@ -109,7 +109,7 @@ private val DESTS = listOf(
 
 class MainActivity : ComponentActivity() {
     private val vm: AppViewModel by viewModels()
-    private val editor by lazy { EditorController(this) }
+    private val editor by lazy { EditorController(this).also { e -> e.lspConfig = { vm.lspConfigJson() } } }
     private val terminal by lazy { TerminalController(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {

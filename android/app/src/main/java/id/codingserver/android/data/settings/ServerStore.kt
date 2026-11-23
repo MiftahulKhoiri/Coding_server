@@ -35,6 +35,8 @@ data class EditorPrefs(
     val tabSize: Int = 4,
     val textColor: String = "",
     val backgroundColor: String = "",
+    /** Language server (clangd/pyright) untuk autocomplete, diagnostik, definisi. */
+    val lsp: Boolean = true,
 )
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "coding_server")
@@ -49,6 +51,7 @@ class ServerStore(private val context: Context) {
     private val kTab = intPreferencesKey("editor_tab")
     private val kTextColor = stringPreferencesKey("editor_text_color")
     private val kBackgroundColor = stringPreferencesKey("editor_background_color")
+    private val kLsp = booleanPreferencesKey("editor_lsp")
     private val kLastProject = stringPreferencesKey("last_project")
     private val kThemeMode = stringPreferencesKey("app_theme_mode")
     private val kThemeAccent = stringPreferencesKey("app_theme_accent")
@@ -58,7 +61,7 @@ class ServerStore(private val context: Context) {
     val activeId: Flow<String?> = context.dataStore.data.map { it[kActive] }
     val lastProject: Flow<String?> = context.dataStore.data.map { it[kLastProject] }
     val editorPrefs: Flow<EditorPrefs> = context.dataStore.data.map {
-        EditorPrefs(it[kDark] ?: true, it[kFont] ?: 14, it[kWrap] ?: false, it[kTab] ?: 4, it[kTextColor] ?: "", it[kBackgroundColor] ?: "")
+        EditorPrefs(it[kDark] ?: true, it[kFont] ?: 14, it[kWrap] ?: false, it[kTab] ?: 4, it[kTextColor] ?: "", it[kBackgroundColor] ?: "", it[kLsp] ?: true)
     }
 
     val appTheme: Flow<AppTheme> = context.dataStore.data.map {
@@ -111,6 +114,7 @@ class ServerStore(private val context: Context) {
             it[kTab] = p.tabSize
             it[kTextColor] = p.textColor
             it[kBackgroundColor] = p.backgroundColor
+            it[kLsp] = p.lsp
         }
     }
 }

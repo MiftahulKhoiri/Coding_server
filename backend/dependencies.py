@@ -12,6 +12,7 @@ from backend.core.exceptions import Forbidden, Unauthorized
 from backend.core.security import RateLimiter
 from backend.database.db import Database
 from backend.engines.registry import EngineRegistry
+from backend.services.lsp_service import LspService
 from backend.services.ai_service import AIService
 from backend.services.auth_service import AuthService
 from backend.services.backup_service import BackupService
@@ -43,6 +44,7 @@ class Services:
     backup: BackupService
     build: BuildService
     ai: AIService
+    lsp: "LspService"
     login_limiter: RateLimiter
     api_limiter: RateLimiter
 
@@ -56,7 +58,7 @@ def build_services(settings: Settings, registry: EngineRegistry) -> Services:
         execution=ExecutionService(settings, db, registry), terminal=TerminalService(settings),
         database=DatabaseService(settings), git=GitService(settings, db), http=HttpService(settings, db),
         monitor=MonitorService(settings), backup=BackupService(settings), build=BuildService(settings),
-        ai=AIService(settings, db, files),
+        ai=AIService(settings, db, files), lsp=LspService(settings),
         login_limiter=RateLimiter(settings.rate_limit_login_per_minute, 60.0),
         api_limiter=RateLimiter(600, 60.0),
     )

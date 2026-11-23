@@ -90,6 +90,14 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Word wrap", Modifier.weight(1f)); Switch(prefs.wordWrap, { vm.setEditorPrefs(prefs.copy(wordWrap = it)) })
                 }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Language server (C/C++ & Python)")
+                        Text("Autocomplete pintar, error saat mengetik, info simbol, ke definisi lintas file (clangd / pyright di server).",
+                             style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(prefs.lsp, { vm.setEditorPrefs(prefs.copy(lsp = it)) })
+                }
                 Text("Ukuran font: ${prefs.fontSize}")
                 Slider(prefs.fontSize.toFloat(), { vm.setEditorPrefs(prefs.copy(fontSize = it.toInt())) }, valueRange = 9f..28f)
                 Text("Lebar tab: ${prefs.tabSize}")

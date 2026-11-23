@@ -6,7 +6,8 @@
 #   ./scripts/uninstall.sh --dry-run       tampilkan apa yang akan dihapus, tanpa menghapus
 #
 # Selalu dihapus : service systemd (system/user), autostart cron, proses server & sandbox,
-#                  .venv, logs/, cache build, PID, __pycache__, node_modules web_editor.
+#                  .venv (termasuk clangd), .lsp/ (pyright), logs/, cache build, PID, __pycache__,
+#                  node_modules web_editor.
 # --purge        : + workspace/ (proyek, database, metadata, riwayat, token Git terenkripsi),
 #                  backups/, dan konfigurasi coding_server.env.
 # Tidak pernah disentuh: linger systemd (bisa dipakai service lain), paket apt (gcc, java, go, ...),
@@ -193,6 +194,7 @@ main() {
   safe_rm "$BASE/workspace/cache"
   safe_rm "$PID_FILE"
   safe_rm "$BASE/web_editor/node_modules"
+  safe_rm "$BASE/.lsp"
   safe_rm "$BASE/.pytest_cache"
   if [ "$DRY" = 1 ]; then echo "    [dry-run] hapus semua __pycache__ dan *.partial"
   else
