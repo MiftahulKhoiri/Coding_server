@@ -3,6 +3,11 @@ package id.codingserver.android.ui.editor
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,7 +30,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -60,7 +64,7 @@ import kotlinx.coroutines.launch
 
 /** Code editor: tab, simpan, simpan sebagai, jalankan, build, cari/ganti, undo/redo, simbol, riwayat. */
 @Composable
-fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () -> Unit) {
+fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit = {}, onRunStarted: () -> Unit) {
     val client by vm.client.collectAsState()
     val tabs by vm.tabs.collectAsState()
     val activeId by vm.activeTab.collectAsState()
@@ -159,41 +163,37 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onRunStarted: () ->
     }
 
     Column(Modifier.fillMaxSize()) {
-        // baris tab
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp)) {
-            tabs.forEach { t ->
-                FilterChip(
-                    selected = t.id == activeId,
-                    onClick = { vm.setActiveTab(t.id) },
-                    label = { Text((if (t.dirty) "● " else "") + t.name) },
-                    trailingIcon = {
-                        Icon(Icons.Default.Close, "Tutup", Modifier.clickable {
-                            scope.launch {
-                                if (t.dirty) vm.toast("${t.name} belum disimpan — perubahan dibuang")
-                                editor.closeTab(t.id); vm.closeTab(t.id)
-                            }
-                        })
-                    },
-                    modifier = Modifier.padding(end = 4.dp),
-                )
+        // Baris 1 (ringkas): menu samping + tab file. Menggantikan AppBar besar agar area kode lebih luas.
+        Row(Modifier.fillMaxWidth().height(40.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToolIcon(Icons.Default.Menu, "Menu", onClick = onMenu)
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                if (tabs.isEmpty()) Text("Code Editor", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp))
+                tabs.forEach { t ->
+                    FileTab(t.name, t.dirty, t.id == activeId, onClick = { vm.setActiveTab(t.id) }, onClose = {
+                        scope.launch {
+                            if (t.dirty) vm.toast("${t.name} belum disimpan — perubahan dibuang")
+                            editor.closeTab(t.id); vm.closeTab(t.id)
+                        }
+                    })
+                }
             }
         }
-        // toolbar
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(enabled = project != null, onClick = { newFile = true }) { Icon(Icons.AutoMirrored.Filled.NoteAdd, "File baru") }
-            IconButton(enabled = active != null, onClick = { scope.launch { active?.let { save(it) } } }) { Icon(Icons.Default.Save, "Simpan") }
-            IconButton(enabled = active != null, onClick = { scope.launch { runActive(false) } }) { Icon(Icons.Default.PlayArrow, "Jalankan") }
-            IconButton(enabled = active != null, onClick = { scope.launch { runActive(true) } }) { Icon(Icons.Default.Build, "Build") }
-            IconButton(enabled = active != null, onClick = { scope.launch { editor.undo() } }) { Icon(Icons.AutoMirrored.Filled.Undo, "Undo") }
-            IconButton(enabled = active != null, onClick = { scope.launch { editor.redo() } }) { Icon(Icons.AutoMirrored.Filled.Redo, "Redo") }
-            IconButton(enabled = active != null, onClick = { scope.launch { editor.openSearch() } }) { Icon(Icons.Default.Search, "Cari & ganti") }
-            Column(Modifier.weight(1f)) {
+        // Baris 2 (ringkas): toolbar
+        Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToolIcon(Icons.AutoMirrored.Filled.NoteAdd, "File baru", enabled = project != null, onClick = { newFile = true })
+            ToolIcon(Icons.Default.Save, "Simpan", enabled = active != null, onClick = { scope.launch { active?.let { save(it) } } })
+            ToolIcon(Icons.Default.PlayArrow, "Jalankan", enabled = active != null, onClick = { scope.launch { runActive(false) } })
+            ToolIcon(Icons.Default.Build, "Build", enabled = active != null, onClick = { scope.launch { runActive(true) } })
+            ToolIcon(Icons.AutoMirrored.Filled.Undo, "Undo", enabled = active != null, onClick = { scope.launch { editor.undo() } })
+            ToolIcon(Icons.AutoMirrored.Filled.Redo, "Redo", enabled = active != null, onClick = { scope.launch { editor.redo() } })
+            ToolIcon(Icons.Default.Search, "Cari & ganti", enabled = active != null, onClick = { scope.launch { editor.openSearch() } })
+            Column(Modifier.weight(1f).padding(start = 4.dp)) {
                 Text("${cursor.first}:${cursor.second}", style = MaterialTheme.typography.labelSmall)
                 if (prefs.lsp && lspStatus.isNotBlank()) Text(lspStatus, style = MaterialTheme.typography.labelSmall, maxLines = 1,
                                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Lainnya") }
+                ToolIcon(Icons.Default.MoreVert, "Lainnya", onClick = { menu = true })
                 DropdownMenu(menu, { menu = false }) {
                     DropdownMenuItem({ Text("Simpan sebagai…") }, enabled = active != null, onClick = { menu = false; saveAs = true })
                     DropdownMenuItem({ Text("Ke baris…") }, enabled = active != null, onClick = { menu = false; gotoLine = true })
@@ -404,6 +404,33 @@ private fun EditorPresetRow(onPick: (EditorColorPreset) -> Unit) {
                 label = { Text(p.name, color = fg) },
                 colors = androidx.compose.material3.SuggestionChipDefaults.suggestionChipColors(containerColor = bg),
             )
+        }
+    }
+}
+
+/** Tombol ikon toolbar ringkas (36dp, ikon 20dp) — default IconButton 48dp memakan tinggi layar. */
+@Composable
+private fun ToolIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, enabled: Boolean = true, onClick: () -> Unit) {
+    IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(36.dp)) {
+        Icon(icon, desc, Modifier.size(20.dp))
+    }
+}
+
+/** Tab file ringkas (tinggi 28dp) pengganti FilterChip. */
+@Composable
+private fun FileTab(name: String, dirty: Boolean, selected: Boolean, onClick: () -> Unit, onClose: () -> Unit) {
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+    Row(
+        Modifier.padding(end = 4.dp).height(28.dp)
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent, shape)
+            .border(1.dp, if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.outlineVariant, shape)
+            .clickable(onClick = onClick).padding(start = 8.dp, end = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text((if (dirty) "● " else "") + name, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+             color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface)
+        Box(Modifier.size(24.dp).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Close, "Tutup $name", Modifier.size(14.dp))
         }
     }
 }

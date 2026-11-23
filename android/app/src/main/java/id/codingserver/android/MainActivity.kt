@@ -186,7 +186,8 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
             snackbarHost = { SnackbarHost(snack) },
             topBar = {
                 if (loggedIn) Column {
-                    TopAppBar(
+                    // Layar editor punya baris menu+tab ringkas sendiri (area kode lebih luas).
+                    if (route != "editor") TopAppBar(
                         title = {
                             Text(DESTS.firstOrNull { it.route == route }?.label ?: "Coding Server", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         },
@@ -203,13 +204,14 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
         ) { pad ->
             // imePadding: dengan edge-to-edge (Android 15) adjustResize tidak lagi mengecilkan jendela,
             // jadi konten (editor/terminal) harus diberi padding keyboard agar baris yang diketik tidak tertutup.
-            NavGraph(nav, vm, editor, terminal, Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize())
+            NavGraph(nav, vm, editor, terminal, onMenu = { scope.launch { drawer.open() } }, modifier = Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize())
         }
     }
 }
 
 @Composable
-private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorController, terminal: TerminalController, modifier: Modifier) {
+private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorController, terminal: TerminalController,
+                     onMenu: () -> Unit, modifier: Modifier) {
     fun openFile(e: FileEntry) {
         val p = vm.project.value ?: return
         vm.addOrFocusTab(EditorTab(p.id, e.path, null, language = e.language))
@@ -236,7 +238,7 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
                 }
             })
         }
-        composable("editor") { EditorScreen(vm, editor) { nav.navigate("output") { launchSingleTop = true } } }
+        composable("editor") { EditorScreen(vm, editor, onMenu) { nav.navigate("output") { launchSingleTop = true } } }
         composable("terminal") { TerminalScreen(vm, terminal) }
         composable("output") {
             OutputScreen(vm, editor, onGotoEditor = { nav.navigate("editor") { launchSingleTop = true } },
