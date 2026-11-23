@@ -1,6 +1,6 @@
-# PROJECT_STATUS — CODING_SERVER 1.0.0
+# PROJECT_STATUS — CODING_SERVER 1.1.1
 
-Terakhir diperbarui: 20 Nov 2026. Semua status di bawah berdasarkan uji nyata di Raspberry Pi 5 (aarch64) dan CI GitHub.
+Terakhir diperbarui: 23 Nov 2026. Semua status di bawah berdasarkan uji nyata di Raspberry Pi 5 (aarch64) dan CI GitHub.
 
 ## Lingkungan server aktual
 Raspberry Pi 5 Model B Rev 1.1 · Debian 13 (trixie) aarch64 · kernel 6.18 · 16 GB RAM · NVMe 468 GB ·
@@ -40,6 +40,11 @@ sandbox **bubblewrap aktif**.
 
 ## Hasil uji aktual
 - **Backend di Pi 5**: `52 passed` (pytest, termasuk 2 uji sandbox). CI Ubuntu: lulus.
+- **Uninstall (23 Nov 2026, Pi 5)**: instalasi uji kedua (`CS_SERVICE_NAME=coding-server-test`, port 8811) dipasang
+  lalu di-uninstall: default (service+cron+proses+venv+log+cache hilang, data tetap), `--purge` (backup akhir 0600
+  terverifikasi lalu data hilang), `--dry-run`, opsi tak dikenal, tanpa `-y` non-interaktif (batal). Cron milik folder
+  lain dan service utama tidak tersentuh. `--remove-repo` dan `--remove-runtimes` hanya diuji lewat `--dry-run`.
+- **Backend di Pi 5 (23 Nov)**: `61 passed`.
 - **Android**: 6 unit test + 1 uji kontrak end-to-end lulus (di Pi dan di CI).
 - **Performa (Pi 5, live)**: health p50 1.1 ms / p95 1.3 ms; baca file p50 3.5 ms.
   Run (termasuk compile, sandbox): Python 0.16 s, C 0.06 s, PHP 0.31 s, Java 0.72 s, Node 0.87 s,

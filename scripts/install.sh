@@ -54,8 +54,9 @@ elif sudo -n true 2>/dev/null; then
 elif linger_enabled; then
   "$BASE/scripts/install_user_systemd.sh"
 else
-  ( crontab -l 2>/dev/null | grep -v coding_server_autostart; \
-    echo "@reboot $BASE/scripts/start.sh >> $BASE/logs/autostart.log 2>&1 # coding_server_autostart" ) | crontab -
+  cron_remove_mine
+  ( crontab -l 2>/dev/null; \
+    echo "@reboot $BASE/scripts/start.sh >> $BASE/logs/autostart.log 2>&1 # $CRON_MARK" ) | crontab -
   c_warn "sudo tidak tersedia tanpa password: autostart memakai cron @reboot (supervisor, restart otomatis)."
   c_warn "Untuk systemd (disarankan): sudo $BASE/scripts/install_systemd.sh"
 fi
@@ -65,3 +66,4 @@ if user_systemd_installed || systemd_installed; then "$BASE/scripts/start.sh"; e
 if [ -f workspace/metadata/initial_admin_password.txt ]; then
   echo; c_info "Login awal (simpan lalu hapus file ini):"; cat workspace/metadata/initial_admin_password.txt
 fi
+c_info "Untuk menghapus instalasi nanti: ./scripts/uninstall.sh --help"

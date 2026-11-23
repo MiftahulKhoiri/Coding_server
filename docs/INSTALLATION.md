@@ -39,3 +39,26 @@ Password admin acak: `cat workspace/metadata/initial_admin_password.txt` → log
 ```bash
 cd ~/Coding_server && git pull && .venv/bin/pip install -r requirements.txt && ./scripts/restart.sh
 ```
+
+## 7. Uninstall
+```bash
+./scripts/uninstall.sh [--purge] [--remove-runtimes] [--remove-repo] [-y] [--dry-run]
+```
+| Langkah | Default | `--purge` |
+|---|---|---|
+| Backup akhir `~/coding_server_uninstall_<waktu>.tar.gz` (0600, diverifikasi) | – | ✔ (lewati: `--no-final-backup`, lokasi: `--backup-dir`) |
+| Hentikan & hapus service systemd (system/user) dan cron `@reboot` milik folder ini | ✔ | ✔ |
+| Hentikan proses tersisa (supervisor, uvicorn, terminal/sandbox) | ✔ | ✔ |
+| Hapus `.venv/`, `logs/`, `workspace/cache/`, PID, `__pycache__`, `*.partial`, `web_editor/node_modules` | ✔ | ✔ |
+| Hapus `workspace/` (proyek, database, metadata, riwayat), `backups/`, `coding_server.env` | – | ✔ |
+
+- Tanpa opsi di terminal interaktif, skrip **menanyakan** apakah data ikut dihapus (default: dipertahankan).
+  Tanpa terminal (mis. lewat SSH non-interaktif) wajib `-y`.
+- Bila backup akhir gagal, data **tidak** dihapus.
+- `--remove-runtimes`: hapus `~/.dotnet` dan `~/.local/opt/php` beserta symlink di `~/.local/bin` — hanya yang tercatat
+  dipasang oleh `install_runtimes.sh` (`deployment/configuration/.installed_runtimes`), dikonfirmasi satu per satu.
+- `--remove-repo`: hapus seluruh folder repo (memperingatkan bila ada perubahan yang belum di-commit/push).
+- Tidak disentuh: *linger* systemd (bisa dipakai service lain), paket apt, aplikasi di HP.
+- Service systemd **sistem** butuh sudo; bila sudo tidak tersedia skrip menampilkan perintah manualnya.
+- Unit/cron hanya dianggap milik instalasi ini bila menunjuk ke folder ini, jadi uninstall salinan lain tidak bisa
+  mematikan service utama. Instalasi kedua di Pi yang sama: set `CS_SERVICE_NAME` dan `CS_PORT` berbeda di `.env`.

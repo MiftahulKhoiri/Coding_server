@@ -4,6 +4,11 @@
 set -euo pipefail
 source "$(dirname "$0")/common.sh"
 [ "$(id -u)" -eq 0 ] && { c_err "Jalankan sebagai user biasa"; exit 1; }
+if unit_foreign "$USER_UNIT"; then
+  c_err "$USER_UNIT milik instalasi lain ($(grep -m1 '^ExecStart=' "$USER_UNIT"))."
+  c_err "Pakai nama service lain: tambahkan CS_SERVICE_NAME=nama-lain di deployment/configuration/coding_server.env"
+  exit 1
+fi
 mkdir -p "$(dirname "$USER_UNIT")"
 sed -e '/^User=/d' -e '/^Group=/d' -e "s|@BASE@|$BASE|g" -e "s|@HOME@|$HOME|g" \
     -e 's|WantedBy=multi-user.target|WantedBy=default.target|' \
@@ -14,7 +19,7 @@ if [ -f "$PID_FILE" ]; then
   pid=$(cat "$PID_FILE"); kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
   sleep 2; rm -f "$PID_FILE"
 fi
-( crontab -l 2>/dev/null | grep -v coding_server_autostart ) | crontab - 2>/dev/null || true
+cron_remove_mine 2>/dev/null || true
 systemctl --user daemon-reload
 systemctl --user enable "$SERVICE" >/dev/null
 systemctl --user restart "$SERVICE"

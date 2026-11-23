@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.1 — 2026-11-23
+### Ditambahkan
+- `scripts/uninstall.sh`: hapus service systemd (system/user) + cron autostart, hentikan proses tersisa, bersihkan
+  `.venv`, log, cache, PID, `__pycache__`. Opsi `--purge` (hapus data setelah backup akhir terverifikasi),
+  `--remove-runtimes`, `--remove-repo`, `--dry-run`, `-y`. Penghapusan dibatasi ke folder instalasi.
+- `CS_SERVICE_NAME` untuk menjalankan instalasi kedua (mis. uji) berdampingan dengan nama service berbeda.
+- `install_runtimes.sh` mencatat runtime yang dipasangnya (`deployment/configuration/.installed_runtimes`).
+### Diperbaiki
+- Skrip mengenali unit systemd hanya dari namanya: `stop.sh`/`start.sh` dari salinan lain bisa mematikan service
+  utama, dan installer salinan bisa menimpa unit-nya. Kini unit dianggap milik instalasi ini hanya bila `ExecStart`
+  menunjuk ke folder ini; installer menolak menimpa unit milik folder lain.
+- Pembersihan cron hanya menghapus baris milik folder ini (sebelumnya semua baris ber-marker).
+- `status.sh` tidak lagi membuat ulang folder `logs/`/`workspace/` dan memberi pesan jelas bila venv tidak ada.
+- Versi backend (`/system/health`) masih 1.0.0 padahal rilis 1.1.0 → kini 1.1.1.
+
 ## 1.1.0 — 2026-11-20
 ### Ditambahkan
 - **AI Chat & Model AI** (konsep seperti ai_asisten): koneksi **lokal** (llama-server mode router di Pi, Ollama, server

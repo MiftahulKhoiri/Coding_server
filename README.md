@@ -50,6 +50,15 @@ Mode autostart yang dipilih otomatis:
 ```bash
 ./scripts/start.sh     ./scripts/stop.sh     ./scripts/restart.sh     ./scripts/status.sh
 ```
+
+## Uninstall
+```bash
+./scripts/uninstall.sh                # hapus aplikasi (service, autostart, proses, venv, log, cache); data dipertahankan
+./scripts/uninstall.sh --purge        # + hapus data (proyek, database, backup, .env) — backup akhir dibuat dulu di ~
+./scripts/uninstall.sh --dry-run      # lihat apa yang akan dihapus tanpa menghapus
+```
+Opsi lain: `--remove-runtimes` (.NET/PHP yang dipasang installer), `--remove-repo` (hapus folder repo), `-y` (tanpa
+konfirmasi). Linger systemd dan paket apt tidak disentuh; aplikasi Android dihapus manual dari HP.
 API: `http://<IP-PI>:8800/api/v1`, dokumentasi interaktif OpenAPI: `http://<IP-PI>:8800/docs`.
 
 ## Menghubungkan APK

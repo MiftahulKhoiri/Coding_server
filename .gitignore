@@ -11,6 +11,7 @@ venv/
 /logs/
 /backups/
 deployment/configuration/coding_server.env
+deployment/configuration/.installed_runtimes
 *.partial
 
 # Node / editor build cache

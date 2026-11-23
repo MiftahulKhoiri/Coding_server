@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+export CS_NO_MKDIR=1
 source "$(dirname "$0")/common.sh"
 echo "== CODING_SERVER =="
 if systemd_installed; then
@@ -10,5 +11,6 @@ elif [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 else
   echo "Mode: tidak berjalan"
 fi
-crontab -l 2>/dev/null | grep -q "Coding_server\|coding_server" && echo "Autostart: cron @reboot aktif"
+[ -n "$(cron_lines_mine)" ] && echo "Autostart: cron @reboot aktif"
+[ -x "$PY" ] || { c_err "Virtualenv tidak ada ($VENV) — belum terpasang atau sudah di-uninstall"; exit 1; }
 "$PY" "$BASE/scripts/health_check.py" --url "http://127.0.0.1:$CS_PORT"
