@@ -1,5 +1,8 @@
 package id.codingserver.android
 
+import id.codingserver.android.data.api.AIProposalItem
+import id.codingserver.android.data.api.AgentEvents
+import id.codingserver.android.data.api.AgentTask
 import id.codingserver.android.data.api.ApiJson
 import id.codingserver.android.data.api.Job
 import id.codingserver.android.data.api.normalizeBaseUrl
@@ -11,6 +14,28 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UnitTests {
+    @Test fun decodeAgentTaskAndEvents() {
+        val json = """{"id":"abc","project_id":"p","title":"t","description":"d","status":"COMPLETED","stage":"COMPLETED",
+            "progress":1.0,"current_op":"","model":"coder","error":"","max_steps":30,"steps_used":5,"created_at":1.0,
+            "started_at":1.5,"updated_at":2.0,"finished_at":2.0,"duration":0.5,"auto_apply":false,"pending_proposals":0,
+            "plan":[{"id":"1","description":"perbaiki","files":["a.py"],"depends_on":[],"risk":"MEDIUM","verification":"run_tests","status":"done"}],
+            "report":{"verified":{"proposals":[],"files_changed":["a.py"],"files_pending":[],"runs":[{"kind":"test","target":"pytest",
+            "status":"COMPLETED","exit_code":0,"process_id":"x"}],"tests_passed":1,"tests_failed":0,"steps_used":5,"plan":[]},
+            "ai_generated":{"summary":"ok","limitations":null,"remaining":null},"note":"n"},"extra_field":1}"""
+        val t = ApiJson.decodeFromString<AgentTask>(json)
+        assertEquals("COMPLETED", t.status)
+        assertEquals(listOf("a.py"), t.report!!.verified.files_changed)
+        assertEquals(1, t.report!!.verified.tests_passed)
+        assertEquals("done", t.plan.single().status)
+        val ev = ApiJson.decodeFromString<AgentEvents>(
+            """{"events":[{"id":3,"ts":1.0,"kind":"tool_call","data":{"tool":"read_file","args":{"path":"a.py"}}}]}""")
+        assertEquals("tool_call", ev.events.single().kind)
+        val p = ApiJson.decodeFromString<AIProposalItem>(
+            """{"id":1,"path":"run.sh","risk":"HIGH","risk_reasons":["skrip shell"],"task_id":"abc","new_file":true}""")
+        assertEquals("HIGH", p.risk)
+        assertEquals("abc", p.task_id)
+    }
+
     @Test fun normalizeUrl() {
         assertEquals("http://192.168.1.5:8800/", normalizeBaseUrl("192.168.1.5"))
         assertEquals("http://192.168.1.5:9000/", normalizeBaseUrl("http://192.168.1.5:9000/"))

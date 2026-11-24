@@ -156,8 +156,8 @@ class AiChatController(private val scope: CoroutineScope, private val client: ()
     }
 
     /** approve=true terapkan, false tolak. */
-    fun decide(item: AIProposalItem, approve: Boolean, onError: (String) -> Unit) =
-        act(item, onError) { c, pid -> c.api.aiDecide(item.id, AIDecisionIn(pid, approve)) }
+    fun decide(item: AIProposalItem, approve: Boolean, confirmHighRisk: Boolean = false, onError: (String) -> Unit) =
+        act(item, onError) { c, pid -> c.api.aiDecide(item.id, AIDecisionIn(pid, approve, confirmHighRisk)) }
 
     fun revert(item: AIProposalItem, onError: (String) -> Unit) =
         act(item, onError) { c, pid -> c.api.aiRevert(item.id, AIDecisionIn(pid)) }

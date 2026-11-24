@@ -178,16 +178,17 @@ def propose(body: AIProposal, user: dict = Depends(require("read")), svc: Servic
 
 @router.get("/proposals")
 def proposals(project_id: str, status: str | None = None, conversation_id: int | None = None,
-              user: dict = Depends(require("read")), svc: Services = Depends(services)):
+              task_id: str | None = None, user: dict = Depends(require("read")), svc: Services = Depends(services)):
     project_dir(svc, project_id, user)
-    return {"proposals": svc.ai.proposals(project_id, status, conversation_id)}
+    return {"proposals": svc.ai.proposals(project_id, status, conversation_id, task_id)}
 
 
 @router.post("/proposals/{proposal_id}/decide", summary="Setujui/tolak proposal AI (dicatat & bisa di-undo)")
-def decide(proposal_id: int, body: AIDecision, user: dict = Depends(require("write")), svc: Services = Depends(services)):
+async def decide(proposal_id: int, body: AIDecision, user: dict = Depends(require("write")), svc: Services = Depends(services)):
     root = project_dir(svc, body.project_id, user)
-    res = svc.ai.decide(user, body.project_id, root, proposal_id, body.approve)
+    res = svc.ai.decide(user, body.project_id, root, proposal_id, body.approve, body.confirm_high_risk)
     svc.db.audit("ai_proposal_decide", user=user, target=str(proposal_id), detail=res["status"])
+    svc.agent.on_proposal_decided(res["proposal"].get("task_id"))
     return res
 
 

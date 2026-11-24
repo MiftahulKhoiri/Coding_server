@@ -8,6 +8,7 @@ runtime, database, Git, terminal dan log semuanya di Pi. APK tidak menyimpan pro
 |---|---|---|
 | Server layer | `backend/main.py`, `backend/api/*`, `backend/middleware/*` | Routing REST `/api/v1`, WebSocket `/ws/*`, validasi (Pydantic), autentikasi, format error seragam, OpenAPI |
 | Service layer | `backend/services/*` | Logika: file, proyek, eksekusi, terminal, build, database, git, http, monitor, backup, ai, auth |
+| Agent layer | `backend/services/agent_service.py`, `agent_tools.py`, `ai_risk.py`, `test_detect.py` | Task AI persisten: loop model → tool ber-izin → proposal / eksekusi sandbox → laporan. Lihat `AI_AGENT.md` |
 | Engine layer | `backend/engines/*` | Satu kelas per bahasa, turunan `BaseEngine` (`language_id`, `extensions`, `validate_environment()`, `get_version()`, `detect_project()`, `build_steps()`, `run_steps()`, `get_status()`), didaftarkan di `registry.py` |
 | Core | `backend/core/*` | Keamanan (scrypt, JWT, rate limit), izin, sandbox (bwrap + rlimit), process manager (timeout, watchdog RAM, cancel), job queue, logging |
 | Storage | `workspace/`, `logs/`, `backups/` | Data proyek, DB pengguna, metadata SQLite, riwayat file, cache compiler |
@@ -31,14 +32,15 @@ APK  WS /ws/execution/{id}?token=...  ← {type: status|phase|stdout|stderr|end}
 coding_server/
 ├── backend/            main.py, config.py, dependencies.py
 │   ├── api/            auth, system, monitor, projects, files, execution, terminal, database, git,
-│   │                   http_client, backup, ai, preview
+│   │                   http_client, backup, ai, agent, lsp, preview
 │   ├── core/           security, permissions, exceptions, logging, process_manager, job_queue, sandbox, git_askpass.sh
-│   ├── services/       file, project, execution, terminal, build, database, git, http, monitor, backup, ai, auth, secret_store
+│   ├── services/       file, project, execution, terminal, build, database, git, http, monitor, backup, ai, auth, secret_store,
+│   │                   agent_service, agent_tools, ai_risk, ai_edits, ai_providers, test_detect, lsp
 │   ├── engines/        base_engine, registry, python, javascript, php, go, c, cpp, java, csharp, sql (+sql_runner), web, shell
 │   ├── schemas/        models.py (kontrak request/response)
 │   ├── database/       db.py (metadata SQLite, WAL)
 │   ├── middleware/     request_log.py
-│   └── tests/          pytest (auth, files, engines, services, sandbox)
+│   └── tests/          pytest (auth, files, engines, services, sandbox, ai, agent, risiko, regresi keamanan)
 ├── android/            aplikasi Android (Gradle, Compose)
 ├── web_editor/         sumber CodeMirror 6 & xterm.js → dist/*.html (juga disalin ke aset Android)
 ├── workspace/          projects/, database/, metadata/, history/, data/, cache/   (runtime, tidak di-commit)

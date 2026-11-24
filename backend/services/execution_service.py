@@ -68,6 +68,20 @@ class Job:
         return d
 
 
+class _CommandEngine:
+    """Pengganti engine untuk submit_command: tanpa runtime tambahan di luar sistem."""
+
+    language_id = "command"
+
+    @staticmethod
+    def extra_writable() -> list[Path]:
+        return []
+
+    @staticmethod
+    def runtime_dirs() -> list[Path]:
+        return []
+
+
 class ExecutionService:
     def __init__(self, settings: Settings, db: Database, registry: EngineRegistry):
         self.s = settings
@@ -227,6 +241,51 @@ class ExecutionService:
             raise
         job.command = [s.argv for s in steps]
         job.task = asyncio.create_task(self._run(job, engine, ctx, steps, stdin, interactive))
+        return job
+
+    async def submit_command(self, *, user: dict, project_id: str, project_dir: Path, argv: list[str],
+                             action: str, label: str, env: dict[str, str] | None = None,
+                             timeout: int | None = None) -> Job:
+        """Jalankan satu perintah yang argv-nya DISUSUN SERVER (mis. perintah uji hasil deteksi).
+
+        Memakai antrean, sandbox (fail-closed), batas sumber daya, riwayat & streaming yang sama
+        dengan run/build biasa. Jangan pernah meneruskan argv mentah dari pengguna/model ke sini.
+        """
+        from backend.engines.base_engine import Step
+
+        require_sandbox(self.s)
+        self.queue.check_admission()
+        root = project_dir.resolve()
+        build_dir = self.s.cache_dir / "builds" / project_id / action
+        build_dir.mkdir(parents=True, exist_ok=True)
+        t = min(timeout or self.s.build_timeout, self.s.build_timeout)
+        ctx = EngineContext(project_dir=root, file=root, build_dir=build_dir, cache_dir=self.s.cache_dir / "lang",
+                            args=[], run_timeout=t, build_timeout=t, memory_mb=self.s.memory_limit_mb,
+                            network=self.s.sandbox_network)
+        steps = [Step(phase="run", argv=list(argv), timeout=t, cwd=root, env=dict(env or {}))]
+        job = Job(id=uuid.uuid4().hex[:16], project_id=project_id, user_id=user["id"], action=action,
+                  language=label, file="", command=[list(argv)])
+        self.jobs[job.id] = job
+        self._save(job)
+        await self._emit(job, {"type": "status", "status": "QUEUED", "time": time.time()})
+        job.task = asyncio.create_task(self._run(job, _CommandEngine(), ctx, steps, None, False))
+        return job
+
+    async def wait(self, job: Job, timeout: float | None = None) -> Job:
+        """Tunggu job selesai (status terminal). Bila pemanggil dibatalkan, job ikut dihentikan."""
+        q = self.subscribe(job)
+        try:
+            async def _until_end() -> None:
+                while True:
+                    ev = await q.get()
+                    if ev.get("type") == "end":
+                        return
+            await asyncio.wait_for(_until_end(), timeout)
+        except (asyncio.CancelledError, asyncio.TimeoutError):
+            await self.stop(job.id)
+            raise
+        finally:
+            self.unsubscribe(job, q)
         return job
 
     async def _run(self, job: Job, engine, ctx: EngineContext, steps, stdin, interactive) -> None:

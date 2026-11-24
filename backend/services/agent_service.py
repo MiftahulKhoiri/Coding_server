@@ -1,0 +1,508 @@
+"""AI Coding Agent: task persisten dengan loop Understand → Inspect → Plan → Execute → Test → Review → Report.
+
+* Model (lokal llama-server atau online) memilih SATU tool per langkah dalam format JSON. Format ini
+  sengaja tidak bergantung pada fitur "tool calling" penyedia agar model lokal kecil juga bisa.
+* Semua aksi lewat ``agent_tools`` (izin = irisan hak pengguna & peran 'ai'); perubahan file menjadi
+  proposal di Approval Center; eksekusi lewat ExecutionService (antrean, sandbox fail-closed).
+* Task, rencana, log event, dan checkpoint percakapan disimpan di SQLite. Server restart → task
+  yang sedang berjalan menjadi PAUSED (bukan hilang) dan bisa dilanjutkan dari checkpoint.
+* Laporan akhir dibangun server dari data nyata (proposal, hasil eksekusi); ringkasan dari model
+  ditandai sebagai teks buatan AI.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import re
+import time
+import uuid
+from pathlib import Path
+
+from backend.config import Settings
+from backend.core.exceptions import AppError, Conflict, Forbidden, NotFound
+from backend.core.logging import get_logger
+from backend.core.permissions import intersect_for_ai
+from backend.database.db import Database
+from backend.services import agent_tools
+from backend.services.agent_tools import NeedsApproval, ToolContext, ToolError
+
+log = get_logger("agent")
+
+ACTIVE = {"PENDING", "PLANNING", "INSPECTING", "EXECUTING", "BUILDING", "TESTING", "REVIEWING", "FIXING"}
+TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
+STATUSES = ACTIVE | TERMINAL | {"PAUSED", "WAITING_APPROVAL"}
+CONTEXT_BUDGET = 48_000   # karakter percakapan yang dikirim ke model
+KEEP_RECENT = 6           # hasil tool terakhir yang tidak dipangkas
+MAX_PARSE_FAILS = 3
+
+SYSTEM_PROMPT = """Kamu adalah AI Coding Agent di CODING_SERVER (Raspberry Pi 5). Kamu bekerja pada SATU proyek
+nyata dan hanya bisa bertindak lewat tool di bawah. Jangan pernah mengarang isi file: baca dulu.
+
+Alur kerja: pahami tugas → inspeksi proyek (project_info, list_dir, search, read_file) → buat rencana
+(update_plan) → ubah file seperlunya (edit_file untuk perubahan kecil, write_file untuk file baru) →
+verifikasi (build_file / run_file / run_tests) → bila gagal, baca error, cari akar masalah, perbaiki,
+ulangi verifikasi → perbarui status rencana → finish.
+
+Aturan:
+- Setiap balasan berisi TEPAT SATU objek JSON dalam blok ```json:
+  {{"thought": "alasan singkat", "tool": "nama_tool", "args": {{...}}}}
+- Untuk write_file/edit_file, isi file boleh ditulis di blok kode TERPISAH tepat setelah blok json
+  (lebih aman daripada di-escape di JSON). Untuk edit_file pakai format:
+<<<<<<< SEARCH
+teks lama persis
+=======
+teks baru
+>>>>>>> REPLACE
+- Perubahan file menjadi proposal; bisa saja menunggu persetujuan pengguna. Jangan menyingkat isi
+  file dengan "...".
+- Buat perubahan sekecil mungkin, jangan ubah hal yang tidak diminta, jangan hapus file kecuali diminta.
+- Jangan mengaku tes lulus tanpa menjalankannya. Bila tidak bisa diverifikasi, katakan di finish.
+
+Tool yang tersedia untukmu:
+{tools}
+"""
+
+
+def _now() -> float:
+    return time.time()
+
+
+def extract_call(text: str) -> tuple[dict, str | None]:
+    """Ambil objek JSON pertama (utamakan blok ```json) + blok kode pertama SETELAH JSON."""
+    candidates: list[tuple[int, int]] = []
+    for m in re.finditer(r"```(?:json|JSON)\s*\n(.*?)```", text, re.S):
+        candidates.append((m.start(1), m.end()))
+    dec = json.JSONDecoder()
+    obj, end = None, None
+    for start, fence_end in candidates:
+        try:
+            o, _ = dec.raw_decode(text[start:].lstrip())
+            if isinstance(o, dict):
+                obj, end = o, fence_end
+                break
+        except json.JSONDecodeError:
+            continue
+    if obj is None:
+        for m in re.finditer(r"\{", text):
+            try:
+                o, n = dec.raw_decode(text[m.start():])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(o, dict) and "tool" in o:
+                obj, end = o, m.start() + n
+                break
+    if obj is None or not isinstance(obj.get("tool"), str):
+        raise ValueError("Balasan tidak berisi objek JSON dengan field \"tool\"")
+    code = None
+    m = re.search(r"```[^\n`]*\n(.*?)```", text[end:], re.S)
+    if m:
+        code = m.group(1)
+    return obj, code
+
+
+class AgentService:
+    def __init__(self, settings: Settings, db: Database, services_ref):
+        self.s = settings
+        self.db = db
+        self._svc_ref = services_ref  # callable -> Services (hindari import melingkar)
+        self._sem = asyncio.Semaphore(max(1, settings.agent_max_concurrent))
+        self._tasks: dict[str, asyncio.Task] = {}
+        self._pause: set[str] = set()
+        # Pemulihan: task yang sedang berjalan saat server mati tidak dihapus diam-diam.
+        self.db.execute(
+            "UPDATE agent_tasks SET status='PAUSED', current_op='Server dimulai ulang; lanjutkan untuk meneruskan "
+            "dari checkpoint', updated_at=? WHERE status IN (%s)" % ",".join("?" * len(ACTIVE)),
+            (_now(), *sorted(ACTIVE)),
+        )
+
+    @property
+    def svc(self):
+        return self._svc_ref()
+
+    # ---------- penyimpanan ----------
+    def _row(self, task_id: str) -> dict:
+        row = self.db.one("SELECT * FROM agent_tasks WHERE id=?", (task_id,))
+        if not row:
+            raise NotFound("Task agen tidak ditemukan")
+        return row
+
+    def _owned(self, task_id: str, user: dict) -> dict:
+        row = self._row(task_id)
+        if row["user_id"] != user["id"] and "admin" not in user["perms"]:
+            raise NotFound("Task agen tidak ditemukan")
+        return row
+
+    def _update(self, task_id: str, **f) -> None:
+        f["updated_at"] = _now()
+        cols = ", ".join(f"{k}=?" for k in f)
+        self.db.execute(f"UPDATE agent_tasks SET {cols} WHERE id=?", (*f.values(), task_id))
+
+    def _event(self, task_id: str, kind: str, data: dict) -> None:
+        self.db.execute("INSERT INTO agent_events(task_id, ts, kind, data) VALUES(?,?,?,?)",
+                        (task_id, _now(), kind, json.dumps(data, ensure_ascii=False, default=str)[:60_000]))
+
+    def public(self, row: dict, detail: bool = False) -> dict:
+        out = {k: row.get(k) for k in ("id", "user_id", "project_id", "title", "description", "status", "stage",
+                                       "progress", "current_op", "connection_id", "model", "error", "max_steps",
+                                       "steps_used", "created_at", "started_at", "updated_at", "finished_at",
+                                       "last_activity")}
+        out["auto_apply"] = bool(row.get("auto_apply"))
+        end = row.get("finished_at") or (_now() if row.get("status") not in TERMINAL else row.get("updated_at"))
+        out["duration"] = round(end - row["started_at"], 1) if row.get("started_at") and end else None
+        pend = self.db.one("SELECT COUNT(*) AS n FROM ai_proposals WHERE task_id=? AND status='pending'", (row["id"],))
+        out["pending_proposals"] = pend["n"] if pend else 0
+        if detail:
+            out["plan"] = json.loads(row.get("plan") or "[]")
+            out["report"] = json.loads(row["report"]) if row.get("report") else None
+        return out
+
+    # ---------- API ----------
+    def tools_for(self, user: dict) -> list[dict]:
+        perms = intersect_for_ai(user["perms"])
+        return [t.schema() | {"allowed": t.perm in perms} for t in agent_tools.TOOLS.values()]
+
+    def create(self, user: dict, project_id: str, description: str, title: str | None = None,
+               auto_apply: bool = False, max_steps: int = 30) -> dict:
+        perms = intersect_for_ai(user["perms"])
+        if "read" not in perms:
+            raise Forbidden("Agen AI tidak punya hak baca untuk pengguna ini")
+        if auto_apply and "write" not in user["perms"]:
+            raise Forbidden("Auto-apply butuh hak tulis")
+        description = description.strip()
+        if not description:
+            raise AppError("Deskripsi tugas wajib diisi", code="empty_task")
+        self.svc.projects.get(project_id, user)
+        self.svc.ai._ready_provider()  # gagal cepat (503) bila belum ada model yang diterapkan
+        tid = uuid.uuid4().hex[:12]
+        now = _now()
+        self.db.execute(
+            "INSERT INTO agent_tasks(id, user_id, project_id, title, description, status, stage, auto_apply, "
+            "max_steps, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (tid, user["id"], project_id, (title or description.splitlines()[0])[:120], description[:20_000],
+             "PENDING", "PENDING", int(auto_apply), max(3, min(int(max_steps), self.s.agent_max_steps)), now, now),
+        )
+        self._event(tid, "status", {"status": "PENDING", "message": "Task dibuat"})
+        self.db.audit("agent_task_create", user=user, target=tid, detail={"project_id": project_id})
+        self._start(tid, user)
+        return self.public(self._row(tid), detail=True)
+
+    def list(self, user: dict, project_id: str | None = None, status: str | None = None, limit: int = 100) -> list[dict]:
+        sql, args = "SELECT * FROM agent_tasks WHERE 1=1", []
+        if "admin" not in user["perms"]:
+            sql += " AND user_id=?"; args.append(user["id"])
+        if project_id:
+            sql += " AND project_id=?"; args.append(project_id)
+        if status:
+            sql += " AND status=?"; args.append(status.upper())
+        rows = self.db.all(sql + " ORDER BY updated_at DESC LIMIT ?", (*args, min(limit, 500)))
+        return [self.public(r) for r in rows]
+
+    def get(self, user: dict, task_id: str) -> dict:
+        return self.public(self._owned(task_id, user), detail=True)
+
+    def events(self, user: dict, task_id: str, after: int = 0, limit: int = 200) -> list[dict]:
+        self._owned(task_id, user)
+        rows = self.db.all("SELECT id, ts, kind, data FROM agent_events WHERE task_id=? AND id>? ORDER BY id LIMIT ?",
+                           (task_id, after, min(limit, 1000)))
+        for r in rows:
+            r["data"] = json.loads(r["data"])
+        return rows
+
+    async def cancel(self, user: dict, task_id: str) -> dict:
+        row = self._owned(task_id, user)
+        if row["status"] in TERMINAL:
+            return self.public(row, detail=True)
+        t = self._tasks.get(task_id)
+        if t and not t.done():
+            t.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(t), 10)
+            except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                pass
+        row = self._row(task_id)
+        if row["status"] not in TERMINAL:
+            self._update(task_id, status="CANCELLED", current_op="Dibatalkan pengguna", finished_at=_now())
+            self._event(task_id, "status", {"status": "CANCELLED", "message": "Dibatalkan pengguna"})
+        self.db.audit("agent_task_cancel", user=user, target=task_id)
+        return self.get(user, task_id)
+
+    def pause(self, user: dict, task_id: str) -> dict:
+        row = self._owned(task_id, user)
+        if row["status"] not in ACTIVE:
+            raise Conflict(f"Task berstatus {row['status']}, tidak bisa dijeda")
+        self._pause.add(task_id)
+        self._update(task_id, current_op="Akan dijeda setelah langkah ini selesai")
+        return self.get(user, task_id)
+
+    def resume(self, user: dict, task_id: str) -> dict:
+        row = self._owned(task_id, user)
+        if row["status"] in ACTIVE and task_id in self._tasks and not self._tasks[task_id].done():
+            self._pause.discard(task_id)
+            return self.get(user, task_id)
+        if row["status"] not in ("PAUSED", "WAITING_APPROVAL", "FAILED", "CANCELLED"):
+            raise Conflict(f"Task berstatus {row['status']}, tidak bisa dilanjutkan")
+        if row["status"] == "WAITING_APPROVAL" and self.public(row)["pending_proposals"]:
+            raise Conflict("Masih ada proposal yang menunggu keputusan di Approval Center", code="approval_pending")
+        if row["status"] in ("FAILED", "CANCELLED"):  # retry dari checkpoint terakhir
+            self._update(task_id, error="", finished_at=None,
+                         max_steps=min(row["max_steps"] + 10, self.s.agent_max_steps + 20))
+        self._update(task_id, status="PENDING", current_op="Menunggu giliran")
+        self._event(task_id, "status", {"status": "PENDING", "message": "Dilanjutkan"})
+        self._start(task_id, self._owner(row))
+        return self.get(user, task_id)
+
+    def delete(self, user: dict, task_id: str) -> None:
+        row = self._owned(task_id, user)
+        if row["status"] in ACTIVE:
+            raise Conflict("Batalkan task dulu sebelum dihapus")
+        with self.db.tx() as c:
+            c.execute("DELETE FROM agent_events WHERE task_id=?", (task_id,))
+            c.execute("DELETE FROM agent_tasks WHERE id=?", (task_id,))
+
+    def on_proposal_decided(self, task_id: str | None) -> None:
+        """Dipanggil setelah pengguna memutuskan proposal: lanjutkan otomatis bila tak ada lagi yang pending."""
+        if not task_id:
+            return
+        row = self.db.one("SELECT * FROM agent_tasks WHERE id=?", (task_id,))
+        if row and row["status"] == "WAITING_APPROVAL" and not self.public(row)["pending_proposals"]:
+            self._update(task_id, status="PENDING", current_op="Persetujuan selesai, melanjutkan")
+            self._event(task_id, "status", {"status": "PENDING", "message": "Semua proposal sudah diputuskan"})
+            self._start(task_id, self._owner(row))
+
+    def _owner(self, row: dict) -> dict:
+        """Hak pemilik dibaca ulang dari DB (bukan dari token lama): izin yang dicabut langsung berlaku."""
+        u = self.db.one("SELECT * FROM users WHERE id=?", (row["user_id"],))
+        if not u or not u["is_active"]:
+            raise Forbidden("Pemilik task tidak aktif")
+        pub = self.svc.auth.public(u)
+        pub["perms"] = set(pub["permissions"])
+        return pub
+
+    def _start(self, task_id: str, user: dict) -> None:
+        self._pause.discard(task_id)
+        if not _loop_running():
+            raise AppError("Event loop tidak berjalan", code="internal", status_code=500)
+        t = asyncio.get_running_loop().create_task(self._run(task_id, user))
+        self._tasks[task_id] = t
+        t.add_done_callback(lambda _t: self._tasks.pop(task_id, None) if self._tasks.get(task_id) is _t else None)
+
+    async def shutdown(self) -> None:
+        for t in list(self._tasks.values()):
+            t.cancel()
+
+    # ---------- loop agen ----------
+    def _messages(self, row: dict, ai_perms: set[str]) -> list[dict]:
+        if row.get("checkpoint"):
+            try:
+                return json.loads(row["checkpoint"])["messages"]
+            except (ValueError, KeyError):
+                pass
+        def sig(t) -> str:
+            return ", ".join(k + ("" if a.required else "?") + ": " + a.type for k, a in t.args.items())
+
+        tools = "\n".join(f"- {t.name}({sig(t)}): {t.description}" for t in agent_tools.available(ai_perms))
+        proj = self.svc.projects.get(row["project_id"], self._owner(row))
+        user_msg = (f"Proyek: {proj['name']} (bahasa utama: {proj.get('language') or '-'})\n"
+                    f"Auto-apply: {'ya (risiko HIGH tetap butuh persetujuan)' if row['auto_apply'] else 'tidak (semua editan menunggu persetujuan)'}\n"
+                    f"Batas langkah: {row['max_steps']}\n\nTUGAS:\n{row['description']}")
+        return [{"role": "system", "content": SYSTEM_PROMPT.format(tools=tools)},
+                {"role": "user", "content": user_msg}]
+
+    @staticmethod
+    def _compact(messages: list[dict]) -> list[dict]:
+        """Pangkas hasil tool lama agar muat konteks; file asli tetap sumber kebenaran (bisa dibaca ulang)."""
+        total = sum(len(m["content"]) for m in messages)
+        if total <= CONTEXT_BUDGET:
+            return messages
+        out = [dict(m) for m in messages]
+        obs_idx = [i for i, m in enumerate(out) if m["role"] == "user" and m["content"].startswith("[hasil tool")]
+        for i in obs_idx[:-KEEP_RECENT]:
+            if total <= CONTEXT_BUDGET:
+                break
+            old = out[i]["content"]
+            if old.endswith("[dipangkas]"):
+                continue
+            out[i]["content"] = old[:300] + "\n…[dipangkas; baca ulang file bila perlu]"
+            total -= len(old) - len(out[i]["content"])
+        # Masih terlalu panjang: buang pasangan langkah tertua (setelah system + tugas).
+        while total > CONTEXT_BUDGET and len(out) > 6:
+            removed = out.pop(2)
+            total -= len(removed["content"])
+        return out
+
+    def _save_checkpoint(self, task_id: str, messages: list[dict], extra: dict) -> None:
+        self._update(task_id, checkpoint=json.dumps({"messages": messages, **extra}, ensure_ascii=False))
+
+    def _progress(self, task: dict, steps_used: int, max_steps: int) -> float:
+        plan = task.get("_plan") or []
+        if plan:
+            done = sum(1 for s in plan if s["status"] in ("done", "skipped"))
+            return round(done / len(plan), 3)
+        return round(min(0.9, steps_used / max(1, max_steps)), 3)
+
+    async def _ask_model(self, messages: list[dict]) -> tuple[str, str]:
+        ai = self.svc.ai
+        row, prov, model = ai._ready_provider()
+        conf = ai.settings()
+        parts: list[str] = []
+        ai.state["last_activity"] = _now()
+
+        async def collect() -> None:
+            async for kind, text in prov.stream_chat(model, messages, min(float(conf.get("temperature") or 0.2), 0.4),
+                                                     max(int(conf.get("max_tokens") or 2048), 2048)):
+                if kind == "delta":
+                    parts.append(text)
+                ai.state["last_activity"] = _now()
+
+        await asyncio.wait_for(collect(), self.s.agent_model_timeout)
+        return "".join(parts), model
+
+    async def _run(self, task_id: str, user: dict) -> None:
+        async with self._sem:
+            try:
+                await asyncio.wait_for(self._loop(task_id, user), self.s.agent_task_timeout)
+            except asyncio.TimeoutError:
+                self._fail(task_id, f"Melebihi batas waktu task ({self.s.agent_task_timeout} detik)")
+            except asyncio.CancelledError:
+                row = self.db.one("SELECT status FROM agent_tasks WHERE id=?", (task_id,))
+                if row and row["status"] not in TERMINAL:
+                    self._update(task_id, status="CANCELLED", current_op="Dibatalkan", finished_at=_now())
+                    self._event(task_id, "status", {"status": "CANCELLED", "message": "Dibatalkan"})
+                raise
+            except Exception as e:  # jangan biarkan task menggantung tanpa status
+                log.exception("Task agen %s error", task_id)
+                self._fail(task_id, f"Kesalahan internal: {e}")
+
+    def _fail(self, task_id: str, msg: str) -> None:
+        self._update(task_id, status="FAILED", error=msg[:2000], current_op="", finished_at=_now())
+        self._event(task_id, "error", {"message": msg})
+        self._event(task_id, "status", {"status": "FAILED", "message": msg})
+
+    def _set_stage(self, task_id: str, status: str, op: str) -> None:
+        self._update(task_id, status=status, stage=status, current_op=op[:300], last_activity=_now())
+        self._event(task_id, "status", {"status": status, "message": op[:300]})
+
+    async def _loop(self, task_id: str, user: dict) -> None:
+        row = self._row(task_id)
+        svc = self.svc
+        root = svc.projects.project_dir(row["project_id"])
+        svc.projects.get(row["project_id"], user)  # akses proyek masih sah?
+        ai_perms = intersect_for_ai(user["perms"])
+        ck = json.loads(row["checkpoint"]) if row.get("checkpoint") else {}
+        task = {"id": task_id, "project_id": row["project_id"], "auto_apply": bool(row["auto_apply"]),
+                "_plan": json.loads(row.get("plan") or "[]"), "_runs": ck.get("runs", [])}
+        messages = self._messages(row, ai_perms)
+        steps_used = row["steps_used"]
+        parse_fails = 0
+        if not row.get("started_at"):
+            self._update(task_id, started_at=_now())
+        self._set_stage(task_id, "PLANNING" if not task["_plan"] else "EXECUTING", "Menghubungi model AI")
+        pending_call = ck.get("pending_call")
+        last_failed_run = False
+
+        while True:
+            if task_id in self._pause:
+                self._pause.discard(task_id)
+                self._save_checkpoint(task_id, messages, {"runs": task["_runs"], "pending_call": pending_call})
+                self._set_stage(task_id, "PAUSED", "Dijeda pengguna")
+                return
+            if pending_call is None:
+                if steps_used >= row["max_steps"]:
+                    self._finish(task_id, task, steps_used, {"summary": None},
+                                 incomplete=f"Batas {row['max_steps']} langkah tercapai sebelum agen memanggil finish")
+                    return
+                text, model = await self._ask_model(self._compact(messages))
+                steps_used += 1
+                self._update(task_id, steps_used=steps_used, model=model,
+                             connection_id=svc.ai.state.get("connection_id"))
+                messages.append({"role": "assistant", "content": text})
+                try:
+                    call, code = extract_call(text)
+                    parse_fails = 0
+                except ValueError as e:
+                    parse_fails += 1
+                    self._event(task_id, "error", {"message": f"Balasan model tidak valid: {e}", "raw": text[:2000]})
+                    if parse_fails >= MAX_PARSE_FAILS:
+                        self._save_checkpoint(task_id, messages, {"runs": task["_runs"]})
+                        self._fail(task_id, "Model berulang kali tidak mengikuti format JSON tool. Coba model lain.")
+                        return
+                    messages.append({"role": "user", "content": "[hasil tool] FORMAT SALAH: balas dengan tepat satu "
+                                     "blok ```json berisi {\"thought\", \"tool\", \"args\"}."})
+                    continue
+                pending_call = {"tool": call["tool"], "args": call.get("args") or {}, "code": code,
+                                "thought": str(call.get("thought", ""))[:2000]}
+                self._event(task_id, "thought", {"text": pending_call["thought"]})
+
+            name = pending_call["tool"]
+            tool = agent_tools.TOOLS.get(name)
+            stage = tool.stage if tool else "EXECUTING"
+            if stage == "EXECUTING" and last_failed_run:
+                stage = "FIXING"
+            self._set_stage(task_id, stage, f"{name}: {json.dumps(pending_call['args'], ensure_ascii=False)[:200]}")
+            self._event(task_id, "tool_call", {"tool": name, "args": pending_call["args"],
+                                               "has_code_block": pending_call.get("code") is not None})
+            ctx = ToolContext(svc=svc, user=user, task=task, root=root, ai_perms=ai_perms,
+                              code_block=pending_call.get("code"))
+            runs_before = len(task["_runs"])
+            try:
+                obs = await agent_tools.call(ctx, name, pending_call["args"])
+                ok = True
+            except NeedsApproval:
+                self._save_checkpoint(task_id, messages, {"runs": task["_runs"], "pending_call": pending_call})
+                self._set_stage(task_id, "WAITING_APPROVAL",
+                                "Menunggu persetujuan proposal sebelum menjalankan/menguji kode")
+                self._event(task_id, "approval", {"pending": self.public(self._row(task_id))["pending_proposals"]})
+                return
+            except ToolError as e:
+                obs, ok = f"ERROR: {e}", False
+            pending_call = None
+            if len(task["_runs"]) > runs_before:
+                r = task["_runs"][-1]
+                last_failed_run = not (r["status"] == "COMPLETED" and r["exit_code"] == 0)
+            self._event(task_id, "observation", {"tool": name, "ok": ok, "text": obs[:8000]})
+            if name == "update_plan" and ok:
+                self._update(task_id, plan=json.dumps(task["_plan"], ensure_ascii=False))
+                self._event(task_id, "plan", {"steps": task["_plan"]})
+            self._update(task_id, progress=self._progress(task, steps_used, row["max_steps"]))
+            messages.append({"role": "user", "content": f"[hasil tool {name}]\n{obs}"})
+            self._save_checkpoint(task_id, messages, {"runs": task["_runs"]})
+            if name == "finish" and ok:
+                self._finish(task_id, task, steps_used, task.get("_finish") or {})
+                return
+
+    def _finish(self, task_id: str, task: dict, steps_used: int, fin: dict, incomplete: str | None = None) -> None:
+        props = self.db.all("SELECT id, path, action, status, risk, additions, deletions FROM ai_proposals "
+                            "WHERE task_id=? ORDER BY id", (task_id,))
+        runs = task.get("_runs") or []
+        report = {
+            "verified": {
+                "proposals": props,
+                "files_changed": sorted({p["path"] for p in props if p["status"] == "approved"}),
+                "files_pending": sorted({p["path"] for p in props if p["status"] == "pending"}),
+                "runs": runs,
+                "tests_passed": sum(1 for r in runs if r["kind"] == "test" and r["status"] == "COMPLETED"
+                                    and r["exit_code"] == 0),
+                "tests_failed": sum(1 for r in runs if r["kind"] == "test" and not (r["status"] == "COMPLETED"
+                                                                                   and r["exit_code"] == 0)),
+                "steps_used": steps_used,
+                "plan": task.get("_plan") or [],
+            },
+            "ai_generated": {k: fin.get(k) for k in ("summary", "limitations", "remaining")},
+            "note": "Bagian 'verified' dihitung server dari data nyata; 'ai_generated' adalah klaim model.",
+        }
+        if incomplete:
+            report["incomplete"] = incomplete
+        status = "FAILED" if incomplete else "COMPLETED"
+        self._update(task_id, status=status, stage=status, report=json.dumps(report, ensure_ascii=False, default=str),
+                     progress=1.0 if not incomplete else self._progress(task, steps_used, 1), current_op="",
+                     error=incomplete or "", finished_at=_now())
+        self._event(task_id, "report", report)
+        self._event(task_id, "status", {"status": status, "message": incomplete or "Task selesai"})
+
+
+def _loop_running() -> bool:
+    try:
+        asyncio.get_running_loop()
+        return True
+    except RuntimeError:
+        return False

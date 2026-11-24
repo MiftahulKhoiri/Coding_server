@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.0 — 2026-11-24
+### Keamanan
+- **P0** Pencarian isi file tidak lagi membaca lewat symlink (sebelumnya symlink ke `~/.ssh/...` membocorkan isi).
+- **P0** HTTP client: IP diperiksa saat koneksi TCP dibuat (anti DNS rebinding); klasifikasi IPv4-mapped IPv6, NAT64,
+  6to4, CGNAT. Uji regresi di `test_security_regressions.py`.
+### Ditambahkan
+- **AI Coding Agent** (`/api/v1/agent/*`, layar **Agent Tasks** di APK): task persisten dengan rencana, tool
+  ber-izin (baca/cari/edit via proposal/build/run/test/git), menunggu persetujuan sebelum menjalankan kode,
+  perbaikan berulang, laporan (fakta terverifikasi server vs ringkasan AI), jeda/lanjut/batal/ulangi, pulih saat
+  server restart. Lihat `docs/AI_AGENT.md`.
+- **Risiko proposal AI** LOW/MEDIUM/HIGH; HIGH tidak pernah auto-apply dan butuh konfirmasi (dialog di APK).
+- Deteksi perintah uji (pytest/unittest, go test, npm test, make test) + `ExecutionService.submit_command`.
+- Menu APK dikelompokkan (Workspace, Development, AI Development, Project Tools, Server, System).
+- Dokumen audit: `PROJECT_AUDIT.md`, `SECURITY_REVIEW.md`, `FEATURE_STATUS.md`, `ROADMAP.md`.
+### Database
+- Skema v3: tabel `agent_tasks`, `agent_events`; kolom `risk`, `risk_reasons`, `task_id` di `ai_proposals`
+  (migrasi otomatis, data lama tetap; diuji pada DB v2).
+
 ## 1.3.0 — 2026-11-23
 ### Ditambahkan
 - **Language server (LSP)**: clangd 22 (C/C++) dan pyright (Python) di Pi, lewat WebSocket `/ws/lsp`, di dalam

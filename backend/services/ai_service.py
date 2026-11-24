@@ -27,6 +27,7 @@ from backend.core.logging import get_logger
 from backend.core.permissions import intersect_for_ai
 from backend.database.db import Database
 from backend.services.ai_edits import EDIT_PROTOCOL, Edit, EditError, apply_replace, looks_truncated, parse_edits, unified_diff
+from backend.services.ai_risk import HIGH, classify_change
 from backend.services.ai_providers import PRESETS, Provider, make_provider, normalize_base
 from backend.services.file_service import FileService
 from backend.services.secret_store import SecretStore
@@ -455,7 +456,9 @@ class AIService:
         """Tanpa isi file penuh (bisa besar); klien cukup melihat diff."""
         return {k: row.get(k) for k in ("id", "project_id", "path", "action", "reason", "status", "created_at",
                                         "decided_at", "conversation_id", "message_id", "diff", "additions",
-                                        "deletions", "error")} | {"new_file": not row.get("existed", 1)}
+                                        "deletions", "error", "risk", "task_id")} | {
+            "new_file": not row.get("existed", 1),
+            "risk_reasons": [r for r in (row.get("risk_reasons") or "").split("; ") if r]}
 
     def _insert_proposal(self, **f) -> dict:
         f.setdefault("created_at", time.time())
@@ -474,10 +477,10 @@ class AIService:
         return True, f["content"], f["sha256"]
 
     def propose_edit(self, user: dict, project_id: str, root: Path, edit: Edit, conv_id: int | None = None,
-                     message_id: int | None = None, reason: str = "") -> dict:
+                     message_id: int | None = None, reason: str = "", task_id: str | None = None) -> dict:
         """Hitung isi baru dari editan AI -> proposal 'pending' (atau 'failed' + alasan bila tak bisa diterapkan)."""
         base = {"project_id": project_id, "user_id": user["id"], "action": "write", "reason": reason[:500],
-                "conversation_id": conv_id, "message_id": message_id}
+                "conversation_id": conv_id, "message_id": message_id, "task_id": task_id}
         try:
             path = FileService.normalize(edit.path)
             existed, old, sha = self._current(root, path)
@@ -493,9 +496,11 @@ class AIService:
             if existed and new == old:
                 raise EditError("Tidak ada perubahan terhadap isi file saat ini")
             diff, adds, dels = unified_diff(path, old, new)
+            risk, why = classify_change(path, "write", old if existed else None, new)
             return self._insert_proposal(**base, path=path, content=new, status="pending", base_sha256=sha,
                                          old_content=old if existed else None, existed=1 if existed else 0,
-                                         diff=diff, additions=adds, deletions=dels)
+                                         diff=diff, additions=adds, deletions=dels, risk=risk,
+                                         risk_reasons="; ".join(why))
         except (EditError, AppError) as e:
             msg = e.message if isinstance(e, AppError) else str(e)
             return self._insert_proposal(**base, path=edit.path[:500], content=None, status="failed", error=msg)
@@ -521,7 +526,10 @@ class AIService:
         items = []
         for e in merged.values():
             row = self.propose_edit(user, project_id, root, e, conv_id, message_id, reason="dari jawaban AI")
-            if auto_apply and row["status"] == "pending":
+            if auto_apply and row["status"] == "pending" and row.get("risk") == HIGH:
+                # Risiko tinggi tidak pernah diterapkan otomatis; tetap menunggu persetujuan eksplisit.
+                pass
+            elif auto_apply and row["status"] == "pending":
                 try:
                     self.decide(user, project_id, root, row["id"], True)
                 except AppError as err:
@@ -535,7 +543,7 @@ class AIService:
         return items
 
     def propose(self, user: dict, project_id: str, path: str, action: str, content: str | None, reason: str,
-                root: Path | None = None) -> dict:
+                root: Path | None = None, task_id: str | None = None) -> dict:
         perms = intersect_for_ai(user["perms"])
         if action not in ("write", "delete"):
             raise AppError("Aksi harus write/delete", code="bad_action")
@@ -545,17 +553,23 @@ class AIService:
             raise Forbidden("AI tidak punya hak hapus")
         path = FileService.normalize(path)
         if action == "write" and root is not None:
-            row = self.propose_edit(user, project_id, root, Edit(path, "full", content=content or ""), reason=reason)
+            row = self.propose_edit(user, project_id, root, Edit(path, "full", content=content or ""), reason=reason,
+                                    task_id=task_id)
             if row["status"] == "failed":
                 raise AppError(row["error"], code="bad_edit")
             return row
         existed, old, sha = self._current(root, path) if root is not None else (True, None, None)
+        risk, why = classify_change(path, action, old, content)
         return self._insert_proposal(project_id=project_id, user_id=user["id"], path=path, action=action,
                                      content=content, reason=reason, status="pending", base_sha256=sha,
-                                     old_content=old, existed=1 if existed else 0)
+                                     old_content=old, existed=1 if existed else 0, risk=risk,
+                                     risk_reasons="; ".join(why), task_id=task_id)
 
-    def proposals(self, project_id: str, status: str | None = None, conversation_id: int | None = None) -> list[dict]:
+    def proposals(self, project_id: str, status: str | None = None, conversation_id: int | None = None,
+                  task_id: str | None = None) -> list[dict]:
         sql, args = "SELECT * FROM ai_proposals WHERE project_id=?", [project_id]
+        if task_id:
+            sql += " AND task_id=?"; args.append(task_id)
         if status:
             sql += " AND status=?"; args.append(status)
         if conversation_id is not None:
@@ -568,10 +582,15 @@ class AIService:
             raise NotFound("Proposal tidak ditemukan")
         return row
 
-    def decide(self, user: dict, project_id: str, project_dir: Path, proposal_id: int, approve: bool) -> dict:
+    def decide(self, user: dict, project_id: str, project_dir: Path, proposal_id: int, approve: bool,
+               confirm_high_risk: bool = False) -> dict:
         row = self._proposal(project_id, proposal_id)
         if row["status"] != "pending":
             raise Conflict(f"Proposal sudah {row['status']}")
+        if approve and row.get("risk") == HIGH and not confirm_high_risk:
+            raise Conflict("Perubahan berisiko TINGGI (" + (row.get("risk_reasons") or "-") + "). "
+                           "Periksa diff lalu setujui dengan confirm_high_risk=true.",
+                           code="high_risk_confirmation_required")
         result = None
         if approve:
             note = f"AI #{proposal_id}: {(row['reason'] or '')[:100]}"

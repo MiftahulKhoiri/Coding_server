@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 
 def _load_env_file(path: Path) -> dict[str, str]:
@@ -82,6 +82,12 @@ class Settings:
     ai_model: str = ""
     ai_api_key: str = ""
 
+    # AI Coding Agent
+    agent_max_concurrent: int = 1   # model lokal = bottleneck RAM; satu task aktif sekaligus
+    agent_max_steps: int = 60
+    agent_model_timeout: int = 600  # detik per jawaban model
+    agent_task_timeout: int = 7200  # detik per sesi berjalan
+
     rate_limit_login_per_minute: int = 10
     cors_origins: str = ""
 
@@ -150,6 +156,7 @@ def build_settings(env: dict[str, str] | None = None) -> Settings:
         "run_timeout", "build_timeout", "memory_limit_mb", "min_free_memory_mb",
         "output_limit_bytes", "max_file_size_bytes", "terminal_idle_timeout",
         "max_terminal_sessions", "http_timeout", "backup_retention", "rate_limit_login_per_minute",
+        "agent_max_concurrent", "agent_max_steps", "agent_model_timeout", "agent_task_timeout",
     ):
         val = g(name)
         if val:

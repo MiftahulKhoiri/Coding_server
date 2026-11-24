@@ -45,6 +45,7 @@ sandbox **bubblewrap aktif**.
   terverifikasi lalu data hilang), `--dry-run`, opsi tak dikenal, tanpa `-y` non-interaktif (batal). Cron milik folder
   lain dan service utama tidak tersentuh. `--remove-repo` dan `--remove-runtimes` hanya diuji lewat `--dry-run`.
 - **Backend di Pi 5 (23 Nov)**: `61 passed`.
+- **Backend (24 Nov, sesi cloud tanpa bubblewrap, `CS_SANDBOX=none`)**: `97 passed, 6 skipped`. Uji sandbox berjalan di CI.
 - **Android**: 6 unit test + 1 uji kontrak end-to-end lulus (di Pi dan di CI).
 - **Performa (Pi 5, live)**: health p50 1.1 ms / p95 1.3 ms; baca file p50 3.5 ms.
   Run (termasuk compile, sandbox): Python 0.16 s, C 0.06 s, PHP 0.31 s, Java 0.72 s, Node 0.87 s,
@@ -61,8 +62,8 @@ sandbox **bubblewrap aktif**.
 4. **Language server (LSP)** belum diintegrasikan; autocomplete dasar (kata di dokumen + bahasa), simbol & go-to-definition
    memakai pola regex per bahasa.
 5. Build C/C++ satu file per eksekusi (belum Makefile/CMake multi-file otomatis — bisa lewat terminal).
-6. AI agent: baru fondasi (provider OpenAI-compatible, chat dengan konteks file, proposal + persetujuan + riwayat);
-   belum ada loop agen otomatis dan UI chat di APK (hanya status).
+6. AI agent (v1.4.0): loop agen otomatis + layar Agent Tasks sudah ada (lihat docs/AI_AGENT.md); diuji dengan
+   model palsu di pytest, **belum diuji dengan model asli di Pi**.
 
 ## Rekomendasi berikutnya
 Isi secret signing → pasang APK → uji alur di HP; aktifkan systemd sistem dengan sudo; pasang reverse proxy HTTPS

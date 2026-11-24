@@ -88,6 +88,9 @@ class BackendIntegrationTest {
             assertTrue(a.aiConnections().connections.isNotEmpty())
             assertTrue(a.aiPresets().presets.any { it.kind == "anthropic" })
             a.aiConversations()
+            // AI Agent & Approval Center: kontrak daftar task dan proposal (dengan field risiko)
+            assertTrue(a.agentTasks(p.id).tasks.isEmpty())
+            a.aiProposals(p.id)
             a.aiStatus(); a.backups(); a.recent(); a.history(p.id)
             Unit
         } finally {

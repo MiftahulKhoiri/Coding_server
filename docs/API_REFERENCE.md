@@ -80,6 +80,16 @@ Error: `{"error":{"code","message","details"}}`.
   ```` ```lang file=PATH ```` (isi lengkap) atau ```` ```edit file=PATH ```` (SEARCH/REPLACE) menghasilkan event
   `{type:"edits", message_id, items:[{id, path, status, diff, additions, deletions, new_file, error}]}`.
   `auto_apply: true` langsung menerapkan (butuh izin `write`).
-- `GET /api/v1/ai/proposals?project_id=&conversation_id=` · `POST /api/v1/ai/proposals/{id}/decide {project_id, approve}`
+- Setiap proposal punya `risk` (LOW/MEDIUM/HIGH), `risk_reasons`, `task_id`. Auto-apply tidak pernah menerapkan HIGH.
+- `GET /api/v1/ai/proposals?project_id=&conversation_id=&task_id=` · `POST /api/v1/ai/proposals/{id}/decide {project_id, approve, confirm_high_risk?}`
+  (409 `high_risk_confirmation_required` bila menyetujui HIGH tanpa `confirm_high_risk=true`)
   (409 `proposal_stale` bila file berubah sejak usulan dibuat) · `POST /api/v1/ai/proposals/{id}/revert {project_id}`
   (kembalikan isi lama / hapus file baru; 409 bila file sudah diubah lagi).
+
+## AI Agent
+Lihat `docs/AI_AGENT.md`. Ringkas: `POST /agent/tasks {project_id, description, title?, auto_apply?, max_steps?}` →
+task berjalan di server; `GET /agent/tasks[?project_id=&status=]`, `GET /agent/tasks/{id}` (rencana & laporan),
+`GET /agent/tasks/{id}/events?after=` (log, polling), `GET /agent/tasks/{id}/proposals`,
+`POST /agent/tasks/{id}/pause|resume|cancel`, `DELETE /agent/tasks/{id}`, `GET /agent/tools`.
+Status: PENDING, PLANNING, INSPECTING, EXECUTING, WAITING_APPROVAL, BUILDING, TESTING, REVIEWING, FIXING,
+COMPLETED, FAILED, CANCELLED, PAUSED.

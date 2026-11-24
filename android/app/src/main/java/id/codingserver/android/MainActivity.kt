@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -68,6 +69,7 @@ import id.codingserver.android.data.api.FileEntry
 import id.codingserver.android.ui.AppViewModel
 import id.codingserver.android.ui.AuthState
 import id.codingserver.android.ui.EditorTab
+import id.codingserver.android.ui.agent.AgentScreen
 import id.codingserver.android.ui.ai.AiChatScreen
 import id.codingserver.android.ui.ai.AiModelScreen
 import id.codingserver.android.ui.dashboard.DashboardScreen
@@ -89,23 +91,25 @@ import id.codingserver.android.ui.theme.CodingServerTheme
 import id.codingserver.android.ui.theme.isAppDark
 import kotlinx.coroutines.launch
 
-private data class Dest(val route: String, val label: String, val icon: ImageVector)
+private data class Dest(val route: String, val label: String, val icon: ImageVector, val section: String)
 
+// Menu dikelompokkan per area kerja agar tetap ringkas di layar kecil.
 private val DESTS = listOf(
-    Dest("dashboard", "Dashboard", Icons.Default.Dashboard),
-    Dest("projects", "Proyek", Icons.Default.Folder),
-    Dest("explorer", "Project Explorer", Icons.Default.FolderOpen),
-    Dest("editor", "Code Editor", Icons.Default.Code),
-    Dest("terminal", "Terminal", Icons.Default.Terminal),
-    Dest("output", "Build Output", Icons.AutoMirrored.Filled.Article),
-    Dest("ai_chat", "AI Chat", Icons.Default.SmartToy),
-    Dest("ai_models", "Model AI", Icons.Default.Psychology),
-    Dest("database", "Database", Icons.Default.Storage),
-    Dest("git", "Git", Icons.Default.AccountTree),
-    Dest("http", "HTTP Client", Icons.Default.Http),
-    Dest("monitor", "Server Monitor", Icons.Default.Monitor),
-    Dest("servers", "Koneksi Server", Icons.Default.Dns),
-    Dest("settings", "Pengaturan", Icons.Default.Settings),
+    Dest("dashboard", "Dashboard", Icons.Default.Dashboard, "WORKSPACE"),
+    Dest("projects", "Proyek", Icons.Default.Folder, "WORKSPACE"),
+    Dest("explorer", "Project Explorer", Icons.Default.FolderOpen, "WORKSPACE"),
+    Dest("editor", "Code Editor", Icons.Default.Code, "WORKSPACE"),
+    Dest("terminal", "Terminal", Icons.Default.Terminal, "DEVELOPMENT"),
+    Dest("output", "Build Output", Icons.AutoMirrored.Filled.Article, "DEVELOPMENT"),
+    Dest("ai_chat", "AI Chat", Icons.Default.SmartToy, "AI DEVELOPMENT"),
+    Dest("agent", "Agent Tasks", Icons.Default.AutoFixHigh, "AI DEVELOPMENT"),
+    Dest("ai_models", "Model AI", Icons.Default.Psychology, "AI DEVELOPMENT"),
+    Dest("git", "Git", Icons.Default.AccountTree, "PROJECT TOOLS"),
+    Dest("database", "Database", Icons.Default.Storage, "PROJECT TOOLS"),
+    Dest("http", "HTTP Client", Icons.Default.Http, "PROJECT TOOLS"),
+    Dest("monitor", "Server Monitor", Icons.Default.Monitor, "SERVER"),
+    Dest("servers", "Koneksi Server", Icons.Default.Dns, "SYSTEM"),
+    Dest("settings", "Pengaturan", Icons.Default.Settings, "SYSTEM"),
 )
 
 class MainActivity : ComponentActivity() {
@@ -174,7 +178,12 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
                     Text("Aplikasi v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                          modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    DESTS.forEach { d ->
+                    DESTS.forEachIndexed { i, d ->
+                        if (i == 0 || DESTS[i - 1].section != d.section) Text(
+                            d.section, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 28.dp, top = if (i == 0) 0.dp else 10.dp, bottom = 2.dp),
+                        )
                         NavigationDrawerItem(label = { Text(d.label) }, icon = { Icon(d.icon, null) },
                             selected = route == d.route, onClick = { go(d.route) }, modifier = Modifier.padding(horizontal = 8.dp))
                     }
@@ -252,6 +261,7 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
                          onOpenEditor = { nav.navigate("editor") { launchSingleTop = true } })
         }
         composable("ai_models") { AiModelScreen(vm) { nav.navigate("ai_chat") { launchSingleTop = true } } }
+        composable("agent") { AgentScreen(vm, onOpenModels = { nav.navigate("ai_models") { launchSingleTop = true } }) }
         composable("database") { DatabaseScreen(vm) }
         composable("git") { GitScreen(vm) }
         composable("http") { HttpScreen(vm) }

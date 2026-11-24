@@ -364,3 +364,12 @@ class AIProposal(BaseModel):
 class AIDecision(BaseModel):
     project_id: str
     approve: bool = True
+    confirm_high_risk: bool = False
+
+
+class AgentTaskCreate(BaseModel):
+    project_id: str
+    description: str = Field(min_length=1, max_length=20_000)
+    title: str | None = Field(default=None, max_length=120)
+    auto_apply: bool = False
+    max_steps: int = Field(default=30, ge=3, le=200)

@@ -26,6 +26,9 @@ Raspberry Pi 5 — FastAPI (Python 3)
 - **Language server (LSP)**: clangd (C/C++) dan pyright (Python) di server, di dalam sandbox — autocomplete pintar, error/peringatan saat mengetik, info simbol, go-to-definition lintas file. Bahasa lain memakai pola regex.
 - **Build C/C++ multi-file**: CMake, Makefile, atau otomatis (semua sumber di folder + subfolder; folder latihan dengan banyak `main()` tetap jalan per file).
 - **AI coding agent**: chat dengan model lokal (llama-server) / online; bila proyek terbuka, AI mengubah file lewat blok `file=` / SEARCH-REPLACE → kartu diff **Terapkan / Tolak / Batalkan**, atau diterapkan otomatis. Semua perubahan tercatat di riwayat file & bisa dibatalkan.
+- **AI Agent Tasks**: beri tugas ("perbaiki bug X dan pastikan test lulus") → agen memeriksa proyek, membuat rencana,
+  mengusulkan perubahan (risiko LOW/MEDIUM/HIGH, butuh persetujuanmu), menjalankan build/test di sandbox, memperbaiki
+  bila gagal, lalu memberi laporan. Task tersimpan dan bisa dijeda/dilanjutkan. Lihat `docs/AI_AGENT.md`.
 - **Database manager SQLite**, **Git manager**, **HTTP client/API tester** (anti-SSRF), **System monitor**, **Backup & restore** terverifikasi.
 - **Aplikasi Android** dibangun otomatis oleh GitHub Actions dan bisa memperbarui dirinya sendiri dari GitHub Releases.
 

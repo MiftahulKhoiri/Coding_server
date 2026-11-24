@@ -171,7 +171,7 @@ fun AiChatScreen(vm: AppViewModel, editor: EditorController, onOpenModels: () ->
                 MessageBubble(m, onCopy = { clipboard.setText(AnnotatedString(it)); vm.toast("Disalin") }, onInsert = ::insertToEditor)
                 m.edits.forEach { e ->
                     EditCard(e, busy = e.id in ui.pending,
-                             onApply = { chat.decide(e, true) { vm.toast(it) } },
+                             onApply = { chat.decide(e, true, confirmHighRisk = e.risk == "HIGH") { vm.toast(it) } },
                              onReject = { chat.decide(e, false) { vm.toast(it) } },
                              onRevert = { chat.revert(e) { vm.toast(it) } })
                 }
@@ -274,10 +274,22 @@ private fun MessageBubble(m: ChatMessage, onCopy: (String) -> Unit, onInsert: (S
     }
 }
 
-/** Kartu perubahan file usulan AI: diff + aksi sesuai status. */
+/** Kartu perubahan file usulan AI: diff + risiko + aksi sesuai status. Dipakai juga oleh layar Agent Tasks.
+ *  Perubahan berisiko HIGH meminta konfirmasi dialog sebelum onApply dipanggil. */
 @Composable
-private fun EditCard(e: AIProposalItem, busy: Boolean, onApply: () -> Unit, onReject: () -> Unit, onRevert: () -> Unit) {
+fun EditCard(e: AIProposalItem, busy: Boolean, onApply: () -> Unit, onReject: () -> Unit, onRevert: () -> Unit) {
     var showDiff by remember(e.id) { mutableStateOf(e.status == "pending") }
+    var confirmHigh by remember(e.id) { mutableStateOf(false) }
+    if (confirmHigh) AlertDialog(
+        onDismissRequest = { confirmHigh = false },
+        title = { Text("Perubahan berisiko TINGGI") },
+        text = {
+            Text("${e.path}\n\nAlasan: ${e.risk_reasons.joinToString(", ").ifBlank { "-" }}\n\n" +
+                 "Pastikan diff sudah dibaca. Terapkan perubahan ini?")
+        },
+        confirmButton = { TextButton(onClick = { confirmHigh = false; onApply() }) { Text("Terapkan") } },
+        dismissButton = { TextButton(onClick = { confirmHigh = false }) { Text("Batal") } },
+    )
     val (label, color) = when (e.status) {
         "pending" -> "menunggu" to WarnAmber
         "approved" -> "diterapkan" to OkGreen
@@ -296,6 +308,11 @@ private fun EditCard(e: AIProposalItem, busy: Boolean, onApply: () -> Unit, onRe
                 Text((if (e.new_file) "✚ " else "✎ ") + e.path, style = MaterialTheme.typography.labelLarge, maxLines = 2)
                 if (e.status != "failed") Text("+${e.additions}  −${e.deletions}" + if (e.new_file) "  · file baru" else "",
                                                  style = MaterialTheme.typography.labelSmall)
+                if (e.status != "failed") Text(
+                    "Risiko ${e.risk}" + if (e.risk_reasons.isNotEmpty()) ": " + e.risk_reasons.joinToString(", ") else "",
+                    color = when (e.risk) { "HIGH" -> ErrRed; "LOW" -> OkGreen; else -> WarnAmber },
+                    style = MaterialTheme.typography.labelSmall, maxLines = 2,
+                )
             }
             Text(label, color = color, style = MaterialTheme.typography.labelMedium)
         }
@@ -304,7 +321,8 @@ private fun EditCard(e: AIProposalItem, busy: Boolean, onApply: () -> Unit, onRe
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             when (e.status) {
                 "pending" -> {
-                    androidx.compose.material3.Button(onClick = onApply, enabled = !busy) { Text("Terapkan") }
+                    androidx.compose.material3.Button(onClick = { if (e.risk == "HIGH") confirmHigh = true else onApply() },
+                                                      enabled = !busy) { Text("Terapkan") }
                     OutlinedButton(onClick = onReject, enabled = !busy) { Text("Tolak") }
                 }
                 "approved" -> OutlinedButton(onClick = onRevert, enabled = !busy) { Text("Batalkan perubahan") }
@@ -315,7 +333,7 @@ private fun EditCard(e: AIProposalItem, busy: Boolean, onApply: () -> Unit, onRe
 }
 
 @Composable
-private fun DiffView(diff: String) {
+fun DiffView(diff: String) {
     Column(
         Modifier.fillMaxWidth().heightIn(max = 320.dp).background(Color(0xFF1E1E1E), RoundedCornerShape(6.dp))
             .verticalScroll(rememberScrollState()).horizontalScroll(rememberScrollState()).padding(6.dp),

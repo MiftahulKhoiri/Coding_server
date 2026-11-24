@@ -13,6 +13,7 @@ import socket
 import time
 from urllib.parse import urljoin, urlparse
 
+import httpcore
 import httpx
 
 from backend.config import Settings
@@ -23,15 +24,27 @@ METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 MAX_BODY = 2_000_000
 
 
+_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
 def classify(ip: str) -> str:
-    a = ipaddress.ip_address(ip)
+    a = ipaddress.ip_address(ip.split("%", 1)[0])
+    # Alamat IPv6 yang membungkus IPv4 dinilai menurut IPv4-nya (Python < 3.13 tidak melakukannya).
+    if isinstance(a, ipaddress.IPv6Address):
+        if a.ipv4_mapped is not None:
+            return classify(str(a.ipv4_mapped))
+        if a in _NAT64:
+            return classify(str(ipaddress.IPv4Address(int(a) & 0xFFFFFFFF)))
+        if a.sixtofour is not None:
+            return classify(str(a.sixtofour))
     if a.is_loopback:
         return "loopback"
     if a.is_link_local:
         return "link_local"
     if a.is_multicast or a.is_reserved or a.is_unspecified:
         return "reserved"
-    if a.is_private:
+    if a.is_private or (isinstance(a, ipaddress.IPv4Address) and a in _CGNAT):
         return "private"
     return "public"
 
@@ -46,14 +59,68 @@ async def check_destination(url: str, allow_private: bool) -> None:
     except socket.gaierror:
         raise AppError(f"Host tidak ditemukan: {u.hostname}", code="dns_error")
     for info in infos:
-        kind = classify(info[4][0])
-        if kind in ("loopback", "link_local", "reserved"):
-            raise Forbidden(f"Tujuan {info[4][0]} ({kind}) diblokir untuk mencegah SSRF", code="ssrf_blocked")
-        if kind == "private" and not allow_private:
-            raise Forbidden(
-                f"Tujuan jaringan privat {info[4][0]} diblokir. Aktifkan CS_HTTP_ALLOW_PRIVATE bila diperlukan.",
-                code="ssrf_blocked",
-            )
+        _check_ip(info[4][0], allow_private)
+
+
+def _check_ip(ip: str, allow_private: bool) -> None:
+    kind = classify(ip)
+    if kind in ("loopback", "link_local", "reserved"):
+        raise Forbidden(f"Tujuan {ip} ({kind}) diblokir untuk mencegah SSRF", code="ssrf_blocked")
+    if kind == "private" and not allow_private:
+        raise Forbidden(
+            f"Tujuan jaringan privat {ip} diblokir. Aktifkan CS_HTTP_ALLOW_PRIVATE bila diperlukan.",
+            code="ssrf_blocked",
+        )
+
+
+class GuardedBackend(httpcore.AsyncNetworkBackend):
+    """Backend jaringan yang memeriksa ulang IP tepat saat koneksi TCP dibuat.
+
+    Tanpa ini, ``check_destination`` dan httpx melakukan resolusi DNS terpisah, sehingga
+    server DNS jahat (DNS rebinding) bisa menjawab IP publik saat diperiksa lalu 127.0.0.1
+    saat dihubungkan. Di sini nama di-resolve SEKALI, semua IP diperiksa, lalu koneksi
+    dibuat ke IP yang sudah diperiksa itu. SNI/Host tetap memakai nama host asli.
+    """
+
+    def __init__(self, allow_private: bool):
+        from httpcore._backends.auto import AutoBackend
+
+        self.allow_private = allow_private
+        self._inner = AutoBackend()
+
+    async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+        try:
+            infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            raise httpcore.ConnectError(f"Host tidak ditemukan: {host}") from e
+        ips = list(dict.fromkeys(info[4][0] for info in infos))
+        for ip in ips:
+            _check_ip(ip, self.allow_private)
+        last: Exception | None = None
+        for ip in ips:
+            try:
+                return await self._inner.connect_tcp(ip, port, timeout=timeout, local_address=local_address,
+                                                     socket_options=socket_options)
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as e:
+                last = e
+        raise last or httpcore.ConnectError(f"Tidak bisa terhubung ke {host}")
+
+    async def connect_unix_socket(self, *a, **kw):  # pragma: no cover - tidak pernah dipakai
+        raise httpcore.ConnectError("Unix socket tidak diizinkan")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
+
+
+def guarded_transport(allow_private: bool) -> httpx.AsyncHTTPTransport:
+    t = httpx.AsyncHTTPTransport(trust_env=False)
+    pool = getattr(t, "_pool", None)
+    if pool is None or not hasattr(pool, "_network_backend"):
+        # Fail closed: lebih baik menolak request daripada berjalan tanpa perlindungan SSRF.
+        raise AppError("Versi httpx tidak didukung untuk perlindungan SSRF", code="ssrf_guard_unavailable",
+                       status_code=503)
+    pool._network_backend = GuardedBackend(allow_private)
+    return t
 
 
 class HttpService:
@@ -80,14 +147,21 @@ class HttpService:
             kwargs["content"] = body.encode()
         start = time.monotonic()
         redirects = []
-        async with httpx.AsyncClient(timeout=timeout or self.s.http_timeout, follow_redirects=False, trust_env=False) as c:
+        transport = guarded_transport(self.s.http_allow_private)
+        async with httpx.AsyncClient(timeout=timeout or self.s.http_timeout, follow_redirects=False, trust_env=False,
+                                     transport=transport) as c:
             current = url
             for _ in range(6):
                 await check_destination(current, self.s.http_allow_private)
                 try:
                     req = c.build_request(method, current, **kwargs)
                     resp = await c.send(req, stream=True)
+                except Forbidden:
+                    raise
                 except httpx.HTTPError as e:
+                    cause = e.__cause__ or e.__context__
+                    if isinstance(cause, Forbidden):
+                        raise cause
                     raise AppError(f"Request gagal: {e}", code="http_error")
                 try:
                     if follow_redirects and resp.is_redirect and "location" in resp.headers:

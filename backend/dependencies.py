@@ -13,6 +13,7 @@ from backend.core.security import RateLimiter
 from backend.database.db import Database
 from backend.engines.registry import EngineRegistry
 from backend.services.lsp_service import LspService
+from backend.services.agent_service import AgentService
 from backend.services.ai_service import AIService
 from backend.services.auth_service import AuthService
 from backend.services.backup_service import BackupService
@@ -45,6 +46,7 @@ class Services:
     build: BuildService
     ai: AIService
     lsp: "LspService"
+    agent: AgentService
     login_limiter: RateLimiter
     api_limiter: RateLimiter
 
@@ -52,7 +54,8 @@ class Services:
 def build_services(settings: Settings, registry: EngineRegistry) -> Services:
     db = Database(settings.metadata_dir / "coding_server.db")
     files = FileService(settings, db)
-    return Services(
+    holder: dict = {}
+    svc = Services(
         settings=settings, db=db, registry=registry, auth=AuthService(settings, db),
         projects=ProjectService(settings, db), files=files,
         execution=ExecutionService(settings, db, registry), terminal=TerminalService(settings),
@@ -61,7 +64,10 @@ def build_services(settings: Settings, registry: EngineRegistry) -> Services:
         ai=AIService(settings, db, files), lsp=LspService(settings),
         login_limiter=RateLimiter(settings.rate_limit_login_per_minute, 60.0),
         api_limiter=RateLimiter(600, 60.0),
+        agent=AgentService(settings, db, lambda: holder["svc"]),
     )
+    holder["svc"] = svc
+    return svc
 
 
 def services(request: Request) -> Services:

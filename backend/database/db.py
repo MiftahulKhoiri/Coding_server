@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Kolom tambahan (migrasi ringan, idempoten): tabel -> [(kolom, definisi)]
 MIGRATIONS: dict[str, list[tuple[str, str]]] = {
@@ -19,6 +19,8 @@ MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("existed", "INTEGER NOT NULL DEFAULT 1"), ("diff", "TEXT NOT NULL DEFAULT ''"),
         ("additions", "INTEGER NOT NULL DEFAULT 0"), ("deletions", "INTEGER NOT NULL DEFAULT 0"),
         ("error", "TEXT NOT NULL DEFAULT ''"),
+        ("risk", "TEXT NOT NULL DEFAULT 'MEDIUM'"), ("risk_reasons", "TEXT NOT NULL DEFAULT ''"),
+        ("task_id", "TEXT"),
     ],
 }
 
@@ -109,6 +111,26 @@ CREATE TABLE IF NOT EXISTS ai_messages (
     content TEXT NOT NULL, reasoning TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_aimsg_conv ON ai_messages(conversation_id, id);
+CREATE TABLE IF NOT EXISTS agent_tasks (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL, project_id TEXT NOT NULL,
+    title TEXT NOT NULL, description TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'PENDING', stage TEXT NOT NULL DEFAULT 'PENDING',
+    progress REAL NOT NULL DEFAULT 0, current_op TEXT NOT NULL DEFAULT '',
+    connection_id TEXT, model TEXT,
+    plan TEXT NOT NULL DEFAULT '[]', report TEXT, error TEXT NOT NULL DEFAULT '',
+    auto_apply INTEGER NOT NULL DEFAULT 0, max_steps INTEGER NOT NULL DEFAULT 30,
+    steps_used INTEGER NOT NULL DEFAULT 0, checkpoint TEXT,
+    created_at REAL NOT NULL, started_at REAL, updated_at REAL NOT NULL, finished_at REAL,
+    last_activity REAL
+);
+CREATE INDEX IF NOT EXISTS ix_agent_user ON agent_tasks(user_id, updated_at);
+CREATE INDEX IF NOT EXISTS ix_agent_project ON agent_tasks(project_id, updated_at);
+CREATE TABLE IF NOT EXISTS agent_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS ix_agent_events ON agent_events(task_id, id);
 CREATE TABLE IF NOT EXISTS ai_proposals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL, user_id INTEGER NOT NULL, path TEXT NOT NULL, action TEXT NOT NULL,
@@ -137,6 +159,8 @@ class Database:
             for name, decl in cols:
                 if name not in have:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+        # Indeks untuk kolom hasil migrasi (tidak bisa di SCHEMA karena DB lama belum punya kolomnya).
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_aiprop_task ON ai_proposals(task_id)")
 
     def _conn(self) -> sqlite3.Connection:
         conn = getattr(self._local, "conn", None)

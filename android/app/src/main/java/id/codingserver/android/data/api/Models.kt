@@ -233,8 +233,47 @@ import kotlinx.serialization.json.JsonElement
     val id: Int, val path: String, val action: String = "write", val status: String = "pending",
     val diff: String? = "", val additions: Int = 0, val deletions: Int = 0, val error: String? = "",
     val new_file: Boolean = false, val message_id: Int? = null, val conversation_id: Int? = null,
+    /** LOW | MEDIUM | HIGH — HIGH tidak pernah diterapkan otomatis & butuh konfirmasi. */
+    val risk: String = "MEDIUM", val risk_reasons: List<String> = emptyList(), val task_id: String? = null,
 )
 @Serializable data class AIProposalList(val proposals: List<AIProposalItem> = emptyList())
-@Serializable data class AIDecisionIn(val project_id: String, val approve: Boolean = true)
+@Serializable data class AIDecisionIn(val project_id: String, val approve: Boolean = true,
+                                      val confirm_high_risk: Boolean = false)
 @Serializable data class AIDecisionResult(val id: Int, val status: String, val proposal: AIProposalItem? = null)
 @Serializable data class AIReply(val content: String = "", val reasoning: String = "", val model: String? = null)
+
+// ---------- AI Coding Agent ----------
+@Serializable data class AgentPlanStep(
+    val id: String = "", val description: String = "", val files: List<String> = emptyList(),
+    val risk: String = "MEDIUM", val verification: String = "", val status: String = "pending",
+)
+@Serializable data class AgentRun(
+    val kind: String = "", val target: String = "", val status: String = "", val exit_code: Int? = null,
+    val process_id: String? = null,
+)
+@Serializable data class AgentVerified(
+    val files_changed: List<String> = emptyList(), val files_pending: List<String> = emptyList(),
+    val runs: List<AgentRun> = emptyList(), val tests_passed: Int = 0, val tests_failed: Int = 0, val steps_used: Int = 0,
+)
+@Serializable data class AgentAiText(val summary: String? = null, val limitations: String? = null, val remaining: String? = null)
+@Serializable data class AgentReport(
+    val verified: AgentVerified = AgentVerified(), val ai_generated: AgentAiText = AgentAiText(),
+    val incomplete: String? = null,
+)
+/** status: PENDING|PLANNING|INSPECTING|EXECUTING|WAITING_APPROVAL|BUILDING|TESTING|REVIEWING|FIXING|COMPLETED|FAILED|CANCELLED|PAUSED */
+@Serializable data class AgentTask(
+    val id: String, val project_id: String = "", val title: String = "", val description: String = "",
+    val status: String = "PENDING", val stage: String = "", val progress: Double = 0.0, val current_op: String = "",
+    val model: String? = null, val error: String = "", val max_steps: Int = 0, val steps_used: Int = 0,
+    val created_at: Double = 0.0, val started_at: Double? = null, val updated_at: Double = 0.0,
+    val finished_at: Double? = null, val duration: Double? = null, val auto_apply: Boolean = false,
+    val pending_proposals: Int = 0, val plan: List<AgentPlanStep> = emptyList(), val report: AgentReport? = null,
+)
+@Serializable data class AgentTaskList(val tasks: List<AgentTask> = emptyList())
+@Serializable data class AgentTaskCreate(
+    val project_id: String, val description: String, val title: String? = null,
+    val auto_apply: Boolean = false, val max_steps: Int = 30,
+)
+@Serializable data class AgentEvent(val id: Int, val ts: Double = 0.0, val kind: String = "",
+                                    val data: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()))
+@Serializable data class AgentEvents(val events: List<AgentEvent> = emptyList())

@@ -293,6 +293,10 @@ class FileService:
             for name in dirnames + filenames:
                 full = dp / name
                 if content:
+                    # Jangan pernah membaca lewat symlink: link bisa menunjuk ke luar proyek
+                    # (mis. ~/.ssh/id_rsa) dan isinya akan bocor lewat hasil pencarian.
+                    if full.is_symlink():
+                        continue
                     if name in filenames and full.suffix.lower() in TEXT_EXT and full.stat().st_size < 2_000_000:
                         try:
                             for i, line in enumerate(full.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):

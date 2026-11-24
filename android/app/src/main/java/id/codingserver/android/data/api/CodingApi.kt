@@ -121,4 +121,15 @@ interface CodingApi {
                                                         @Query("conversation_id") conversationId: Int? = null): AIProposalList
     @POST("api/v1/ai/proposals/{id}/decide") suspend fun aiDecide(@Path("id") id: Int, @Body body: AIDecisionIn): AIDecisionResult
     @POST("api/v1/ai/proposals/{id}/revert") suspend fun aiRevert(@Path("id") id: Int, @Body body: AIDecisionIn): AIDecisionResult
+
+    // AI Coding Agent
+    @GET("api/v1/agent/tasks") suspend fun agentTasks(@Query("project_id") projectId: String? = null): AgentTaskList
+    @POST("api/v1/agent/tasks") suspend fun agentCreate(@Body body: AgentTaskCreate): AgentTask
+    @GET("api/v1/agent/tasks/{id}") suspend fun agentTask(@Path("id") id: String): AgentTask
+    @GET("api/v1/agent/tasks/{id}/events") suspend fun agentEvents(@Path("id") id: String, @Query("after") after: Int = 0): AgentEvents
+    @GET("api/v1/agent/tasks/{id}/proposals") suspend fun agentProposals(@Path("id") id: String): AIProposalList
+    @POST("api/v1/agent/tasks/{id}/cancel") suspend fun agentCancel(@Path("id") id: String): AgentTask
+    @POST("api/v1/agent/tasks/{id}/pause") suspend fun agentPause(@Path("id") id: String): AgentTask
+    @POST("api/v1/agent/tasks/{id}/resume") suspend fun agentResume(@Path("id") id: String): AgentTask
+    @DELETE("api/v1/agent/tasks/{id}") suspend fun agentDelete(@Path("id") id: String): OkResponse
 }
