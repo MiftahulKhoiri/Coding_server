@@ -1,5 +1,20 @@
 package id.codingserver.android
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.lifecycleScope
+import id.codingserver.android.data.update.UpdateChecker
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -138,6 +153,20 @@ class MainActivity : ComponentActivity() {
             CodingServerTheme(theme) { App(vm, editor, terminal) }
         }
         handleAgentIntent(intent)
+        // Izin notifikasi (Android 13+) sejak awal: pembaruan APK, task agent & Uji Model memakai notifikasi.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private val notifPerm = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) lifecycleScope.launch { UpdateChecker.check(this@MainActivity, force = false) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Kembali ke aplikasi: cek APK baru (dibatasi tiap 30 menit di UpdateChecker).
+        lifecycleScope.launch { UpdateChecker.check(this@MainActivity) }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -146,12 +175,17 @@ class MainActivity : ComponentActivity() {
         handleAgentIntent(intent)
     }
 
-    /** Notifikasi AI Agent membawa id task yang harus dibuka. */
+    /** Notifikasi membawa id task agent atau layar yang harus dibuka. */
     private fun handleAgentIntent(intent: android.content.Intent?) {
         val key = AgentMonitorService.EXTRA_OPEN_TASK
-        val taskId = intent?.getStringExtra(key) ?: return
-        intent.removeExtra(key)
-        vm.openAgentTask(taskId)
+        intent?.getStringExtra(key)?.let { taskId ->
+            intent.removeExtra(key)
+            vm.openAgentTask(taskId)
+        }
+        intent?.getStringExtra(UpdateChecker.EXTRA_OPEN_ROUTE)?.let { r ->
+            intent.removeExtra(UpdateChecker.EXTRA_OPEN_ROUTE)
+            vm.requestRoute(r)
+        }
     }
 }
 
@@ -167,6 +201,10 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
     val snack = remember { SnackbarHostState() }
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
+    val update by UpdateChecker.available.collectAsState()
+    val activity = LocalContext.current as? android.app.Activity
+    var exitDialog by remember { mutableStateOf(false) }
+    var exitWork by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(Unit) { vm.messages.collect { snack.showSnackbar(it) } }
     LaunchedEffect(auth) {
@@ -182,6 +220,14 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
     LaunchedEffect(agentTarget, auth) {
         if (agentTarget != null && auth == AuthState.LOGGED_IN && route != "agent")
             nav.navigate("agent") { launchSingleTop = true; popUpTo("dashboard") }
+    }
+    val openRoute by vm.openRoute.collectAsState()
+    LaunchedEffect(openRoute, auth) {
+        val r = openRoute ?: return@LaunchedEffect
+        if (auth == AuthState.LOGGED_IN) {
+            if (r != route) nav.navigate(r) { launchSingleTop = true; popUpTo("dashboard") }
+            vm.consumeRoute()
+        }
     }
 
     fun go(r: String) {
@@ -212,6 +258,16 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
                         NavigationDrawerItem(label = { Text(d.label) }, icon = { Icon(d.icon, null) },
                             selected = route == d.route, onClick = { go(d.route) }, modifier = Modifier.padding(horizontal = 8.dp))
                     }
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    NavigationDrawerItem(label = { Text("Keluar aplikasi") },
+                        icon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, null) }, selected = false,
+                        onClick = {
+                            scope.launch {
+                                drawer.close()
+                                exitWork = vm.runningWork()
+                                exitDialog = true
+                            }
+                        }, modifier = Modifier.padding(horizontal = 8.dp))
                     Spacer(Modifier.height(16.dp))
                 }
             }
@@ -236,6 +292,15 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
                         modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.error).padding(6.dp),
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    // Banner pembaruan APK (tidak perlu lagi cek manual di Pengaturan).
+                    val upd = update
+                    if (upd != null && route != "settings") Text(
+                        "⬆️ Versi baru tersedia (build ${upd.build}) — ketuk untuk memperbarui",
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primary)
+                            .clickable { go("settings") }.padding(8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             },
         ) { pad ->
@@ -244,6 +309,22 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
             NavGraph(nav, vm, editor, terminal, onMenu = { scope.launch { drawer.open() } }, modifier = Modifier.padding(pad).consumeWindowInsets(pad).imePadding().fillMaxSize())
         }
     }
+
+    if (exitDialog) ExitDialog(
+        work = exitWork,
+        onDismiss = { exitDialog = false },
+        onMinimize = {
+            exitDialog = false
+            // Pemantau latar belakang menyala selama masih ada proses -> notifikasi saat selesai.
+            activity?.let { AgentMonitorService.start(it) }
+            activity?.moveTaskToBack(true)
+        },
+        onExit = {
+            exitDialog = false
+            if (exitWork.isEmpty()) activity?.let { AgentMonitorService.stop(it) }
+            activity?.finishAndRemoveTask()
+        },
+    )
 }
 
 @Composable
@@ -298,4 +379,36 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
         composable("monitor") { MonitorScreen(vm) }
         composable("settings") { SettingsScreen(vm) { nav.navigate("servers") } }
     }
+}
+
+
+/** Dialog keluar: bila masih ada proses berjalan, sarankan minimalkan (proses tetap jalan di server). */
+@Composable
+private fun ExitDialog(work: List<String>, onDismiss: () -> Unit, onMinimize: () -> Unit, onExit: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, null) },
+        title = { Text(if (work.isEmpty()) "Keluar dari Coding Server?" else "Masih ada proses berjalan") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (work.isEmpty()) Text("Tidak ada proses yang sedang berjalan. Aplikasi akan ditutup.")
+                else {
+                    work.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                    Text("Proses berjalan di server Pi dan tetap lanjut walau aplikasi ditutup. Pilih Minimalkan agar " +
+                             "pemantau tetap aktif & kamu dapat notifikasi saat selesai.",
+                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+        },
+        confirmButton = {
+            if (work.isEmpty()) TextButton(onClick = onExit) { Text("Keluar") }
+            else TextButton(onClick = onMinimize) { Text("Minimalkan") }
+        },
+        dismissButton = {
+            Row {
+                if (work.isNotEmpty()) TextButton(onClick = onExit) { Text("Tutup aplikasi") }
+                TextButton(onClick = onDismiss) { Text("Batal") }
+            }
+        },
+    )
 }

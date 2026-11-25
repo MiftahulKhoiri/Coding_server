@@ -40,6 +40,9 @@ import id.codingserver.android.data.update.ApkInstaller
 import id.codingserver.android.data.update.AppRelease
 import id.codingserver.android.data.update.AppUpdater
 import id.codingserver.android.data.update.InstallEvent
+import id.codingserver.android.data.update.UpdateChecker
+import id.codingserver.android.ui.common.InfoButton
+import id.codingserver.android.ui.common.TitleWithInfo
 import id.codingserver.android.ui.AppViewModel
 import id.codingserver.android.ui.common.formatBytes
 import id.codingserver.android.ui.common.formatTime
@@ -54,6 +57,7 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val install by ApkInstaller.events.collectAsState()
+    val autoRelease by UpdateChecker.available.collectAsState()
     var release by remember { mutableStateOf<AppRelease?>(null) }
     var updateMsg by remember { mutableStateOf<String?>(null) }
     var progress by remember { mutableStateOf<Float?>(null) }
@@ -91,10 +95,10 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
                     Text("Word wrap", Modifier.weight(1f)); Switch(prefs.wordWrap, { vm.setEditorPrefs(prefs.copy(wordWrap = it)) })
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Language server (C/C++ & Python)")
-                        Text("Autocomplete pintar, error saat mengetik, info simbol, ke definisi lintas file (clangd / pyright di server).",
-                             style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Language server", modifier = Modifier.weight(1f, fill = false))
+                        InfoButton("Language server (C/C++ & Python)", "Autocomplete pintar, error saat mengetik, info simbol, " +
+                            "dan lompat ke definisi lintas file. Dijalankan di server (clangd / pyright).")
                     }
                     Switch(prefs.lsp, { vm.setEditorPrefs(prefs.copy(lsp = it)) })
                 }
@@ -106,19 +110,23 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
         }
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Pembaruan aplikasi", style = MaterialTheme.typography.titleMedium)
+                TitleWithInfo("Pembaruan aplikasi", "Aplikasi memeriksa APK terbaru di GitHub secara otomatis saat dibuka, " +
+                    "saat kembali ke aplikasi, dan tiap 6 jam. Bila ada versi baru, muncul notifikasi dan banner biru di atas " +
+                    "layar — tidak perlu cek manual.\n\nPemasangan tetap butuh konfirmasi \"Perbarui\" dari Android; " +
+                    "APK hanya diterima bila tanda tangannya sama.")
                 Text("Versi terpasang: ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
-                Button(onClick = {
+                autoRelease?.let { if (release == null) Text("⬆️ Tersedia ${it.title}", color = MaterialTheme.colorScheme.primary) }
+                OutlinedButton(onClick = {
                     updateMsg = "Memeriksa…"
                     scope.launch {
-                        runCatching { updater.latest() }.onSuccess { r ->
+                        runCatching { UpdateChecker.check(ctx, force = true) }.onSuccess { r ->
                             release = r
-                            updateMsg = if (r.build > BuildConfig.VERSION_CODE) "Tersedia ${r.title}" else "Sudah versi terbaru (${r.title})"
+                            updateMsg = if (r != null) "Tersedia ${r.title}" else "Sudah versi terbaru"
                         }.onFailure { updateMsg = it.message }
                     }
-                }) { Text("Periksa pembaruan") }
+                }) { Text("Periksa sekarang") }
                 updateMsg?.let { Text(it) }
-                val r = release
+                val r = release ?: autoRelease
                 if (r != null && r.build > BuildConfig.VERSION_CODE) {
                     Button(onClick = {
                         if (!ApkInstaller.canInstall(ctx)) {
@@ -156,7 +164,8 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
         }
         if (isAdmin) Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Backup server", style = MaterialTheme.typography.titleMedium)
+                TitleWithInfo("Backup server", "Membuat salinan database & konfigurasi server lalu memverifikasinya.\n\n" +
+                    "Restore dilakukan dari server: scripts/backup.py restore NAMA")
                 Button(onClick = {
                     val c = client ?: return@Button
                     vm.toast("Membuat backup…")
@@ -168,7 +177,6 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
                     }
                 }) { Text("Backup sekarang") }
                 backups?.forEach { b -> Text("${b.name} · ${formatBytes(b.size)} · ${formatTime(b.created_at)}", style = MaterialTheme.typography.bodySmall) }
-                Text("Restore dilakukan dari server: scripts/backup.py restore NAMA", style = MaterialTheme.typography.bodySmall)
             }
         }
     }

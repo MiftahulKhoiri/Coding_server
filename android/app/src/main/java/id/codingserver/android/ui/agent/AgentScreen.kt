@@ -66,6 +66,7 @@ import id.codingserver.android.ui.AppViewModel
 import id.codingserver.android.ui.ai.EditCard
 import id.codingserver.android.ui.common.ConfirmDialog
 import id.codingserver.android.ui.common.ErrorCard
+import id.codingserver.android.ui.common.InfoButton
 import id.codingserver.android.ui.common.formatDuration
 import id.codingserver.android.ui.common.formatTime
 import id.codingserver.android.ui.theme.ErrRed
@@ -162,12 +163,16 @@ private fun TaskList(vm: AppViewModel, c: ApiClient, projectId: String, projectN
             val list = tasks
             when {
                 list == null && error == null -> LinearProgressIndicator(Modifier.fillMaxWidth().padding(12.dp))
-                list.isNullOrEmpty() -> Text(
-                    "Belum ada task. Tekan + lalu tulis tugasnya, mis. \"perbaiki error di main.py dan pastikan test lulus\". " +
-                        "Agen akan memeriksa proyek, membuat rencana, mengusulkan perubahan (perlu persetujuanmu), " +
-                        "menjalankan build/test di sandbox, lalu memberi laporan. Pastikan model sudah diterapkan di menu Model AI.",
-                    Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium,
-                )
+                list.isNullOrEmpty() -> Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Belum ada task. Tekan + untuk memberi tugas ke agen.", style = MaterialTheme.typography.bodyMedium,
+                         modifier = Modifier.weight(1f))
+                    InfoButton("Cara kerja AI Agent",
+                        "Tulis tugasnya, mis. \"perbaiki error di main.py dan pastikan test lulus\".\n\n" +
+                            "Agen akan memeriksa proyek, membuat rencana, mengusulkan perubahan (perlu persetujuanmu), " +
+                            "menjalankan build/test di sandbox, lalu memberi laporan.\n\nAgen berjalan di server: aplikasi " +
+                            "boleh ditutup, notifikasi muncul saat selesai / butuh persetujuan.\n\nPastikan model sudah " +
+                            "diterapkan di menu Model AI (atau atur peran di Model Agent).")
+                }
                 else -> LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(list.orEmpty(), key = { it.id }) { t -> TaskRow(t) { onOpen(t.id) } }
                     item { androidx.compose.foundation.layout.Spacer(Modifier.heightIn(min = 72.dp)) }
@@ -228,8 +233,10 @@ private fun NewTaskDialog(onDismiss: () -> Unit, onCreate: (String, Boolean) -> 
                                   modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp), maxLines = 10)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(auto, { auto = it })
-                    Text("Terapkan otomatis perubahan berisiko rendah/sedang (risiko TINGGI tetap minta persetujuan)",
-                         style = MaterialTheme.typography.bodySmall)
+                    Text("Terapkan otomatis", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    InfoButton("Terapkan otomatis", "Perubahan file berisiko rendah/sedang langsung diterapkan tanpa menunggu " +
+                        "persetujuanmu (tetap tercatat & bisa dibatalkan). Perubahan berisiko TINGGI (mis. hapus file) tetap " +
+                        "minta persetujuan.")
                 }
             }
         },
@@ -328,9 +335,12 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
         when (tab) {
             0 -> LazyColumn(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (t.status == "WAITING_APPROVAL") item {
-                    Text("Agen menunggu keputusanmu atas perubahan di bawah sebelum menjalankan/menguji kode. " +
-                             "Setelah semua diputuskan, task lanjut otomatis.",
-                         style = MaterialTheme.typography.bodySmall, color = Color(0xFF1E88E5))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("⏸ Menunggu keputusanmu", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF1E88E5),
+                             modifier = Modifier.weight(1f))
+                        InfoButton("Menunggu persetujuan", "Agen menunggu keputusanmu (Terapkan / Tolak) atas perubahan di bawah " +
+                            "sebelum menjalankan atau menguji kode. Setelah semua diputuskan, task lanjut otomatis.")
+                    }
                 }
                 if (proposals.isEmpty()) item { Text("Belum ada perubahan file.", style = MaterialTheme.typography.bodyMedium) }
                 items(proposals, key = { it.id }) { e ->

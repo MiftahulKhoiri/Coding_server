@@ -1,5 +1,14 @@
 package id.codingserver.android.ui.ai
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.rotate
+import id.codingserver.android.data.api.BenchRecommendation
+import id.codingserver.android.ui.common.InfoButton
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -97,66 +106,85 @@ fun ModelBenchScreen(vm: AppViewModel) {
     var reload by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(reload) {
         while (true) {
             apiCall { c.api.benchOverview() }.onSuccess { data = it; error = null }.onFailure { error = it.message }
             val running = data?.runs.orEmpty().any { it.status == "PENDING" || it.status == "RUNNING" }
+            // Uji berjalan -> pemantau latar belakang aktif: notifikasi saat selesai walau aplikasi diminimalkan.
+            if (running) id.codingserver.android.agent.AgentMonitorService.start(ctx)
             if (!running) break
             delay(3000)
+        }
+    }
+
+    // Status buka/tutup bagian & kartu (bertahan saat layar diputar).
+    var lbOpen by rememberSaveable { mutableStateOf(true) }
+    var histOpen by rememberSaveable { mutableStateOf(false) }
+    var openItems by rememberSaveable { mutableStateOf(setOf<String>()) }
+    fun toggle(id: String) { openItems = if (id in openItems) openItems - id else openItems + id }
+
+    fun applyRecommendation(rec: BenchRecommendation) {
+        val planner = rec.planner ?: return
+        scope.launch {
+            val body = buildMap {
+                putAll(roleJson("planner", planner.connection_id, planner.model))
+                rec.executor?.let { putAll(roleJson("executor", it.connection_id, it.model)) }
+                rec.reviewer?.let { putAll(roleJson("reviewer", it.connection_id, it.model)) }
+            }
+            apiCall { c.api.agentModelsUpdate(JsonObject(body)) }
+                .onSuccess { vm.toast("Peran model agent diterapkan") }
+                .onFailure { vm.toast(it.message ?: "Gagal") }
         }
     }
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Setiap model diberi ${data?.cases?.size ?: 6} kasus yang meniru kerja AI Agent: format JSON tool, " +
-                         "menyusun rencana, memperbaiki bug, menulis fungsi, membaca error, dan jujur soal hasil tes. " +
-                         "Kode buatan model dijalankan di sandbox terhadap tes tersembunyi. Uji berjalan di latar belakang " +
-                         "dan bergiliran dengan task agent.", style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(enabled = isAdmin, onClick = { showStart = true }) { Text("🧪 Mulai uji") }
                     OutlinedButton(onClick = { reload++ }) { Text("Muat ulang") }
+                    InfoButton("Uji Model",
+                        "Setiap model diberi ${data?.cases?.size ?: 6} kasus yang meniru kerja AI Agent: format JSON tool, " +
+                            "menyusun rencana, memperbaiki bug, menulis fungsi, membaca error, dan jujur soal hasil tes.\n\n" +
+                            "Kode buatan model dijalankan di sandbox terhadap tes tersembunyi.\n\n" +
+                            "Uji berjalan di latar belakang (aman ditinggal / aplikasi ditutup) dan bergiliran dengan task agent." +
+                            if (!isAdmin) "\n\nHanya admin yang bisa menjalankan uji." else "")
                 }
-                if (!isAdmin) Text("Hanya admin yang bisa menjalankan uji.", color = WarnAmber, style = MaterialTheme.typography.labelSmall)
                 error?.let { ErrorCard(it) { reload++ } }
             }
         }
         val d = data
         if (d == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         else {
-            val rec = d.recommendation
-            if (rec.planner != null) item {
-                Card(colors = CardDefaults.cardColors(containerColor = OkGreen.copy(alpha = 0.10f))) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("⭐ Rekomendasi peran (model lokal)", style = MaterialTheme.typography.titleSmall)
-                        Text("🧠 Perencana & 🔍 Peninjau: ${rec.planner.model} (skor ${rec.planner.score.toInt()})",
-                             style = MaterialTheme.typography.bodySmall)
-                        rec.executor?.let {
-                            Text("⚙️ Pelaksana: ${it.model} (skor ${it.score.toInt()}${it.avg_tps?.let { t -> ", $t tok/dtk" } ?: ""})",
-                                 style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (isAdmin) Button(onClick = {
-                            scope.launch {
-                                val body = buildMap {
-                                    putAll(roleJson("planner", rec.planner.connection_id, rec.planner.model))
-                                    rec.executor?.let { putAll(roleJson("executor", it.connection_id, it.model)) }
-                                    rec.reviewer?.let { putAll(roleJson("reviewer", it.connection_id, it.model)) }
-                                }
-                                apiCall { c.api.agentModelsUpdate(JsonObject(body)) }
-                                    .onSuccess { vm.toast("Peran model agent diterapkan") }
-                                    .onFailure { vm.toast(it.message ?: "Gagal") }
-                            }
-                        }) { Text("Terapkan rekomendasi") }
+            // ---- uji yang sedang berjalan: selalu tampil lengkap dengan log langsung ----
+            val running = d.runs.filter { it.status == "PENDING" || it.status == "RUNNING" }
+            if (running.isNotEmpty()) {
+                item { Text("⏳ Sedang berjalan (${running.size})", style = MaterialTheme.typography.titleMedium) }
+                items(running, key = { "run" + it.id }) { r -> RunRow(c, r, expanded = true, onToggle = {}) { detail = r.id } }
+            }
+
+            // ---- peringkat (dropdown) + rekomendasi ----
+            if (d.leaderboard.isNotEmpty()) {
+                item { SectionHeader("🏆 Peringkat", d.leaderboard.size, lbOpen) { lbOpen = !lbOpen } }
+                if (lbOpen) {
+                    val rec = d.recommendation
+                    if (rec.planner != null) item { RecommendationRow(rec, isAdmin) { applyRecommendation(rec) } }
+                    itemsIndexed(d.leaderboard, key = { _, r -> "lb" + r.id }) { i, r ->
+                        LeaderRow(i + 1, r, expanded = "lb" + r.id in openItems, onToggle = { toggle("lb" + r.id) }) { detail = r.id }
                     }
                 }
             }
-            if (d.leaderboard.isNotEmpty()) {
-                item { Text("🏆 Peringkat", style = MaterialTheme.typography.titleMedium) }
-                items(d.leaderboard, key = { "lb" + it.id }) { r -> LeaderRow(d.leaderboard.indexOf(r) + 1, r) { detail = r.id } }
+
+            // ---- riwayat uji (dropdown) ----
+            val done = d.runs.filter { it.status != "PENDING" && it.status != "RUNNING" }
+            item { SectionHeader("📜 Riwayat uji", done.size, histOpen) { histOpen = !histOpen } }
+            if (histOpen) {
+                if (done.isEmpty()) item { Text("Belum ada uji selesai. Tekan \"Mulai uji\" lalu pilih model.", style = MaterialTheme.typography.bodySmall) }
+                items(done, key = { "h" + it.id }) { r ->
+                    RunRow(c, r, expanded = "h" + r.id in openItems, onToggle = { toggle("h" + r.id) }) { detail = r.id }
+                }
             }
-            item { Text("Riwayat uji", style = MaterialTheme.typography.titleMedium) }
-            if (d.runs.isEmpty()) item { Text("Belum ada uji. Tekan \"Mulai uji\" lalu pilih model.", style = MaterialTheme.typography.bodySmall) }
-            items(d.runs, key = { it.id }) { r -> RunRow(c, r) { detail = r.id } }
             item { Spacer(Modifier.height(24.dp)) }
         }
     }
@@ -180,42 +208,88 @@ private fun ScoreBar(score: Double) {
 }
 
 @Composable
-private fun LeaderRow(rank: Int, r: BenchRun, onClick: () -> Unit) {
-    val s = r.summary ?: return
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(when (rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#$rank" }, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(r.model, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(r.connection_name + if (r.location == "online") " (online)" else "", style = MaterialTheme.typography.labelSmall)
-                }
-                Text("${s.score.toInt()}", color = scoreColor(s.score), style = MaterialTheme.typography.headlineSmall,
-                     fontWeight = FontWeight.Bold)
-            }
-            ScoreBar(s.score)
-            Text(s.verdict, color = scoreColor(s.score), style = MaterialTheme.typography.labelMedium)
-            Text("lulus ${s.passed}/${s.total} · format ${s.format_ok}/${s.total} · " +
-                     (s.avg_tps?.let { "$it tok/dtk · " } ?: "") + "±${s.avg_seconds.toInt()} dtk/kasus",
-                 style = MaterialTheme.typography.labelSmall)
+private fun SectionHeader(title: String, count: Int, open: Boolean, onClick: () -> Unit) {
+    val rot by animateFloatAsState(if (open) 180f else 0f, tween(250), label = "chev")
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick),
+         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("$title ($count)", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Icon(Icons.Default.ExpandMore, if (open) "Tutup" else "Buka", Modifier.rotate(rot))
         }
     }
 }
 
 @Composable
-private fun RunRow(c: ApiClient, r: BenchRun, onClick: () -> Unit) {
+private fun RecommendationRow(rec: BenchRecommendation, isAdmin: Boolean, onApply: () -> Unit) {
+    val p = rec.planner ?: return
+    Card(colors = CardDefaults.cardColors(containerColor = OkGreen.copy(alpha = 0.10f))) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("⭐ Rekomendasi", style = MaterialTheme.typography.titleSmall)
+                Text("🧠 ${p.model}" + (rec.executor?.let { "  ·  ⚙️ ${it.model}" } ?: ""),
+                     style = MaterialTheme.typography.labelSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+            InfoButton("Rekomendasi peran",
+                "Dihitung dari hasil uji model lokal.\n\n🧠 Perencana & 🔍 Peninjau: ${p.model} (skor ${p.score.toInt()}) — skor tertinggi.\n" +
+                    (rec.executor?.let { "⚙️ Pelaksana: ${it.model} (skor ${it.score.toInt()}${it.avg_tps?.let { t -> ", $t tok/dtk" } ?: ""}) — " +
+                        "tercepat di antara model yang skornya ≥ 60.\n" } ?: "") +
+                    "\n\"Terapkan\" mengisi peran di Model AI → Model Agent. Bisa diubah lagi kapan saja.")
+            if (isAdmin) TextButton(onClick = onApply) { Text("Terapkan") }
+        }
+    }
+}
+
+@Composable
+private fun ScoreBadge(score: Double) {
+    Text("${score.toInt()}", color = scoreColor(score), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+}
+
+@Composable
+private fun Chevron(open: Boolean) {
+    val rot by animateFloatAsState(if (open) 180f else 0f, tween(250), label = "chev")
+    Icon(Icons.Default.ExpandMore, if (open) "Tutup" else "Buka", Modifier.rotate(rot))
+}
+
+@Composable
+private fun LeaderRow(rank: Int, r: BenchRun, expanded: Boolean, onToggle: () -> Unit, onDetail: () -> Unit) {
+    val s = r.summary ?: return
+    Card(Modifier.fillMaxWidth().clickable(onClick = onToggle).animateContentSize()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(when (rank) { 1 -> "🥇"; 2 -> "🥈"; 3 -> "🥉"; else -> "#$rank" }, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.width(8.dp))
+                Text(r.model, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                ScoreBadge(s.score)
+                Chevron(expanded)
+            }
+            if (expanded) {
+                Text(r.connection_name + if (r.location == "online") " (online)" else "", style = MaterialTheme.typography.labelSmall)
+                ScoreBar(s.score)
+                Text(s.verdict, color = scoreColor(s.score), style = MaterialTheme.typography.labelMedium)
+                Text("lulus ${s.passed}/${s.total} · format ${s.format_ok}/${s.total} · " +
+                         (s.avg_tps?.let { "$it tok/dtk · " } ?: "") + "±${s.avg_seconds.toInt()} dtk/kasus",
+                     style = MaterialTheme.typography.labelSmall)
+                TextButton(onClick = onDetail) { Text("Lihat detail per kasus") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RunRow(c: ApiClient, r: BenchRun, expanded: Boolean, onToggle: () -> Unit, onDetail: () -> Unit) {
     val active = r.status == "PENDING" || r.status == "RUNNING"
     // Jam berdetak tiap detik selama uji berjalan (durasi tidak menunggu polling).
     var now by remember { mutableStateOf(System.currentTimeMillis() / 1000.0) }
     LaunchedEffect(active) { while (active) { now = System.currentTimeMillis() / 1000.0; delay(1000) } }
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = if (active) onDetail else onToggle).animateContentSize()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (active) { CircularProgressIndicator(Modifier.heightIn(max = 18.dp).width(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
                 Text(r.model, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val col = when (r.status) { "COMPLETED" -> OkGreen; "FAILED" -> ErrRed; "RUNNING" -> WarnAmber; else -> Color.Gray }
-                Text(runLabel(r.status), color = col, style = MaterialTheme.typography.labelMedium)
+                if (!active && r.summary != null) ScoreBadge(r.summary.score)
+                else Text(runLabel(r.status), color = col, style = MaterialTheme.typography.labelMedium)
+                if (!active) Chevron(expanded)
             }
             if (active) {
                 LinearProgressIndicator(progress = { if (r.total_cases > 0) r.done_cases.toFloat() / r.total_cases else 0f },
@@ -223,15 +297,19 @@ private fun RunRow(c: ApiClient, r: BenchRun, onClick: () -> Unit) {
                 if (r.current.isNotBlank()) Text("${r.current} (${r.done_cases}/${r.total_cases} selesai)",
                                                  style = MaterialTheme.typography.bodySmall)
             }
-            r.summary?.let { Text("skor ${it.score.toInt()} · ${it.verdict}", color = scoreColor(it.score), style = MaterialTheme.typography.bodySmall) }
-            if (r.error.isNotBlank()) Text(r.error, color = ErrRed, style = MaterialTheme.typography.bodySmall, maxLines = 3)
-            Text(formatTime(r.created_at) + (r.started_at?.let { st ->
-                " · " + formatDuration(((r.finished_at ?: now) - st).toLong().coerceAtLeast(0))
-            } ?: ""), style = MaterialTheme.typography.labelSmall)
-            // Log langsung: apa yang sedang dikerjakan model.
+            if (active || expanded) {
+                Text(runLabel(r.status) + " · " + formatTime(r.created_at) + (r.started_at?.let { st ->
+                    " · " + formatDuration(((r.finished_at ?: now) - st).toLong().coerceAtLeast(0))
+                } ?: ""), style = MaterialTheme.typography.labelSmall)
+                r.summary?.let { Text("skor ${it.score.toInt()} · ${it.verdict}", color = scoreColor(it.score), style = MaterialTheme.typography.bodySmall) }
+                if (r.error.isNotBlank()) Text(r.error, color = ErrRed, style = MaterialTheme.typography.bodySmall, maxLines = 3)
+            }
+            // Log langsung: selalu tampil selama uji berjalan, tanda program sedang bekerja.
             if (active) {
                 HorizontalDivider(Modifier.padding(vertical = 4.dp))
                 BenchLiveLog(c, r.id)
+            } else if (expanded) {
+                TextButton(onClick = onDetail) { Text("Lihat detail & log") }
             }
         }
     }
@@ -254,8 +332,12 @@ private fun StartDialog(c: ApiClient, onDismiss: () -> Unit, onStart: (List<Agen
         title = { Text("Pilih model untuk diuji") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Model lokal diuji satu per satu (dimuat bergantian). Tiap model bisa makan beberapa menit sampai " +
-                         "puluhan menit di Pi — aman ditinggal, hasilnya tersimpan.", style = MaterialTheme.typography.labelSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Centang model yang mau diuji", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                    InfoButton("Cara kerja uji", "Model lokal diuji satu per satu (dimuat bergantian ke RAM Pi). Tiap model bisa " +
+                        "makan beberapa menit sampai puluhan menit — aman ditinggal, hasilnya tersimpan.\n\nModel online " +
+                        "memakai API (butuh internet & bisa berbayar), jadi disembunyikan secara bawaan.")
+                }
                 if (loading) CircularProgressIndicator(Modifier.heightIn(max = 24.dp))
                 val visible = models.filter { showOnline || it.first.location == "local" }
                 visible.groupBy { it.first }.forEach { (cn, ms) ->
@@ -323,7 +405,11 @@ private fun RunDetailDialog(c: ApiClient, id: String, isAdmin: Boolean, onDismis
                     }
                     HorizontalDivider()
                 }
-                if (r.results.isNotEmpty()) Text("Ketuk kasus untuk melihat jawaban model.", style = MaterialTheme.typography.labelSmall)
+                if (r.results.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Hasil per kasus", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                    InfoButton("Hasil per kasus", "Ketuk sebuah kasus untuk melihat jawaban asli model.\n\n✅ lulus penuh · 🟡 sebagian " +
+                        "· ❌ salah · 🚫 format JSON tool salah (agent tidak bisa memakai jawabannya).")
+                }
                 if (r.log.isNotEmpty()) {
                     Text("Log proses", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 6.dp))
                     r.log.forEach { LogLine(it) }

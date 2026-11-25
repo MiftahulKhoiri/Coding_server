@@ -18,6 +18,8 @@ import id.codingserver.android.CodingServerApp
 import id.codingserver.android.MainActivity
 import id.codingserver.android.R
 import id.codingserver.android.data.api.AgentTask
+import id.codingserver.android.data.api.BenchRun
+import id.codingserver.android.data.update.UpdateChecker
 import id.codingserver.android.data.api.ApiClient
 import id.codingserver.android.data.api.apiCall
 import kotlinx.coroutines.CoroutineScope
@@ -30,7 +32,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Foreground service yang memantau task AI Agent di server selama ada task aktif.
+ * Foreground service yang memantau task AI Agent & Uji Model di server selama masih ada yang berjalan.
  *
  * Agen sendiri berjalan di server (Raspberry Pi); service ini hanya mem-polling status supaya:
  * * ada notifikasi tetap "Agent sedang bekerja…" berisi progres task aktif, dan
@@ -151,6 +153,8 @@ class AgentMonitorService : Service() {
         var failures = 0
         while (scope.isActive) {
             val res = apiCall { client.api.agentTasks() }
+            // Uji Model juga dipantau (boleh gagal mis. tanpa izin: dianggap tidak ada uji).
+            val benches = apiCall { client.api.benchOverview() }.getOrNull()?.runs
             if (expired) {
                 postEvent("session", "Sesi berakhir", "Login lagi di aplikasi untuk melanjutkan pemantauan agent.", null)
                 stopNow(); return
@@ -159,11 +163,13 @@ class AgentMonitorService : Service() {
             if (tasks != null) {
                 failures = 0
                 handleTransitions(tasks)
+                benches?.let { handleBenchTransitions(it) }
                 val active = tasks.filter { it.status in ACTIVE }
-                if (active.isEmpty()) {
+                val runningBench = benches.orEmpty().filter { it.status == "PENDING" || it.status == "RUNNING" }
+                if (active.isEmpty() && runningBench.isEmpty()) {
                     stopNow(); return
                 }
-                showActive(active)
+                if (active.isNotEmpty()) showActive(active) else showBench(runningBench)
             } else {
                 failures++
                 if (failures >= MAX_FAILURES) {
@@ -193,6 +199,29 @@ class AgentMonitorService : Service() {
         primed = true
     }
 
+    private val lastBench = HashMap<String, String>()
+    private var benchPrimed = false
+
+    private fun handleBenchTransitions(runs: List<BenchRun>) {
+        for (r in runs) {
+            val prev = lastBench.put(r.id, r.status)
+            if (!benchPrimed || prev == null || prev == r.status) continue
+            when (r.status) {
+                "COMPLETED" -> postRoute("bench" + r.id, "Uji model selesai ✓",
+                    "${r.model}: skor ${r.summary?.score?.toInt() ?: "-"} — ${r.summary?.verdict ?: ""}", "ai_bench")
+                "FAILED" -> postRoute("bench" + r.id, "Uji model gagal", "${r.model}: ${r.error}", "ai_bench")
+            }
+        }
+        benchPrimed = true
+    }
+
+    private fun showBench(running: List<BenchRun>) {
+        val r = running.first()
+        val more = if (running.size > 1) " (+${running.size - 1} antre)" else ""
+        val p = if (r.total_cases > 0) r.done_cases.toDouble() / r.total_cases else null
+        nm.notify(NOTIF_ONGOING, ongoing("Uji model: ${r.model}$more", r.current.ifBlank { "Menunggu giliran" }, p, null, "ai_bench"))
+    }
+
     private fun showActive(active: List<AgentTask>) {
         val t = active.first()
         val more = if (active.size > 1) " (+${active.size - 1} task lain)" else ""
@@ -213,16 +242,33 @@ class AgentMonitorService : Service() {
         })
     }
 
-    private fun openIntent(task: AgentTask?): PendingIntent {
+    private fun openIntent(task: AgentTask?, route: String? = null): PendingIntent {
         val i = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             if (task != null) putExtra(EXTRA_OPEN_TASK, task.id)
+            if (route != null) putExtra(UpdateChecker.EXTRA_OPEN_ROUTE, route)
         }
-        return PendingIntent.getActivity(this, task?.id?.hashCode() ?: 0, i,
+        return PendingIntent.getActivity(this, task?.id?.hashCode() ?: route?.hashCode() ?: 0, i,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
-    private fun ongoing(title: String, text: String, progress: Double?, task: AgentTask?): android.app.Notification {
+    private fun postRoute(key: String, title: String, text: String, route: String) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
+        val n = NotificationCompat.Builder(this, CH_EVENTS)
+            .setSmallIcon(R.drawable.ic_stat_agent)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(openIntent(null, route))
+            .build()
+        nm.notify("agent_event", key.hashCode(), n)
+    }
+
+    private fun ongoing(title: String, text: String, progress: Double?, task: AgentTask?,
+                        route: String? = null): android.app.Notification {
         val stop = PendingIntent.getService(this, 1, Intent(this, AgentMonitorService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val b = NotificationCompat.Builder(this, CH_ONGOING)
@@ -235,7 +281,7 @@ class AgentMonitorService : Service() {
             .setSilent(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setContentIntent(openIntent(task))
+            .setContentIntent(openIntent(task, route))
             .addAction(0, "Berhenti memantau", stop)
         if (progress == null) b.setProgress(0, 0, true)
         else b.setProgress(100, (progress * 100).toInt().coerceIn(0, 100), false)

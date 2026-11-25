@@ -60,6 +60,8 @@ import id.codingserver.android.data.api.apiCall
 import id.codingserver.android.ui.AppViewModel
 import id.codingserver.android.ui.common.ConfirmDialog
 import id.codingserver.android.ui.common.ErrorCard
+import id.codingserver.android.ui.common.InfoButton
+import id.codingserver.android.ui.common.TitleWithInfo
 import id.codingserver.android.ui.theme.ErrRed
 import id.codingserver.android.ui.theme.OkGreen
 import id.codingserver.android.ui.theme.WarnAmber
@@ -122,7 +124,10 @@ fun AiModelScreen(vm: AppViewModel, onOpenBench: () -> Unit = {}, onOpenChat: ()
         status?.let { st ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("Model aktif", style = MaterialTheme.typography.titleMedium)
+                    TitleWithInfo("Model aktif", "Model yang dipakai AI Chat (dan AI Agent bila peran agent kosong).\n\n" +
+                        "Model lokal dibongkar otomatis dari RAM bila tidak dipakai selama " +
+                        "${st.settings.idle_unload_minutes} menit (atur di Parameter chat). Model yang sedang dipakai " +
+                        "agent / Uji Model tidak bisa dibongkar sampai selesai.")
                     val (txt, col) = when (st.status) {
                         "ready" -> "SIAP: ${st.model}" to OkGreen
                         "loading" -> "MEMUAT: ${st.target ?: ""}" to WarnAmber
@@ -135,8 +140,6 @@ fun AiModelScreen(vm: AppViewModel, onOpenBench: () -> Unit = {}, onOpenChat: ()
                     }
                     st.connection?.let { Text("${it.name} (${if (it.location == "local") "lokal" else "online"})", style = MaterialTheme.typography.bodySmall) }
                     if (st.message.isNotBlank()) Text(st.message, style = MaterialTheme.typography.bodySmall)
-                    if (st.status == "ready" && st.loaded_by_us)
-                        Text("Dibongkar otomatis bila idle ${st.settings.idle_unload_minutes} menit", style = MaterialTheme.typography.labelSmall)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (st.status == "ready") Button(onClick = onOpenChat) { Text("Buka AI Chat") }
                         if (isAdmin && st.status in setOf("ready", "error")) OutlinedButton(onClick = {
@@ -146,21 +149,27 @@ fun AiModelScreen(vm: AppViewModel, onOpenBench: () -> Unit = {}, onOpenChat: ()
                 }
             }
         }
-        if (!isAdmin) Text("Hanya admin yang bisa mengganti model. Kamu tetap bisa memakai AI Chat.", color = WarnAmber)
+        if (!isAdmin) Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Mode lihat saja", color = WarnAmber, modifier = Modifier.weight(1f))
+            InfoButton("Mode lihat saja", "Hanya admin yang bisa mengganti model. Kamu tetap bisa memakai AI Chat.")
+        }
         error?.let { ErrorCard(it) }
 
         // ---- 1. lokasi ----
-        Text("1. Jenis model", style = MaterialTheme.typography.titleSmall)
+        TitleWithInfo("1. Jenis model", "Lokal: model berjalan di Raspberry Pi (llama-server) atau PC lain di jaringanmu — " +
+            "gratis & data tidak keluar.\n\nOnline: memakai API penyedia (OpenAI, OpenRouter, Groq, DeepSeek, Anthropic, " +
+            "Gemini…) — butuh internet & API key, bisa berbayar.", style = MaterialTheme.typography.titleSmall)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(location == "local", { location = "local"; selConn = null; models = null }, label = { Text("Lokal (di Pi / jaringan)") })
             FilterChip(location == "online", { location = "online"; selConn = null; models = null }, label = { Text("Online (API)") })
         }
 
         // ---- 2. koneksi ----
-        Text("2. Koneksi", style = MaterialTheme.typography.titleSmall)
+        TitleWithInfo("2. Koneksi", "Server/penyedia tempat model berada. Admin bisa menambah, mengubah (✏️), atau menghapus " +
+            "koneksi. Untuk koneksi online tambahkan beserta API key-nya.", style = MaterialTheme.typography.titleSmall)
         val list = conns.filter { it.location == location }
-        if (list.isEmpty()) Text(if (location == "online") "Belum ada koneksi online. Tambahkan (OpenAI, OpenRouter, Groq, DeepSeek, Anthropic, Gemini…) beserta API key."
-                                 else "Belum ada koneksi lokal.", style = MaterialTheme.typography.bodySmall)
+        if (list.isEmpty()) Text(if (location == "online") "Belum ada koneksi online." else "Belum ada koneksi lokal.",
+                                 style = MaterialTheme.typography.bodySmall)
         list.forEach { cn ->
             Card(
                 Modifier.fillMaxWidth().clickable { selConn = cn.id; selModel = null },
@@ -186,7 +195,11 @@ fun AiModelScreen(vm: AppViewModel, onOpenBench: () -> Unit = {}, onOpenChat: ()
         // ---- 3. model ----
         if (selConn != null) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("3. Pilih model", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                TitleWithInfo("3. Pilih model", "Pilih model lalu tekan Terapkan.\n\n" +
+                    (if (location == "local") "Model lokal dimuat ke RAM Pi saat diterapkan; model chat sebelumnya dibongkar " +
+                        "(kecuali sedang dipakai agent / Uji Model). Status: termuat = sudah di RAM, belum dimuat = masih di disk."
+                     else "Model online langsung aktif (butuh internet & API key)."),
+                    style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 TextButton(onClick = { selConn?.let { fetchModels(it) } }) { Text("Muat ulang daftar") }
             }
             if (loadingModels) CircularProgressIndicator()
@@ -218,8 +231,6 @@ fun AiModelScreen(vm: AppViewModel, onOpenBench: () -> Unit = {}, onOpenChat: ()
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(if (busy) "Sedang memuat…" else "Terapkan model") }
-            Text(if (location == "local") "Model lokal dimuat ke RAM Pi saat diterapkan; model sebelumnya dibongkar."
-                 else "Model online langsung aktif (butuh internet & API key).", style = MaterialTheme.typography.labelSmall)
         }
 
         // ---- 4. model per peran agent + uji model ----
@@ -274,7 +285,10 @@ private fun ParamsCard(initial: AISettings, onSave: (AISettings) -> Unit) {
     var hist by remember(initial) { mutableStateOf(initial.history_messages.toString()) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("4. Parameter chat", style = MaterialTheme.typography.titleSmall)
+            TitleWithInfo("5. Parameter chat", "System prompt: instruksi dasar untuk AI Chat.\nTemperature: makin tinggi makin " +
+                "kreatif, makin rendah makin konsisten (agent selalu memakai ≤ 0,4).\nMax token: panjang jawaban maksimum.\n" +
+                "Riwayat pesan: jumlah pesan lama yang ikut dikirim.\nBongkar otomatis: model lokal dilepas dari RAM bila " +
+                "tidak dipakai sekian menit (0 = tidak pernah).", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(prompt, { prompt = it }, label = { Text("System prompt") }, modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp))
             Text("Temperature: ${"%.2f".format(temp)}")
             Slider(temp, { temp = it }, valueRange = 0f..1.5f)
@@ -328,7 +342,10 @@ private fun ConnectionDialog(initial: AIConnection?, location: String, presets: 
                 OutlinedTextField(key, { key = it }, singleLine = true,
                     label = { Text(if (initial?.has_key == true) "API key (kosongkan = tidak diubah)" else if (needsKey) "API key" else "API key (opsional)") },
                     visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-                Text("API key disimpan terenkripsi di server dan tidak pernah dikirim balik ke HP.", style = MaterialTheme.typography.labelSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Keamanan API key", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                    InfoButton("Keamanan API key", "API key disimpan terenkripsi di server dan tidak pernah dikirim balik ke HP.")
+                }
             }
         },
         confirmButton = {

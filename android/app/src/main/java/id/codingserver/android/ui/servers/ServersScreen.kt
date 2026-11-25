@@ -147,7 +147,12 @@ private fun ServerDialog(initial: ServerProfile?, onDismiss: () -> Unit, onSave:
                 OutlinedTextField(name, { name = it }, label = { Text("Nama") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(url, { url = it }, label = { Text("Alamat (IP:port)") }, placeholder = { Text("192.168.1.10:8800") },
                     singleLine = true, modifier = Modifier.fillMaxWidth())
-                Text("Port bawaan 8800. Gunakan https:// bila memakai reverse proxy TLS.", style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("Format alamat", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                    id.codingserver.android.ui.common.InfoButton("Format alamat",
+                        "Isi IP atau nama host Raspberry Pi, mis. 192.168.1.10:8800. Port bawaan 8800 (boleh tidak ditulis).\n\n" +
+                            "Gunakan https:// bila server memakai reverse proxy TLS.")
+                }
             }
         },
         confirmButton = {

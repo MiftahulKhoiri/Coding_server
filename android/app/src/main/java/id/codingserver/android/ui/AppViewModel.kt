@@ -96,6 +96,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val aiChat = id.codingserver.android.ui.ai.AiChatController(viewModelScope) { _client.value }
 
     init {
+        // Cek APK terbaru otomatis: saat aplikasi dibuka lalu tiap 6 jam selama berjalan.
+        viewModelScope.launch {
+            delay(4_000)
+            while (isActive) {
+                id.codingserver.android.data.update.UpdateChecker.check(getApplication())
+                delay(6 * 60 * 60 * 1000L)
+            }
+        }
         viewModelScope.launch {
             val active = serverStore.current()
             if (active != null) activate(active, restoreProject = true) else _auth.value = AuthState.NO_SERVER
@@ -112,14 +120,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun openAgentTask(taskId: String) { _agentTarget.value = taskId }
     fun consumeAgentTarget() { _agentTarget.value = null }
 
-    /** Nyalakan pemantau latar belakang bila masih ada task agent aktif di server. */
+    /** Layar yang diminta dibuka dari notifikasi (mis. "settings" untuk pembaruan, "ai_bench" untuk Uji Model). */
+    private val _openRoute = MutableStateFlow<String?>(null)
+    val openRoute: StateFlow<String?> = _openRoute.asStateFlow()
+    fun requestRoute(route: String) { _openRoute.value = route }
+    fun consumeRoute() { _openRoute.value = null }
+
+    /** Nyalakan pemantau latar belakang bila masih ada task agent / Uji Model yang berjalan di server. */
     private fun resumeAgentMonitor(c: ApiClient) {
         viewModelScope.launch {
+            if (runningWork(c).isNotEmpty()) id.codingserver.android.agent.AgentMonitorService.start(getApplication())
+        }
+    }
+
+    /** Daftar proses yang masih berjalan (untuk dialog keluar). Kosong = aman ditutup. */
+    suspend fun runningWork(c: ApiClient? = _client.value): List<String> {
+        val out = mutableListOf<String>()
+        if (c != null) {
             apiCall { c.api.agentTasks() }.onSuccess { list ->
-                if (list.tasks.any { it.status in id.codingserver.android.agent.AgentMonitorService.ACTIVE })
-                    id.codingserver.android.agent.AgentMonitorService.start(getApplication())
+                val active = list.tasks.filter { it.status in id.codingserver.android.agent.AgentMonitorService.ACTIVE }
+                if (active.isNotEmpty()) out += "🤖 ${active.size} task AI Agent (${active.first().title.take(40)})"
+            }
+            apiCall { c.api.benchOverview() }.onSuccess { b ->
+                b.runs.filter { it.status == "PENDING" || it.status == "RUNNING" }.forEach {
+                    out += "🧪 Uji model ${it.model} (${it.done_cases}/${it.total_cases})"
+                }
             }
         }
+        _run.value?.let { r -> if (r.status in setOf("QUEUED", "RUNNING", "PENDING", "BUILDING")) out += "▶ Program sedang dijalankan" }
+        return out
     }
 
     // ---------- server & auth ----------

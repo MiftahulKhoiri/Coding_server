@@ -41,6 +41,7 @@ import id.codingserver.android.data.api.BenchLive
 import id.codingserver.android.data.api.BenchLogEntry
 import id.codingserver.android.data.api.BenchRun
 import id.codingserver.android.data.api.apiCall
+import id.codingserver.android.ui.common.InfoButton
 import id.codingserver.android.ui.theme.ErrRed
 import id.codingserver.android.ui.theme.Mono
 import id.codingserver.android.ui.theme.OkGreen
@@ -93,11 +94,14 @@ fun BenchLiveLog(c: ApiClient, runId: String) {
                 Text(txt, color = col, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
                      modifier = Modifier.weight(1f))
                 Text("${l.elapsed.toInt()} dtk", style = MaterialTheme.typography.labelSmall)
+                InfoButton("Tahap proses model",
+                    "📦 Memuat model: file model dibaca ke RAM Pi (1–3 menit).\n" +
+                        "📖 Membaca prompt: model memproses instruksi & riwayat sebelum menjawab — di CPU Pi bagian " +
+                        "paling lama (1–5 menit per kasus), belum ada teks yang keluar.\n" +
+                        "🧠 Berpikir: model penalaran (mis. Qwen3.5) menulis pikirannya dulu.\n" +
+                        "✍️ Menulis jawaban: teks jawaban keluar token demi token.\n" +
+                        "🧪 Memeriksa: format JSON dicek & kode dijalankan di sandbox terhadap tes tersembunyi.")
             }
-            if (l.phase == "prompt") Text(
-                "Model sedang membaca instruksi & riwayat sebelum menjawab. Di CPU Pi ini bisa 1–5 menit per kasus.",
-                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             if (l.text.isNotBlank()) {
                 Text(if (l.phase == "thinking") "Isi pikiran model (langsung):" else "Yang sedang ditulis model (langsung):",
                      style = MaterialTheme.typography.labelSmall)

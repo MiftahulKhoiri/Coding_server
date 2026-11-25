@@ -38,6 +38,8 @@ import id.codingserver.android.data.api.AgentRoleModel
 import id.codingserver.android.data.api.ApiClient
 import id.codingserver.android.data.api.apiCall
 import id.codingserver.android.ui.AppViewModel
+import id.codingserver.android.ui.common.InfoButton
+import id.codingserver.android.ui.common.TitleWithInfo
 import id.codingserver.android.ui.theme.OkGreen
 import id.codingserver.android.ui.theme.WarnAmber
 import kotlinx.coroutines.launch
@@ -86,10 +88,11 @@ fun AgentModelsCard(vm: AppViewModel, c: ApiClient, conns: List<AIConnection>, i
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Model Agent (multi-model)", style = MaterialTheme.typography.titleMedium)
-            Text("Atur model berbeda per peran AI Agent. Peran yang kosong memakai model aktif" +
-                     (cfg?.default?.let { " (${it.model})" } ?: "") + ".",
-                 style = MaterialTheme.typography.bodySmall)
+            TitleWithInfo("Model Agent (multi-model)",
+                "Atur model berbeda per peran AI Agent. Peran yang kosong memakai model aktif" +
+                    (cfg?.default?.let { " (${it.model})" } ?: "") + ".\n\n" +
+                    "Bila model gagal berulang (format salah, error, atau verifikasi gagal), langkah itu otomatis " +
+                    "diambil alih Perencana (eskalasi), lalu model online bila diizinkan.")
             val c0 = cfg
             if (c0 == null) CircularProgressIndicator(Modifier.heightIn(max = 24.dp))
             else {
@@ -97,7 +100,10 @@ fun AgentModelsCard(vm: AppViewModel, c: ApiClient, conns: List<AIConnection>, i
                     val t = c0.role(r.key)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text("${r.icon} ${r.title}", style = MaterialTheme.typography.titleSmall)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("${r.icon} ${r.title}", style = MaterialTheme.typography.titleSmall)
+                                InfoButton(r.title, r.hint)
+                            }
                             Text(
                                 when {
                                     t != null -> "${t.model} · ${t.connection_name}${if (t.location == "online") " (online)" else ""}"
@@ -108,7 +114,6 @@ fun AgentModelsCard(vm: AppViewModel, c: ApiClient, conns: List<AIConnection>, i
                                 color = if (t != null) OkGreen else MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.bodySmall, fontWeight = if (t != null) FontWeight.Bold else null,
                             )
-                            Text(r.hint, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (isAdmin) TextButton(onClick = { picking = r }) { Text("Ubah") }
                     }
@@ -116,22 +121,36 @@ fun AgentModelsCard(vm: AppViewModel, c: ApiClient, conns: List<AIConnection>, i
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Izinkan eskalasi ke API online", style = MaterialTheme.typography.bodyMedium)
-                        Text(if (c0.allow_online) "Kode proyek bisa dikirim ke penyedia online saat eskalasi."
-                             else "100% lokal: model online tidak pernah dipakai.",
-                             style = MaterialTheme.typography.labelSmall, color = if (c0.allow_online) WarnAmber else OkGreen)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Eskalasi ke API online", style = MaterialTheme.typography.bodyMedium)
+                            InfoButton("Eskalasi ke API online",
+                                "Mati (bawaan): 100% lokal, model online tidak pernah dipakai.\n\nNyala: bila model lokal " +
+                                    "(termasuk Perencana) tetap gagal, langkah itu dikirim ke model 🌐 Eskalasi online. " +
+                                    "Isi kode proyek ikut terkirim ke penyedia online dan bisa berbayar.")
+                        }
+                        Text(if (c0.allow_online) "Diizinkan" else "100% lokal", style = MaterialTheme.typography.labelSmall,
+                             color = if (c0.allow_online) WarnAmber else OkGreen)
                     }
                     Switch(checked = c0.allow_online, enabled = isAdmin,
                            onCheckedChange = { save(JsonObject(mapOf("allow_online" to JsonPrimitive(it)))) })
                 }
-                Stepper("Eskalasi setelah verifikasi gagal", "kali berturut-turut", c0.escalate_after_failures, 1..10, isAdmin) {
+                Stepper("Eskalasi setelah verifikasi gagal", "kali berturut-turut", c0.escalate_after_failures, 1..10, isAdmin,
+                        info = "Berapa kali build/test boleh gagal berturut-turut sebelum langkah perbaikan diambil alih " +
+                            "model yang lebih kuat (Perencana). Kecil = cepat minta bantuan, besar = Pelaksana dicoba lebih lama.") {
                     save(JsonObject(mapOf("escalate_after_failures" to JsonPrimitive(it))))
                 }
-                Stepper("Model lokal termuat bersamaan", "model (RAM Pi)", c0.max_loaded_models, 1..4, isAdmin) {
+                Stepper("Model lokal termuat bersamaan", "model (RAM Pi)", c0.max_loaded_models, 1..4, isAdmin,
+                        info = "Batas model yang boleh ada di RAM sekaligus (termasuk model chat). Bila penuh, model yang paling " +
+                            "lama tidak dipakai dibongkar dulu. Pi 16 GB: 2 cukup untuk model 9B + 4B. Model yang sedang dipakai " +
+                            "agent / Uji Model tidak pernah dibongkar.") {
                     save(JsonObject(mapOf("max_loaded_models" to JsonPrimitive(it))))
                 }
             }
-            OutlinedButton(onClick = onOpenBench, modifier = Modifier.fillMaxWidth()) { Text("🧪 Uji Model — cari model yang pas") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(onClick = onOpenBench, modifier = Modifier.weight(1f)) { Text("🧪 Uji Model") }
+                InfoButton("Uji Model", "Bandingkan model dengan kasus yang meniru kerja agent, lihat peringkat, lalu " +
+                    "terapkan rekomendasi peran dengan satu ketukan.")
+            }
         }
     }
 
@@ -146,10 +165,14 @@ fun AgentModelsCard(vm: AppViewModel, c: ApiClient, conns: List<AIConnection>, i
 }
 
 @Composable
-private fun Stepper(label: String, unit: String, value: Int, range: IntRange, enabled: Boolean, onChange: (Int) -> Unit) {
+private fun Stepper(label: String, unit: String, value: Int, range: IntRange, enabled: Boolean, info: String,
+                    onChange: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f, fill = false))
+                InfoButton(label, info)
+            }
             Text("$value $unit", style = MaterialTheme.typography.labelSmall)
         }
         TextButton(enabled = enabled && value > range.first, onClick = { onChange(value - 1) }) { Text("−") }
