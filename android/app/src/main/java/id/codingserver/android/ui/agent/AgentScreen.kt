@@ -195,6 +195,8 @@ private fun TaskRow(t: AgentTask, onClick: () -> Unit) {
     Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp).clickable(onClick = onClick)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                AgentAnimation(agentPhase(t.status), 36.dp)
+                androidx.compose.foundation.layout.Spacer(Modifier.padding(start = 8.dp))
                 Text(t.title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 2,
                      overflow = TextOverflow.Ellipsis)
                 Text(label, color = color, style = MaterialTheme.typography.labelMedium)
@@ -292,16 +294,13 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
         }
         error?.let { ErrorCard(it) { tick++ } }
         val t = task ?: run { LinearProgressIndicator(Modifier.fillMaxWidth().padding(12.dp)); return@Column }
-        val (label, color) = statusLabel(t.status)
+        // Kartu animasi status: berpikir, merencanakan, mengerjakan, menguji, selesai, gagal, …
+        val lastKind = events.lastOrNull { it.kind != "plan" && it.kind != "report" }?.kind
+        val lastThought = events.lastOrNull { it.kind == "thought" }?.let { str(it, "text") }
+        val lastStage = events.lastOrNull { it.kind == "status" && str(it, "status") !in setOf("FAILED", "PAUSED", "CANCELLED") }
+            ?.let { str(it, "status") }
+        AgentStatusHero(t, lastKind, lastThought, lastStage)
         Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(label, color = color, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
-                Text("langkah ${t.steps_used}/${t.max_steps}" + (t.model?.let { " · $it" } ?: ""),
-                     style = MaterialTheme.typography.labelSmall)
-            }
-            LinearProgressIndicator(progress = { t.progress.toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-            if (t.current_op.isNotBlank()) Text(t.current_op, style = MaterialTheme.typography.bodySmall, maxLines = 3)
-            if (t.error.isNotBlank()) Text(t.error, color = ErrRed, style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (t.status in ACTIVE) {
                     OutlinedButton(enabled = !busy, onClick = { act { apiCall { c.api.agentPause(taskId) }.onFailure { vm.toast(it.message ?: "") } } }) { Text("Jeda") }
@@ -391,6 +390,7 @@ private fun EventRow(ev: AgentEvent) {
         "error" -> Text("⚠ ${str(ev, "message")}", color = ErrRed, style = MaterialTheme.typography.bodySmall)
         "approval" -> Text("⏸ Menunggu persetujuan", color = Color(0xFF1E88E5), style = MaterialTheme.typography.bodySmall)
         "plan" -> Text("🗺 Rencana diperbarui", style = MaterialTheme.typography.labelSmall)
+        "thinking" -> Text("🧠 Model berpikir (langkah ${str(ev, "step")})…", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
         "report" -> Text("📄 Laporan dibuat", style = MaterialTheme.typography.labelSmall)
         else -> Text("${ev.kind}: ${ev.data}", style = MaterialTheme.typography.labelSmall)
     }

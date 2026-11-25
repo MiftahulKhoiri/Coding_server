@@ -411,6 +411,9 @@ class AgentService:
                     self._finish(task_id, task, steps_used, {"summary": None},
                                  incomplete=f"Batas {row['max_steps']} langkah tercapai sebelum agen memanggil finish")
                     return
+                # Sinyal untuk UI (animasi "Berpikir"): model sedang menyusun langkah berikutnya.
+                self._update(task_id, current_op="Model AI sedang berpikir…", last_activity=_now())
+                self._event(task_id, "thinking", {"step": steps_used + 1})
                 text, model = await self._ask_model(self._compact(messages))
                 steps_used += 1
                 self._update(task_id, steps_used=steps_used, model=model,
