@@ -68,6 +68,8 @@ class AIService:
                             "loaded_by_us": False, "last_activity": 0.0, "target": None}
         # Model llama-server yang dimuat untuk agent / Uji Model (selain model chat aktif): (cid, model) -> terakhir dipakai
         self._agent_loaded: dict[tuple[str, str], float] = {}
+        # Model yang sedang dipakai agent / Uji Model (penghitung): tidak boleh dibongkar sampai dilepas.
+        self._in_use: dict[tuple[str, str], int] = {}
         self._bootstrap()
 
     # ---------- pengaturan & koneksi ----------
@@ -242,17 +244,30 @@ class AIService:
         limit = int(self.agent_models().get("max_loaded_models") or 2)
         st = self.state
         active = (st["connection_id"], st["model"]) if st["status"] == "ready" and st["loaded_by_us"] else None
-        ours = [k for k in self._agent_loaded if k != key and k != active]
+        ours = [k for k in self._agent_loaded if k != key and k != active and not self.in_use(k)]
         count = len(ours) + (1 if active and active != key else 0)
         for k in sorted(ours, key=lambda k: self._agent_loaded[k]):
             if count < limit:
                 return
             await self._unload_key(k)
             count -= 1
-        if count >= limit and active and active != key:
+        if count >= limit and active and active != key and not self.in_use(active):
             await self._unload_key(active)
             st.update(status="idle", model=None, loaded_by_us=False, target=None,
                       message="Dibongkar sementara untuk memberi RAM ke agent (muat otomatis saat dipakai lagi)")
+
+    def hold(self, cid: str, model: str) -> None:
+        self._in_use[(cid, model)] = self._in_use.get((cid, model), 0) + 1
+
+    def release(self, cid: str, model: str) -> None:
+        n = self._in_use.get((cid, model), 0) - 1
+        if n > 0:
+            self._in_use[(cid, model)] = n
+        else:
+            self._in_use.pop((cid, model), None)
+
+    def in_use(self, key: tuple[str, str] | None) -> bool:
+        return bool(key and self._in_use.get(key))
 
     def touch(self, cid: str, model: str) -> None:
         now = time.time()
@@ -345,7 +360,10 @@ class AIService:
             old_cid, old_model, ours = self.state["connection_id"], self.state["model"], self.state["loaded_by_us"]
             loaded_by_us = False
             try:
-                if ours and old_model and (old_cid, old_model) != (cid, model):
+                if ours and old_model and (old_cid, old_model) != (cid, model) and self.in_use((old_cid, old_model)):
+                    # masih dipakai agent / Uji Model: jangan dibongkar sekarang; dibersihkan nanti (idle/LRU)
+                    self._agent_loaded[(old_cid, old_model)] = time.time()
+                elif ours and old_model and (old_cid, old_model) != (cid, model):
                     try:
                         _, old_prov = self.provider(old_cid)
                         log.info("Membongkar model sebelumnya: %s", old_model)
@@ -399,6 +417,9 @@ class AIService:
     async def unload(self) -> dict:
         async with self._lock:
             cid, model, ours = self.state["connection_id"], self.state["model"], self.state["loaded_by_us"]
+            if model and self.in_use((cid, model)):
+                raise Conflict(f"Model {model} sedang dipakai AI Agent / Uji Model. Tunggu sampai selesai atau "
+                               "batalkan dulu, baru bongkar.", code="model_in_use")
             if model and ours:
                 try:
                     _, prov = self.provider(cid)
@@ -416,13 +437,14 @@ class AIService:
                 minutes = int(self.settings().get("idle_unload_minutes") or 0)
                 st = self.state
                 if (minutes > 0 and st["status"] == "ready" and st["loaded_by_us"]
+                        and not self.in_use((st["connection_id"], st["model"]))
                         and time.time() - st["last_activity"] > minutes * 60):
                     log.info("Model %s idle %d menit, dibongkar otomatis", st["model"], minutes)
                     await self.unload()
                     self.state["message"] = f"Dibongkar otomatis setelah idle {minutes} menit"
                 if minutes > 0:
                     for key, used in list(self._agent_loaded.items()):
-                        if time.time() - used > minutes * 60:
+                        if time.time() - used > minutes * 60 and not self.in_use(key):
                             async with self._lock:
                                 if key in self._agent_loaded and time.time() - self._agent_loaded[key] > minutes * 60:
                                     await self._unload_key(key)

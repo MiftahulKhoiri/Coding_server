@@ -205,7 +205,10 @@ def test_agent_permissions_and_restart_recovery(client, auth, project):
     now = time.time()
     svc.db.execute("INSERT INTO agent_tasks(id, user_id, project_id, title, description, status, stage, created_at, "
                    "updated_at) VALUES('zombie', 1, ?, 't', 'd', 'EXECUTING', 'EXECUTING', ?, ?)", (project, now, now))
-    AgentService(svc.settings, svc.db, lambda: svc)
+    fresh = AgentService(svc.settings, svc.db, lambda: svc)
+    # sekadar membuat service (mis. mengimpor aplikasi dari skrip) tidak boleh menjeda task yang berjalan
+    assert svc.db.one("SELECT status FROM agent_tasks WHERE id='zombie'")["status"] == "EXECUTING"
+    fresh.recover()  # dipanggil lifespan saat server benar-benar mulai
     row = svc.db.one("SELECT status, current_op FROM agent_tasks WHERE id='zombie'")
     assert row["status"] == "PAUSED" and "checkpoint" in row["current_op"]
     svc.db.execute("DELETE FROM agent_tasks WHERE id='zombie'")

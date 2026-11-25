@@ -182,6 +182,9 @@ def test_model_bench(client, auth, conn):
     notes = {x["id"]: x["note"] for x in good["results"]}
     assert good["summary"]["score"] == 100.0, notes
     assert good["summary"]["format_ok"] == len(CASES) and good["summary"]["avg_tps"] == 8.5
+    texts = [e["text"] for e in good["log"]]
+    assert any("Kasus 1/6" in t for t in texts) and any("sandbox" in t for t in texts)
+    assert any(t.startswith("🏁 Selesai: skor 100") for t in texts) and good["live"] is None
     res = {x["id"]: x for x in bad["results"]}
     assert bad["summary"]["score"] < 40
     assert not res["langkah_pertama"]["format_ok"]
@@ -244,3 +247,14 @@ _real_sleep = __import__("asyncio").sleep
 
 async def _fast_sleep(delay, *a, **kw):
     return await _real_sleep(0)
+
+
+def test_unload_refused_while_model_in_use(client, auth, conn):
+    ai = client.app.state.services.ai
+    ai.hold(conn, "kecil")  # mis. Uji Model / agent sedang memakai model chat aktif
+    try:
+        r = client.post("/api/v1/ai/unload", headers=auth)
+        assert r.status_code == 409 and r.json()["error"]["code"] == "model_in_use", r.text
+    finally:
+        ai.release(conn, "kecil")
+    assert client.post("/api/v1/ai/unload", headers=auth).status_code == 200

@@ -265,6 +265,12 @@ class ModelBench:
         self.db = db
         self._svc_ref = services_ref
         self._tasks: dict[str, asyncio.Task] = {}
+        # Keadaan langsung per uji yang sedang berjalan (tidak disimpan): tahap, token, teks yang sedang ditulis.
+        self._live: dict[str, dict] = {}
+
+    def recover(self) -> None:
+        """Dipanggil saat server benar-benar mulai (lifespan), BUKAN di konstruktor: mengimpor aplikasi
+        (mis. skrip/cek) tidak boleh mengubah uji yang sedang berjalan di proses server lain."""
         self.db.execute("UPDATE model_bench_runs SET status='FAILED', error='Server dimulai ulang', current='', "
                         "finished_at=? WHERE status IN ('PENDING','RUNNING')", (time.time(),))
 
@@ -283,21 +289,38 @@ class ModelBench:
             raise NotFound("Uji model tidak ditemukan")
         return row
 
-    @staticmethod
-    def public(row: dict, detail: bool = False) -> dict:
+    def public(self, row: dict, detail: bool = False) -> dict:
         out = {k: row[k] for k in ("id", "connection_id", "model", "connection_name", "location", "status",
                                    "current", "error", "created_at", "started_at", "finished_at")}
         results = json.loads(row["results"] or "[]")
         out["done_cases"] = len(results)
         out["total_cases"] = len(CASES)
         out["summary"] = json.loads(row["summary"]) if row.get("summary") else None
+        live = self._live.get(row["id"])
+        out["live"] = dict(live, elapsed=round(time.time() - live["started"], 1)) if live else None
         if detail:
             out["results"] = results
+            out["log"] = json.loads(row.get("log") or "[]")
         return out
 
     def _update(self, run_id: str, **f) -> None:
         cols = ", ".join(f"{k}=?" for k in f)
         self.db.execute(f"UPDATE model_bench_runs SET {cols} WHERE id=?", (*f.values(), run_id))
+
+    def _log(self, run_id: str, text: str, kind: str = "info") -> None:
+        """Tambah baris log (disimpan agar bisa dilihat lagi setelah uji selesai)."""
+        row = self.db.one("SELECT log FROM model_bench_runs WHERE id=?", (run_id,))
+        entries = json.loads((row or {}).get("log") or "[]")
+        entries.append({"ts": round(time.time(), 1), "kind": kind, "text": text[:500]})
+        self._update(run_id, log=json.dumps(entries[-400:], ensure_ascii=False))
+
+    def _status(self, run_id: str, msg: str) -> None:
+        """Pesan status dari pemuat model: baris pertama dicatat, sisanya hanya memperbarui 'current'."""
+        live = self._live.setdefault(run_id, {"phase": "loading", "started": time.time()})
+        if not live.get("load_logged"):
+            live["load_logged"] = True
+            self._log(run_id, f"📦 {msg} (model dimuat ke RAM Pi, bisa 1–3 menit)", "load")
+        self._update(run_id, current=msg)
 
     def list(self, limit: int = 50) -> list[dict]:
         return [self.public(r) for r in self.db.all("SELECT * FROM model_bench_runs ORDER BY created_at DESC LIMIT ?",
@@ -378,35 +401,79 @@ class ModelBench:
         cid, model = row["connection_id"], row["model"]
         try:
             self._update(run_id, current="Menunggu agent / uji lain selesai…")
+            self._log(run_id, "⏳ Menunggu giliran (task agent / uji lain dipakai bergantian)", "wait")
             async with self.svc.agent._sem:  # bergiliran dengan task agent (CPU & RAM Pi terbatas)
                 self._update(run_id, status="RUNNING", started_at=time.time(), current="Menyiapkan model…")
-                _, prov = await self.svc.ai.acquire(cid, model, on_status=lambda m: self._update(run_id, current=m))
+                self._log(run_id, f"🚀 Mulai uji {model} ({row['connection_name']})", "start")
+                t0 = time.time()
+                self._live[run_id] = {"phase": "loading", "started": t0}
+                _, prov = await self.svc.ai.acquire(cid, model, on_status=lambda m: self._status(run_id, m))
+                self._log(run_id, f"✅ Model siap ({round(time.time() - t0)} dtk)", "load")
                 results: list[dict] = []
-                for i, case in enumerate(CASES, 1):
-                    self._update(run_id, current=f"Kasus {i}/{len(CASES)}: {case.title}")
-                    results.append(await self._run_case(case, prov, cid, model))
-                    self._update(run_id, results=json.dumps(results, ensure_ascii=False))
+                self.svc.ai.hold(cid, model)  # model tidak boleh dibongkar selama uji berjalan
+                try:
+                    for i, case in enumerate(CASES, 1):
+                        self._update(run_id, current=f"Kasus {i}/{len(CASES)}: {case.title}")
+                        self._log(run_id, f"▶ Kasus {i}/{len(CASES)}: {case.title} — {case.description}", "case")
+                        res = await self._run_case(run_id, case, prov, cid, model)
+                        results.append(res)
+                        self._update(run_id, results=json.dumps(results, ensure_ascii=False))
+                        icon = "✅" if res["score"] >= 0.99 else "🟡" if res["score"] >= 0.5 else "❌"
+                        self._log(run_id, f"{icon} Skor kasus {int(res['score'] * 100)}: {res['note']}", "score")
+                        if res["note"].startswith("error penyedia") and i < len(CASES):
+                            # server model mati/terputus: hentikan, jangan beri skor 0 palsu ke kasus sisanya
+                            raise AppError(f"Uji dihentikan: {res['note']}", code="ai_error")
+                finally:
+                    self.svc.ai.release(cid, model)
                 summary = summarize(results)
                 self._update(run_id, status="COMPLETED", summary=json.dumps(summary), current="",
                              finished_at=time.time())
+                self._log(run_id, f"🏁 Selesai: skor {summary['score']} — {summary['verdict']}", "done")
                 log.info("Uji model %s selesai: skor %s", model, summary["score"])
         except asyncio.CancelledError:
             self._update(run_id, status="CANCELLED", current="", finished_at=time.time())
+            self._log(run_id, "⏹ Uji dibatalkan", "error")
             raise
         except Exception as e:
             msg = e.message if isinstance(e, AppError) else str(e)
             log.warning("Uji model %s gagal: %s", model, msg)
             self._update(run_id, status="FAILED", error=msg[:1000], current="", finished_at=time.time())
+            self._log(run_id, f"⚠ Gagal: {msg}", "error")
+        finally:
+            self._live.pop(run_id, None)
 
-    async def _run_case(self, case: Case, prov, cid: str, model: str) -> dict:
+    async def _run_case(self, run_id: str, case: Case, prov, cid: str, model: str) -> dict:
         messages = [{"role": "system", "content": system_prompt(ALL_PERMS)}, *case.messages]
+        approx_prompt = sum(len(m["content"]) for m in messages) // 4
         parts: list[str] = []
         started = time.time()
+        live = {"phase": "prompt", "case": case.title, "started": started, "tokens": 0, "reasoning_tokens": 0,
+                "first_token_s": None, "tps": None, "text": "", "approx_prompt_tokens": approx_prompt}
+        self._live[run_id] = live
+        self._log(run_id, f"📨 Mengirim prompt ±{approx_prompt} token — model membaca konteks dulu "
+                          f"(di CPU Pi ini bagian paling lama)", "prompt")
 
         async def collect() -> None:
             async for kind, text in prov.stream_chat(model, messages, 0.2, 2048):
-                if kind == "delta":
+                now = time.time()
+                if live["first_token_s"] is None:
+                    live["first_token_s"] = round(now - started, 1)
+                    self._log(run_id, f"💡 Selesai membaca prompt dalam {live['first_token_s']} dtk, mulai "
+                                      f"{'berpikir' if kind == 'reasoning' else 'menulis jawaban'}", "first")
+                if kind == "reasoning":
+                    if live["phase"] != "thinking":
+                        live["phase"] = "thinking"
+                    live["reasoning_tokens"] += max(1, len(text) // 4)
+                else:
+                    if live["phase"] == "thinking":
+                        self._log(run_id, f"🧠 Selesai berpikir (±{live['reasoning_tokens']} token), menulis jawaban", "think")
+                    live["phase"] = "writing"
                     parts.append(text)
+                    live["tokens"] += max(1, len(text) // 4)
+                live["text"] = (live["text"] + text)[-700:]
+                gen = now - started - (live["first_token_s"] or 0)
+                if gen > 0.5:
+                    live["tps"] = round((live["tokens"] + live["reasoning_tokens"]) / gen, 2)
                 self.svc.ai.touch(cid, model)
 
         res = {"id": case.id, "title": case.title, "category": case.category, "format_ok": False, "score": 0.0,
@@ -415,9 +482,11 @@ class ModelBench:
             await asyncio.wait_for(collect(), self.s.agent_model_timeout)
         except asyncio.TimeoutError:
             res.update(seconds=round(time.time() - started, 1), note=f"tidak menjawab dalam {self.s.agent_model_timeout} dtk")
+            self._log(run_id, f"⏱ {res['note']}", "error")
             return res
         except AppError as e:
             res.update(seconds=round(time.time() - started, 1), note=f"error penyedia: {e.message}")
+            self._log(run_id, f"⚠ {res['note']}", "error")
             return res
         secs = time.time() - started
         text = "".join(parts)
@@ -425,13 +494,22 @@ class ModelBench:
         tokens = int(st.get("completion_tokens") or max(1, len(text) // 4))
         res.update(seconds=round(secs, 1), tokens=tokens, output=text[:4000], prompt_tokens=st.get("prompt_tokens"),
                    tps=round(float(st.get("gen_tps") or tokens / max(secs, 0.01)), 2))
+        self._log(run_id, f"📝 Jawaban selesai: {tokens} token, {res['tps']} tok/dtk, total {res['seconds']} dtk"
+                          + (f" (prompt {st['prompt_tokens']} token)" if st.get("prompt_tokens") else ""), "answer")
+        if not text.strip() and live["reasoning_tokens"]:
+            self._log(run_id, "⚠ Model hanya berpikir tanpa jawaban akhir (batas token habis untuk berpikir)", "error")
+        live["phase"] = "checking"
         try:
             call, code = extract_call(text)
         except ValueError as e:
             res["note"] = f"format JSON tool salah: {e}"
+            self._log(run_id, "🚫 Format JSON tool salah — agent tidak bisa memakai jawaban ini", "check")
             return res
         res["format_ok"] = True
         res["tool"] = call.get("tool")
+        self._log(run_id, f"🔧 Format JSON benar, model memanggil tool: {res['tool']}", "check")
+        if case.category == "kode" and res["tool"] in ("write_file", "edit_file"):
+            self._log(run_id, "🧪 Menerapkan editan & menjalankan tes tersembunyi di sandbox…", "check")
         try:
             score, note = await case.check(self, call, code)
         except Exception as e:  # pemeriksa tidak boleh menggagalkan seluruh uji

@@ -236,7 +236,15 @@ import kotlinx.serialization.json.JsonElement
     val created_at: Double = 0.0, val started_at: Double? = null, val finished_at: Double? = null,
     val done_cases: Int = 0, val total_cases: Int = 0, val summary: BenchSummary? = null,
     val results: List<BenchCaseResult> = emptyList(),
+    val live: BenchLive? = null, val log: List<BenchLogEntry> = emptyList(),
 )
+/** Keadaan langsung uji yang sedang berjalan. phase: loading|prompt|thinking|writing|checking */
+@Serializable data class BenchLive(
+    val phase: String = "", val case: String? = null, val elapsed: Double = 0.0, val tokens: Int = 0,
+    val reasoning_tokens: Int = 0, val first_token_s: Double? = null, val tps: Double? = null, val text: String = "",
+    val approx_prompt_tokens: Int? = null,
+)
+@Serializable data class BenchLogEntry(val ts: Double = 0.0, val kind: String = "", val text: String = "")
 @Serializable data class BenchCase(val id: String, val title: String = "", val category: String = "", val description: String = "")
 @Serializable data class BenchPick(val connection_id: String, val model: String, val score: Double = 0.0, val avg_tps: Double? = null)
 @Serializable data class BenchRecommendation(val planner: BenchPick? = null, val executor: BenchPick? = null, val reviewer: BenchPick? = null)

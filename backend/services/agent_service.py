@@ -132,7 +132,10 @@ class AgentService:
         self._sem = asyncio.Semaphore(max(1, settings.agent_max_concurrent))
         self._tasks: dict[str, asyncio.Task] = {}
         self._pause: set[str] = set()
-        # Pemulihan: task yang sedang berjalan saat server mati tidak dihapus diam-diam.
+
+    def recover(self) -> None:
+        """Pemulihan saat server mulai (lifespan): task yang sedang berjalan saat server mati menjadi PAUSED,
+        tidak dihapus diam-diam. Tidak di konstruktor agar sekadar mengimpor aplikasi tidak menjeda task aktif."""
         self.db.execute(
             "UPDATE agent_tasks SET status='PAUSED', current_op='Server dimulai ulang; lanjutkan untuk meneruskan "
             "dari checkpoint', updated_at=? WHERE status IN (%s)" % ",".join("?" * len(ACTIVE)),
@@ -424,7 +427,11 @@ class AgentService:
                     parts.append(text)
                 ai.touch(cid, model)
 
-        await asyncio.wait_for(collect(), self.s.agent_model_timeout)
+        ai.hold(cid, model)  # cegah model dibongkar selama dipakai
+        try:
+            await asyncio.wait_for(collect(), self.s.agent_model_timeout)
+        finally:
+            ai.release(cid, model)
         secs = time.time() - started
         text = "".join(parts)
         st = dict(prov.last_stats)

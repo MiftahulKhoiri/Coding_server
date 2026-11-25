@@ -22,6 +22,9 @@ MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("risk", "TEXT NOT NULL DEFAULT 'MEDIUM'"), ("risk_reasons", "TEXT NOT NULL DEFAULT ''"),
         ("task_id", "TEXT"),
     ],
+    "model_bench_runs": [
+        ("log", "TEXT NOT NULL DEFAULT '[]'"),  # log proses Uji Model (tahap, token, hasil sandbox)
+    ],
 }
 
 SCHEMA = """

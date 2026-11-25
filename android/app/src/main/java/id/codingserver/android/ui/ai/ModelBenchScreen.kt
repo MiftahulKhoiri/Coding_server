@@ -156,7 +156,7 @@ fun ModelBenchScreen(vm: AppViewModel) {
             }
             item { Text("Riwayat uji", style = MaterialTheme.typography.titleMedium) }
             if (d.runs.isEmpty()) item { Text("Belum ada uji. Tekan \"Mulai uji\" lalu pilih model.", style = MaterialTheme.typography.bodySmall) }
-            items(d.runs, key = { it.id }) { r -> RunRow(r) { detail = r.id } }
+            items(d.runs, key = { it.id }) { r -> RunRow(c, r) { detail = r.id } }
             item { Spacer(Modifier.height(24.dp)) }
         }
     }
@@ -204,8 +204,11 @@ private fun LeaderRow(rank: Int, r: BenchRun, onClick: () -> Unit) {
 }
 
 @Composable
-private fun RunRow(r: BenchRun, onClick: () -> Unit) {
+private fun RunRow(c: ApiClient, r: BenchRun, onClick: () -> Unit) {
     val active = r.status == "PENDING" || r.status == "RUNNING"
+    // Jam berdetak tiap detik selama uji berjalan (durasi tidak menunggu polling).
+    var now by remember { mutableStateOf(System.currentTimeMillis() / 1000.0) }
+    LaunchedEffect(active) { while (active) { now = System.currentTimeMillis() / 1000.0; delay(1000) } }
     Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -217,13 +220,19 @@ private fun RunRow(r: BenchRun, onClick: () -> Unit) {
             if (active) {
                 LinearProgressIndicator(progress = { if (r.total_cases > 0) r.done_cases.toFloat() / r.total_cases else 0f },
                                         modifier = Modifier.fillMaxWidth())
-                if (r.current.isNotBlank()) Text(r.current, style = MaterialTheme.typography.bodySmall)
+                if (r.current.isNotBlank()) Text("${r.current} (${r.done_cases}/${r.total_cases} selesai)",
+                                                 style = MaterialTheme.typography.bodySmall)
             }
             r.summary?.let { Text("skor ${it.score.toInt()} · ${it.verdict}", color = scoreColor(it.score), style = MaterialTheme.typography.bodySmall) }
             if (r.error.isNotBlank()) Text(r.error, color = ErrRed, style = MaterialTheme.typography.bodySmall, maxLines = 3)
             Text(formatTime(r.created_at) + (r.started_at?.let { st ->
-                (r.finished_at ?: (System.currentTimeMillis() / 1000.0)).let { " · ${formatDuration((it - st).toLong())}" }
+                " · " + formatDuration(((r.finished_at ?: now) - st).toLong().coerceAtLeast(0))
             } ?: ""), style = MaterialTheme.typography.labelSmall)
+            // Log langsung: apa yang sedang dikerjakan model.
+            if (active) {
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                BenchLiveLog(c, r.id)
+            }
         }
     }
 }
@@ -315,6 +324,10 @@ private fun RunDetailDialog(c: ApiClient, id: String, isAdmin: Boolean, onDismis
                     HorizontalDivider()
                 }
                 if (r.results.isNotEmpty()) Text("Ketuk kasus untuk melihat jawaban model.", style = MaterialTheme.typography.labelSmall)
+                if (r.log.isNotEmpty()) {
+                    Text("Log proses", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 6.dp))
+                    r.log.forEach { LogLine(it) }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } },

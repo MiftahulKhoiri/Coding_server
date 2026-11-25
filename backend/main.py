@@ -32,6 +32,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI):
         svc = app.state.services
         svc.terminal.start_reaper()
+        svc.agent.recover()
+        svc.bench.recover()
         tasks = [asyncio.create_task(svc.backup.scheduler()), asyncio.create_task(svc.ai.idle_loop())]
         await svc.ai.restore_on_start()
         log.info("CODING_SERVER %s siap di %s:%s (sandbox=%s)", VERSION, settings.host, settings.port,
