@@ -6,6 +6,11 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Pembaruan aplikasi dari GitHub Releases -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Pemantau AI Agent di latar belakang (foreground service + notifikasi) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:name=".CodingServerApp"
@@ -21,6 +26,7 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|smallestScreenSize|uiMode"
             android:theme="@style/Theme.CodingServer.Splash"
             android:windowSoftInputMode="adjustResize">
@@ -33,5 +39,15 @@
         <receiver
             android:name=".data.update.InstallResultReceiver"
             android:exported="false" />
+
+        <!-- specialUse (Android 14+) tidak punya batas waktu harian seperti dataSync di Android 15. -->
+        <service
+            android:name=".agent.AgentMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Memantau progres task AI coding agent yang berjalan di server milik pengguna dan memberi notifikasi saat selesai atau butuh persetujuan." />
+        </service>
     </application>
 </manifest>

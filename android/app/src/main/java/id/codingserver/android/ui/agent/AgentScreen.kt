@@ -1,5 +1,10 @@
 package id.codingserver.android.ui.agent
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -45,6 +50,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import id.codingserver.android.agent.AgentMonitorService
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import id.codingserver.android.data.api.AIDecisionIn
@@ -94,13 +102,30 @@ private fun statusLabel(s: String): Pair<String, Color> = when (s) {
 fun AgentScreen(vm: AppViewModel, onOpenModels: () -> Unit) {
     val client by vm.client.collectAsState()
     val project by vm.project.collectAsState()
+    val target by vm.agentTarget.collectAsState()
     var selected by remember { mutableStateOf<String?>(null) }
+
+    // Izin notifikasi (Android 13+) agar pemantau latar belakang bisa memberi kabar task selesai/butuh persetujuan.
+    val ctx = LocalContext.current
+    val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+    // Dibuka dari notifikasi → langsung tampilkan detail task tersebut.
+    LaunchedEffect(target) {
+        target?.let { selected = it; vm.consumeAgentTarget() }
+    }
+
     val c = client
     val p = project
-    if (c == null || p == null) { Text("Buka proyek dulu untuk memakai AI Agent.", Modifier.padding(16.dp)); return }
+    if (c == null) { Text("Hubungkan ke server dulu untuk memakai AI Agent.", Modifier.padding(16.dp)); return }
     val sel = selected
-    if (sel != null) TaskDetail(vm, c, p.id, sel, onBack = { selected = null })
-    else TaskList(vm, c, p.id, p.name, onOpen = { selected = it }, onOpenModels = onOpenModels)
+    // Detail task tetap bisa dibuka (mis. dari notifikasi) walau proyeknya belum/berbeda dibuka.
+    if (sel != null) { TaskDetail(vm, c, p?.id ?: "", sel, onBack = { selected = null }); return }
+    if (p == null) { Text("Buka proyek dulu untuk memakai AI Agent.", Modifier.padding(16.dp)); return }
+    TaskList(vm, c, p.id, p.name, onOpen = { selected = it }, onOpenModels = onOpenModels)
 }
 
 @Composable
@@ -111,11 +136,14 @@ private fun TaskList(vm: AppViewModel, c: ApiClient, projectId: String, projectN
     var showNew by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
 
     LaunchedEffect(projectId, reload) {
         while (true) {
             apiCall { c.api.agentTasks(projectId) }.onSuccess { tasks = it.tasks; error = null }
                 .onFailure { error = it.message }
+            // Ada task aktif → pemantau latar belakang menyala (tetap jalan walau aplikasi ditutup).
+            if (tasks.orEmpty().any { it.status in ACTIVE }) AgentMonitorService.start(ctx)
             // Polling hanya selama ada task aktif; selain itu cukup sekali.
             if (tasks.orEmpty().none { it.status in ACTIVE }) break
             delay(3000)
@@ -152,7 +180,7 @@ private fun TaskList(vm: AppViewModel, c: ApiClient, projectId: String, projectN
         showNew = false
         scope.launch {
             apiCall { c.api.agentCreate(AgentTaskCreate(projectId, desc, auto_apply = auto)) }
-                .onSuccess { onOpen(it.id) }
+                .onSuccess { AgentMonitorService.start(ctx); onOpen(it.id) }
                 .onFailure {
                     vm.toast(it.message ?: "Gagal membuat task")
                     if (it.message?.contains("Model AI") == true || it.message?.contains("model", true) == true) onOpenModels()
@@ -220,9 +248,14 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
     var confirmDelete by remember { mutableStateOf(false) }
     var tick by remember(taskId) { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    // Proyek milik task (task bisa dibuka dari notifikasi saat proyek lain sedang terbuka).
+    val pid = task?.project_id?.takeIf { it.isNotBlank() } ?: projectId
 
     suspend fun refresh() {
         apiCall { c.api.agentTask(taskId) }.onSuccess { task = it; error = null }.onFailure { error = it.message }
+        // Mis. setelah proposal disetujui agen lanjut lagi → nyalakan lagi pemantau latar belakang.
+        if (task?.status in ACTIVE) AgentMonitorService.start(ctx)
         val after = events.lastOrNull()?.id ?: 0
         apiCall { c.api.agentEvents(taskId, after) }.onSuccess { events.addAll(it.events) }
         apiCall { c.api.agentProposals(taskId) }.onSuccess { proposals = it.proposals }
@@ -247,7 +280,7 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
     }
 
     fun decide(e: AIProposalItem, approve: Boolean) = act {
-        apiCall { c.api.aiDecide(e.id, AIDecisionIn(projectId, approve, confirm_high_risk = e.risk == "HIGH")) }
+        apiCall { c.api.aiDecide(e.id, AIDecisionIn(pid, approve, confirm_high_risk = e.risk == "HIGH")) }
             .onFailure { vm.toast(it.message ?: "Gagal") }
     }
 
@@ -298,7 +331,7 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
                 if (proposals.isEmpty()) item { Text("Belum ada perubahan file.", style = MaterialTheme.typography.bodyMedium) }
                 items(proposals, key = { it.id }) { e ->
                     EditCard(e, busy = busy, onApply = { decide(e, true) }, onReject = { decide(e, false) }, onRevert = {
-                        act { apiCall { c.api.aiRevert(e.id, AIDecisionIn(projectId)) }.onFailure { vm.toast(it.message ?: "Gagal") } }
+                        act { apiCall { c.api.aiRevert(e.id, AIDecisionIn(pid)) }.onFailure { vm.toast(it.message ?: "Gagal") } }
                     })
                 }
             }

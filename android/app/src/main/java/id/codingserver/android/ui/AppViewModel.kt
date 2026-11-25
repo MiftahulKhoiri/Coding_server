@@ -104,6 +104,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toast(msg: String) { _messages.tryEmit(msg) }
 
+    // ---------- AI Agent (notifikasi & pemantau latar belakang) ----------
+    /** Task agent yang diminta dibuka dari notifikasi; dikonsumsi oleh layar Agent Tasks. */
+    private val _agentTarget = MutableStateFlow<String?>(null)
+    val agentTarget: StateFlow<String?> = _agentTarget.asStateFlow()
+
+    fun openAgentTask(taskId: String) { _agentTarget.value = taskId }
+    fun consumeAgentTarget() { _agentTarget.value = null }
+
+    /** Nyalakan pemantau latar belakang bila masih ada task agent aktif di server. */
+    private fun resumeAgentMonitor(c: ApiClient) {
+        viewModelScope.launch {
+            apiCall { c.api.agentTasks() }.onSuccess { list ->
+                if (list.tasks.any { it.status in id.codingserver.android.agent.AgentMonitorService.ACTIVE })
+                    id.codingserver.android.agent.AgentMonitorService.start(getApplication())
+            }
+        }
+    }
+
     // ---------- server & auth ----------
     suspend fun activate(server: ServerProfile, restoreProject: Boolean = false) {
         serverStore.setActive(server.id)
@@ -130,6 +148,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
                 val e = it as ApiException
                 if (e.status == 401) _auth.value = AuthState.LOGGED_OUT
             }
+        if (_auth.value == AuthState.LOGGED_IN) resumeAgentMonitor(c)
         if (restoreProject) {
             serverStore.lastProject.first()?.let { pid -> apiCall { c.api.project(pid) }.onSuccess { p -> _project.value = p } }
         }
@@ -153,12 +172,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _auth.value = AuthState.LOGGED_IN
             _online.value = true
             serverStore.upsert(c.server.copy(username = username))
+            resumeAgentMonitor(c)
             res.user
         }
     }
 
     fun logout() {
         val c = _client.value ?: return
+        id.codingserver.android.agent.AgentMonitorService.stop(getApplication())
         viewModelScope.launch {
             c.logout()
             _user.value = null
@@ -168,6 +189,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun disconnect() {
+        id.codingserver.android.agent.AgentMonitorService.stop(getApplication())
         viewModelScope.launch {
             healthLoop?.cancel()
             serverStore.setActive(null)

@@ -65,6 +65,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import id.codingserver.android.agent.AgentMonitorService
 import id.codingserver.android.data.api.FileEntry
 import id.codingserver.android.ui.AppViewModel
 import id.codingserver.android.ui.AuthState
@@ -133,6 +134,21 @@ class MainActivity : ComponentActivity() {
             }
             CodingServerTheme(theme) { App(vm, editor, terminal) }
         }
+        handleAgentIntent(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleAgentIntent(intent)
+    }
+
+    /** Notifikasi AI Agent membawa id task yang harus dibuka. */
+    private fun handleAgentIntent(intent: android.content.Intent?) {
+        val key = AgentMonitorService.EXTRA_OPEN_TASK
+        val taskId = intent?.getStringExtra(key) ?: return
+        intent.removeExtra(key)
+        vm.openAgentTask(taskId)
     }
 }
 
@@ -157,6 +173,12 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
             AuthState.LOGGED_IN -> if (route == null || route == "login" || route == "servers") "dashboard" else null
         }
         if (target != null && target != route) nav.navigate(target) { popUpTo(0) }
+    }
+    // Dibuka dari notifikasi AI Agent → pindah ke layar Agent Tasks (layar itu yang membuka detail task).
+    val agentTarget by vm.agentTarget.collectAsState()
+    LaunchedEffect(agentTarget, auth) {
+        if (agentTarget != null && auth == AuthState.LOGGED_IN && route != "agent")
+            nav.navigate("agent") { launchSingleTop = true; popUpTo("dashboard") }
     }
 
     fun go(r: String) {
