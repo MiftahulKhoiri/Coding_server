@@ -10,19 +10,42 @@ const term = new Terminal({
 });
 const fit = new FitAddon();
 term.loadAddon(fit);
-term.open(document.getElementById("terminal"));
-fit.fit();
+const host = document.getElementById("terminal");
+term.open(host);
 
 let ws = null;
 let pingTimer = null;
+let lastSize = "";
 
 function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
 
+// Sesuaikan kolom/baris dengan ukuran layar. WebView bisa belum punya ukuran saat halaman dimuat
+// (dibuat sebelum ditempel ke layar): ukuran yang terlalu kecil diabaikan, dicoba lagi saat ukuran berubah.
 function resize() {
-  try { fit.fit(); } catch (e) {}
-  send({ type: "resize", cols: term.cols, rows: term.rows });
+  const dims = (() => { try { return fit.proposeDimensions(); } catch (e) { return null; } })();
+  if (!dims || !dims.cols || !dims.rows || dims.cols < 10 || dims.rows < 3) return;
+  if (dims.cols !== term.cols || dims.rows !== term.rows) term.resize(dims.cols, dims.rows);
+  const key = term.cols + "x" + term.rows;
+  if (key !== lastSize) { lastSize = key; send({ type: "resize", cols: term.cols, rows: term.rows }); }
 }
-window.addEventListener("resize", resize);
+let resizeTimer = null;
+function resizeSoon() { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 60); }
+window.addEventListener("resize", resizeSoon);
+if (window.ResizeObserver) new ResizeObserver(resizeSoon).observe(host);
+resize();
+
+// Ketukan (bukan geser untuk scroll) di mana pun pada area terminal -> fokus & keyboard muncul (lewat Kotlin).
+let touchStart = null;
+document.addEventListener("touchstart", (e) => {
+  const t = e.touches[0]; touchStart = t ? { x: t.clientX, y: t.clientY, at: Date.now() } : null;
+}, { passive: true });
+document.addEventListener("touchend", (e) => {
+  const t = e.changedTouches[0];
+  if (!touchStart || !t) return;
+  const moved = Math.abs(t.clientX - touchStart.x) + Math.abs(t.clientY - touchStart.y);
+  if (moved < 12 && Date.now() - touchStart.at < 600) { term.focus(); bridge.onTap && bridge.onTap(); }
+  touchStart = null;
+}, { passive: true });
 
 term.onData((d) => send({ type: "input", data: d }));
 
@@ -31,7 +54,7 @@ window.CS_TERM = {
     if (ws) try { ws.close(); } catch (e) {}
     bridge.onStatus("connecting");
     ws = new WebSocket(url);
-    ws.onopen = () => { bridge.onStatus("connected"); resize(); term.focus();
+    ws.onopen = () => { bridge.onStatus("connected"); lastSize = ""; resize(); term.focus();
       clearInterval(pingTimer); pingTimer = setInterval(() => send({ type: "ping" }), 25000); };
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
@@ -53,6 +76,6 @@ window.CS_TERM = {
   setFontSize(px) { term.options.fontSize = Number(px) || 13; resize(); },
   clear() { term.clear(); },
   focus() { term.focus(); },
-  fit: resize,
+  fit() { lastSize = ""; resize(); },
 };
 bridge.onReady();

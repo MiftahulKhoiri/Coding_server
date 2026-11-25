@@ -8,6 +8,22 @@ import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.view.inputmethod.InputMethodManager
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,8 +35,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +64,8 @@ import kotlinx.serialization.builtins.serializer
 class TerminalBridge(private val c: TerminalController) {
     @JavascriptInterface fun onStatus(s: String?) { c.status.value = s ?: "" }
     @JavascriptInterface fun onReady() { c.ready.value = true }
+    /** Terminal disentuh: munculkan keyboard. */
+    @JavascriptInterface fun onTap() { c.showKeyboard() }
 }
 
 /** WebView xterm.js yang bertahan selama Activity; terhubung ke /ws/terminal/{id}. */
@@ -87,11 +103,25 @@ class TerminalController(context: Context) {
     fun text(t: String) = js("CS_TERM.sendText(${q(t)})")
     fun fontSize(px: Int) = js("CS_TERM.setFontSize($px)")
     fun focus() = js("CS_TERM.focus()")
+    /** Hitung ulang kolom/baris (dipanggil saat ukuran WebView berubah, mis. keyboard muncul/hilang). */
+    fun fit() = js("CS_TERM.fit()")
+
+    private val imm get() = webView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+
+    /** Fokus ke terminal dan tampilkan keyboard (WebView tidak selalu memunculkannya sendiri). */
+    fun showKeyboard() = main.post {
+        webView.requestFocus()
+        webView.evaluateJavascript("CS_TERM.focus()", null)
+        main.postDelayed({ imm.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT) }, 80)
+    }
+
+    fun hideKeyboard() = main.post { imm.hideSoftInputFromWindow(webView.windowToken, 0) }
 }
 
 /** Terminal interaktif: banyak sesi, input perintah, output real-time, Ctrl-C, tutup sesi. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TerminalScreen(vm: AppViewModel, term: TerminalController) {
+fun TerminalScreen(vm: AppViewModel, term: TerminalController, onMenu: () -> Unit = {}) {
     val client by vm.client.collectAsState()
     val project by vm.project.collectAsState()
     val status by term.status.collectAsState()
@@ -100,6 +130,7 @@ fun TerminalScreen(vm: AppViewModel, term: TerminalController) {
     var reload by remember { mutableIntStateOf(0) }
     var current by remember { mutableStateOf(term.sessionId) }
     val scope = rememberCoroutineScope()
+    val imeVisible = WindowInsets.isImeVisible
 
     LaunchedEffect(client, reload) {
         val c = client ?: return@LaunchedEffect
@@ -129,39 +160,76 @@ fun TerminalScreen(vm: AppViewModel, term: TerminalController) {
     LaunchedEffect(ready, sessions) {
         if (ready && current == null && sessions.isNotEmpty()) connect(sessions.first())
     }
+    // Keyboard muncul/hilang mengubah tinggi terminal -> hitung ulang baris.
+    LaunchedEffect(imeVisible) { term.fit() }
 
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
-            sessions.forEachIndexed { i, s ->
-                FilterChip(selected = s.session_id == current, onClick = { connect(s) },
-                    label = { Text("Sesi ${i + 1}") },
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            val c = client ?: return@IconButton
-                            scope.launch {
-                                apiCall { c.api.closeTerminal(s.session_id) }
-                                if (current == s.session_id) { term.disconnect(); current = null }
-                                reload++
-                            }
-                        }) { Icon(Icons.Default.Close, "Tutup sesi") }
-                    }, modifier = Modifier.padding(end = 4.dp))
+        // ---- baris atas ringkas: menu + tab sesi + tambah + status ----
+        Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onMenu, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Menu, "Menu", Modifier.size(20.dp)) }
+            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                sessions.forEachIndexed { i, s ->
+                    SessionTab("Sesi ${i + 1}", selected = s.session_id == current, onClick = { connect(s) }, onClose = {
+                        val c = client ?: return@SessionTab
+                        scope.launch {
+                            apiCall { c.api.closeTerminal(s.session_id) }
+                            if (current == s.session_id) { term.disconnect(); current = null }
+                            reload++
+                        }
+                    })
+                }
+                IconButton(onClick = { newSession() }, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Add, "Sesi baru", Modifier.size(20.dp)) }
             }
-            IconButton(onClick = { newSession() }) { Icon(Icons.Default.Add, "Sesi baru") }
-            Text(status, style = MaterialTheme.typography.labelSmall)
+            val (dot, label) = when (status) {
+                "connected" -> Color(0xFF43A047) to "terhubung"
+                "connecting" -> Color(0xFFFFA000) to "menghubungkan"
+                "exited" -> Color.Gray to "selesai"
+                "error" -> Color(0xFFE53935) to "error"
+                else -> Color.Gray to "terputus"
+            }
+            Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(dot))
+            Text(label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 4.dp, end = 6.dp))
         }
         if (sessions.isEmpty()) Text("Tidak ada sesi. Tekan + untuk membuka terminal di folder proyek (${project?.name ?: "-"}).",
-                                     Modifier.padding(8.dp), style = MaterialTheme.typography.bodySmall)
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+                                     Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
+        Box(Modifier.weight(1f).fillMaxWidth().onSizeChanged { term.fit() }) {
             AndroidView(factory = { term.detach(); term.webView }, modifier = Modifier.fillMaxSize())
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(2.dp)) {
-            listOf("ESC", "TAB", "CTRL_C", "CTRL_D", "CTRL_Z", "CTRL_L", "UP", "DOWN", "LEFT", "RIGHT", "HOME", "END").forEach { k ->
-                AssistChip(onClick = { term.key(k); term.focus() }, label = { Text(k.replace("CTRL_", "^")) },
-                           modifier = Modifier.padding(end = 4.dp))
+        // ---- baris tombol khusus (ringkas) ----
+        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)
+                .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            KeyButton(if (imeVisible) "⌨ ▼" else "⌨ ▲", highlight = true) {
+                if (imeVisible) term.hideKeyboard() else term.showKeyboard()
             }
-            listOf("|", "/", "-", "~", "&&", ">").forEach { s ->
-                AssistChip(onClick = { term.text(s); term.focus() }, label = { Text(s) }, modifier = Modifier.padding(end = 4.dp))
+            listOf("ESC" to "ESC", "TAB" to "TAB", "CTRL_C" to "^C", "CTRL_D" to "^D", "CTRL_Z" to "^Z", "CTRL_L" to "^L",
+                   "UP" to "↑", "DOWN" to "↓", "LEFT" to "←", "RIGHT" to "→", "HOME" to "HOME", "END" to "END").forEach { (k, l) ->
+                KeyButton(l) { term.key(k); term.focus() }
             }
+            listOf("|", "/", "-", "~", "&&", ">").forEach { t -> KeyButton(t) { term.text(t); term.focus() } }
         }
+    }
+}
+
+@Composable
+private fun SessionTab(label: String, selected: Boolean, onClick: () -> Unit, onClose: () -> Unit) {
+    val bg = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+    Row(Modifier.padding(end = 4.dp).height(30.dp).clip(RoundedCornerShape(8.dp)).background(bg)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick).padding(start = 10.dp, end = 2.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        IconButton(onClick = onClose, modifier = Modifier.size(26.dp)) { Icon(Icons.Default.Close, "Tutup $label", Modifier.size(14.dp)) }
+    }
+}
+
+@Composable
+private fun KeyButton(label: String, highlight: Boolean = false, onClick: () -> Unit) {
+    Box(Modifier.height(34.dp).widthIn(min = 40.dp).clip(RoundedCornerShape(6.dp))
+            .background(if (highlight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick).padding(horizontal = 10.dp),
+        contentAlignment = Alignment.Center) {
+        Text(label, style = MaterialTheme.typography.labelLarge,
+             color = if (highlight) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
     }
 }

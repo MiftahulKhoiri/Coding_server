@@ -278,9 +278,9 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
             topBar = {
                 // Tanpa AppBar (layar editor) jarak status bar harus diberikan sendiri; TopAppBar biasanya
                 // yang menanganinya, dan Scaffold tidak menambahkannya lagi selama topBar ada.
-                if (loggedIn) Column(if (route == "editor") Modifier.statusBarsPadding() else Modifier) {
-                    // Layar editor punya baris menu+tab ringkas sendiri (area kode lebih luas).
-                    if (route != "editor") TopAppBar(
+                if (loggedIn) Column(if (route == "editor" || route == "terminal") Modifier.statusBarsPadding() else Modifier) {
+                    // Layar editor & terminal punya baris menu+tab ringkas sendiri (area kerja lebih luas).
+                    if (route != "editor" && route != "terminal") TopAppBar(
                         title = {
                             Text(DESTS.firstOrNull { it.route == route }?.label ?: "Coding Server", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         },
@@ -357,7 +357,7 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
             })
         }
         composable("editor") { EditorScreen(vm, editor, onMenu) { nav.navigate("output") { launchSingleTop = true } } }
-        composable("terminal") { TerminalScreen(vm, terminal) }
+        composable("terminal") { TerminalScreen(vm, terminal, onMenu) }
         composable("output") {
             OutputScreen(vm, editor, onGotoEditor = { nav.navigate("editor") { launchSingleTop = true } },
                          onAskAi = { nav.navigate("ai_chat") { launchSingleTop = true } })
