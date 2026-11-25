@@ -349,6 +349,26 @@ class AISettingsIn(BaseModel):
     history_messages: int | None = Field(default=None, ge=0, le=200)
 
 
+class AgentModelTarget(BaseModel):
+    connection_id: str = Field(min_length=1, max_length=80)
+    model: str = Field(min_length=1, max_length=300)
+
+
+class AgentModelsIn(BaseModel):
+    """Peran model agent. Kirim null untuk mengosongkan peran (kembali ke model aktif)."""
+    planner: AgentModelTarget | None = None
+    executor: AgentModelTarget | None = None
+    reviewer: AgentModelTarget | None = None
+    online: AgentModelTarget | None = None
+    allow_online: bool | None = None
+    escalate_after_failures: int | None = Field(default=None, ge=1, le=10)
+    max_loaded_models: int | None = Field(default=None, ge=1, le=4)
+
+
+class ModelBenchIn(BaseModel):
+    targets: list[AgentModelTarget] = Field(min_length=1, max_length=10)
+
+
 class AIConversationIn(BaseModel):
     title: str = Field(default="Percakapan baru", max_length=120)
 

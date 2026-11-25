@@ -39,6 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         for t in tasks:
             t.cancel()
+        await svc.bench.shutdown()
         await svc.agent.shutdown()
         await svc.execution.shutdown()
         svc.terminal.shutdown()

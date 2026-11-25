@@ -15,6 +15,7 @@ from backend.engines.registry import EngineRegistry
 from backend.services.lsp_service import LspService
 from backend.services.agent_service import AgentService
 from backend.services.ai_service import AIService
+from backend.services.model_bench import ModelBench
 from backend.services.auth_service import AuthService
 from backend.services.backup_service import BackupService
 from backend.services.build_service import BuildService
@@ -47,6 +48,7 @@ class Services:
     ai: AIService
     lsp: "LspService"
     agent: AgentService
+    bench: ModelBench
     login_limiter: RateLimiter
     api_limiter: RateLimiter
 
@@ -65,6 +67,7 @@ def build_services(settings: Settings, registry: EngineRegistry) -> Services:
         login_limiter=RateLimiter(settings.rate_limit_login_per_minute, 60.0),
         api_limiter=RateLimiter(600, 60.0),
         agent=AgentService(settings, db, lambda: holder["svc"]),
+        bench=ModelBench(settings, db, lambda: holder["svc"]),
     )
     holder["svc"] = svc
     return svc

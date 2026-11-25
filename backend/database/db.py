@@ -131,6 +131,15 @@ CREATE TABLE IF NOT EXISTS agent_events (
     task_id TEXT NOT NULL, ts REAL NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS ix_agent_events ON agent_events(task_id, id);
+CREATE TABLE IF NOT EXISTS model_bench_runs (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL, connection_id TEXT NOT NULL, model TEXT NOT NULL,
+    connection_name TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT 'local',
+    status TEXT NOT NULL DEFAULT 'PENDING', current TEXT NOT NULL DEFAULT '',
+    results TEXT NOT NULL DEFAULT '[]', summary TEXT, error TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL, started_at REAL, finished_at REAL
+);
+CREATE INDEX IF NOT EXISTS ix_bench_model ON model_bench_runs(connection_id, model, created_at);
 CREATE TABLE IF NOT EXISTS ai_proposals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL, user_id INTEGER NOT NULL, path TEXT NOT NULL, action TEXT NOT NULL,

@@ -113,6 +113,14 @@ interface CodingApi {
     @POST("api/v1/ai/apply") suspend fun aiApply(@Body body: AIApply): AIStatus
     @POST("api/v1/ai/unload") suspend fun aiUnload(): AIStatus
     @PUT("api/v1/ai/settings") suspend fun aiSettings(@Body body: AISettings): AIStatus
+    @GET("api/v1/ai/agent-models") suspend fun agentModels(): AgentModels
+    /** Body JSON mentah: kunci peran yang dikirim null = kosongkan peran (kembali ke model aktif). */
+    @PUT("api/v1/ai/agent-models") suspend fun agentModelsUpdate(@Body body: kotlinx.serialization.json.JsonObject): AgentModels
+    @GET("api/v1/ai/bench") suspend fun benchOverview(): BenchOverview
+    @POST("api/v1/ai/bench") suspend fun benchStart(@Body body: BenchStart): BenchRuns
+    @GET("api/v1/ai/bench/{id}") suspend fun benchRun(@Path("id") id: String): BenchRun
+    @POST("api/v1/ai/bench/{id}/cancel") suspend fun benchCancel(@Path("id") id: String): BenchRun
+    @DELETE("api/v1/ai/bench/{id}") suspend fun benchDelete(@Path("id") id: String): OkResponse
     @GET("api/v1/ai/conversations") suspend fun aiConversations(): AIConversations
     @GET("api/v1/ai/conversations/{id}") suspend fun aiConversation(@Path("id") id: Int): AIConversationDetail
     @PATCH("api/v1/ai/conversations/{id}") suspend fun aiRenameConversation(@Path("id") id: Int, @Body body: AIConversationIn): AIConversationDetail

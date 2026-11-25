@@ -299,7 +299,12 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
         val lastThought = events.lastOrNull { it.kind == "thought" }?.let { str(it, "text") }
         val lastStage = events.lastOrNull { it.kind == "status" && str(it, "status") !in setOf("FAILED", "PAUSED", "CANCELLED") }
             ?.let { str(it, "status") }
-        AgentStatusHero(t, lastKind, lastThought, lastStage)
+        val lastThink = events.lastOrNull { it.kind == "thinking" }
+        val worker = lastThink?.let { e ->
+            listOf(roleName(str(e, "role")), str(e, "model")).filter { it.isNotBlank() }.joinToString(" · ")
+        }?.takeIf { it.isNotBlank() }
+        val escalated = events.lastOrNull { it.kind == "escalation" || it.kind == "escalation_end" }?.kind == "escalation"
+        AgentStatusHero(t, lastKind, lastThought, lastStage, worker, escalated)
         Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (t.status in ACTIVE) {
@@ -366,6 +371,14 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
         onDismiss = { confirmDelete = false })
 }
 
+fun roleName(role: String): String = when (role) {
+    "planner" -> "Perencana"
+    "executor" -> "Pelaksana"
+    "reviewer" -> "Peninjau"
+    "online" -> "Model online"
+    else -> ""
+}
+
 private fun str(ev: AgentEvent, key: String): String =
     (ev.data[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
 
@@ -373,7 +386,14 @@ private fun str(ev: AgentEvent, key: String): String =
 private fun EventRow(ev: AgentEvent) {
     val time = formatTime(ev.ts)
     when (ev.kind) {
-        "thought" -> Text("💭 ${str(ev, "text")}", style = MaterialTheme.typography.bodySmall)
+        "thought" -> Column {
+            val who = listOf(roleName(str(ev, "role")), str(ev, "model")).filter { it.isNotBlank() }.joinToString(" · ")
+            val speed = listOfNotNull(str(ev, "tps").takeIf { it.isNotBlank() }?.let { "$it tok/dtk" },
+                                      str(ev, "seconds").takeIf { it.isNotBlank() }?.let { "${it} dtk" }).joinToString(" · ")
+            if (who.isNotBlank()) Text("$who${if (speed.isNotBlank()) "  ($speed)" else ""}",
+                                       style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+            Text("💭 ${str(ev, "text")}", style = MaterialTheme.typography.bodySmall)
+        }
         "tool_call" -> Text("🔧 ${str(ev, "tool")} ${ev.data["args"] ?: ""}", style = Mono, maxLines = 4,
                             overflow = TextOverflow.Ellipsis)
         "observation" -> {
@@ -390,7 +410,18 @@ private fun EventRow(ev: AgentEvent) {
         "error" -> Text("⚠ ${str(ev, "message")}", color = ErrRed, style = MaterialTheme.typography.bodySmall)
         "approval" -> Text("⏸ Menunggu persetujuan", color = Color(0xFF1E88E5), style = MaterialTheme.typography.bodySmall)
         "plan" -> Text("🗺 Rencana diperbarui", style = MaterialTheme.typography.labelSmall)
-        "thinking" -> Text("🧠 Model berpikir (langkah ${str(ev, "step")})…", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        "thinking" -> Text("🧠 ${roleName(str(ev, "role")).ifBlank { "Model" }}" +
+                               str(ev, "model").takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty() +
+                               " berpikir — langkah ${str(ev, "step")}…",
+                           style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+        "escalation" -> Text("⬆️ Eskalasi ke ${roleName(str(ev, "to_role"))} (${str(ev, "to_model")}): ${str(ev, "reason")}",
+                             style = MaterialTheme.typography.bodySmall, color = Color(0xFFF4511E))
+        "escalation_end" -> Text("↩️ Kembali ke peran normal setelah eskalasi", style = MaterialTheme.typography.labelSmall,
+                                 color = Color.Gray)
+        "review" -> Text(if (str(ev, "approved") == "true") "🔍 Peninjau (${str(ev, "model")}) menyetujui hasil ✓"
+                         else "🔍 Peninjau (${str(ev, "model")}) meminta pemeriksaan/perbaikan lagi",
+                         style = MaterialTheme.typography.bodySmall,
+                         color = if (str(ev, "approved") == "true") OkGreen else Color(0xFF5E35B1))
         "report" -> Text("📄 Laporan dibuat", style = MaterialTheme.typography.labelSmall)
         else -> Text("${ev.kind}: ${ev.data}", style = MaterialTheme.typography.labelSmall)
     }

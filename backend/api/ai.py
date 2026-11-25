@@ -5,8 +5,8 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from backend.core.exceptions import AppError, Forbidden
 from backend.core.permissions import intersect_for_ai
 from backend.dependencies import Services, current_user, project_dir, require, services, ws_user
-from backend.schemas.models import (AIApply, AIChat, AIConnectionIn, AIConversationIn, AIDecision, AIProposal,
-                                    AISettingsIn, OkResponse)
+from backend.schemas.models import (AgentModelsIn, AIApply, AIChat, AIConnectionIn, AIConversationIn, AIDecision,
+                                    AIProposal, AISettingsIn, ModelBenchIn, OkResponse)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 ws_router = APIRouter(tags=["websocket"])
@@ -71,6 +71,47 @@ async def unload(user: dict = Depends(require("admin")), svc: Services = Depends
 async def update_settings(body: AISettingsIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
     svc.ai.save_settings(body.model_dump(exclude_none=True))
     return await svc.ai.status(user)
+
+
+# ---------- peran model agent ----------
+@router.get("/agent-models", summary="Peran model AI Agent (perencana/pelaksana/peninjau/online) + eskalasi")
+def agent_models(_: dict = Depends(current_user), svc: Services = Depends(services)):
+    return svc.ai.public_agent_models()
+
+
+@router.put("/agent-models", summary="Atur peran model agent; null = kosongkan (pakai model aktif)")
+def update_agent_models(body: AgentModelsIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    out = svc.ai.save_agent_models(body.model_dump(exclude_unset=True))
+    svc.db.audit("ai_agent_models", user=user, detail={k: v for k, v in out.items() if k != "default"})
+    return out
+
+
+# ---------- uji model ----------
+@router.get("/bench", summary="Riwayat Uji Model + papan peringkat + rekomendasi peran")
+def bench_list(_: dict = Depends(require("read")), svc: Services = Depends(services)):
+    return {"runs": svc.bench.list(), "leaderboard": svc.bench.leaderboard(),
+            "recommendation": svc.bench.recommendation(), "cases": svc.bench.cases()}
+
+
+@router.post("/bench", status_code=201, summary="Mulai Uji Model (berjalan di latar belakang, bergiliran)")
+async def bench_start(body: ModelBenchIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    return {"runs": svc.bench.create(user, [t.model_dump() for t in body.targets])}
+
+
+@router.get("/bench/{run_id}", summary="Detail Uji Model: hasil per kasus")
+def bench_get(run_id: str, _: dict = Depends(require("read")), svc: Services = Depends(services)):
+    return svc.bench.get(run_id)
+
+
+@router.post("/bench/{run_id}/cancel")
+async def bench_cancel(run_id: str, _: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    return await svc.bench.cancel(run_id)
+
+
+@router.delete("/bench/{run_id}", response_model=OkResponse)
+def bench_delete(run_id: str, _: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    svc.bench.delete(run_id)
+    return OkResponse()
 
 
 # ---------- percakapan ----------

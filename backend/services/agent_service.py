@@ -34,6 +34,19 @@ STATUSES = ACTIVE | TERMINAL | {"PAUSED", "WAITING_APPROVAL"}
 CONTEXT_BUDGET = 48_000   # karakter percakapan yang dikirim ke model
 KEEP_RECENT = 6           # hasil tool terakhir yang tidak dipangkas
 MAX_PARSE_FAILS = 3
+ESCALATE_AFTER_PARSE = 2  # balasan salah format berturut-turut sebelum eskalasi ke model yang lebih kuat
+ESC_STEPS = 3             # langkah yang dikerjakan model eskalasi sebelum kembali ke peran normal
+MAX_REVIEWS = 2           # peninjauan sebelum finish (mencegah loop tinjau tanpa akhir)
+ROLE_LABEL = {"planner": "Perencana", "executor": "Pelaksana", "reviewer": "Peninjau", "online": "Online"}
+ESC_LEVEL = {"planner": 1, "online": 2}
+
+REVIEW_PROMPT = """[peninjau] Agen mengusulkan task SELESAI. Kamu sekarang PENINJAU yang teliti.
+Periksa riwayat di atas: apakah tugas benar-benar terpenuhi? Apakah perubahan sudah diterapkan (bukan
+hanya diusulkan) dan sudah diverifikasi (build/test) bila memungkinkan? Adakah error yang tersisa atau
+klaim yang tidak didukung hasil tool?
+- Bila semuanya benar: panggil finish (perbaiki ringkasan/keterbatasan bila perlu).
+- Bila belum: panggil tool untuk memeriksa atau memperbaiki (mis. read_file, run_tests, edit_file).
+Balas dengan format JSON tool seperti biasa."""
 
 SYSTEM_PROMPT = """Kamu adalah AI Coding Agent di CODING_SERVER (Raspberry Pi 5). Kamu bekerja pada SATU proyek
 nyata dan hanya bisa bertindak lewat tool di bawah. Jangan pernah mengarang isi file: baca dulu.
@@ -65,6 +78,17 @@ Tool yang tersedia untukmu:
 
 def _now() -> float:
     return time.time()
+
+
+def tools_text(ai_perms: set[str]) -> str:
+    def sig(t) -> str:
+        return ", ".join(k + ("" if a.required else "?") + ": " + a.type for k, a in t.args.items())
+
+    return "\n".join(f"- {t.name}({sig(t)}): {t.description}" for t in agent_tools.available(ai_perms))
+
+
+def system_prompt(ai_perms: set[str]) -> str:
+    return SYSTEM_PROMPT.format(tools=tools_text(ai_perms))
 
 
 def extract_call(text: str) -> tuple[dict, str | None]:
@@ -172,7 +196,9 @@ class AgentService:
         if not description:
             raise AppError("Deskripsi tugas wajib diisi", code="empty_task")
         self.svc.projects.get(project_id, user)
-        self.svc.ai._ready_provider()  # gagal cepat (503) bila belum ada model yang diterapkan
+        if self.svc.ai.state["status"] == "loading":
+            raise AppError(f"Model masih dimuat: {self.svc.ai.state['message']}", code="ai_loading", status_code=503)
+        self._target("executor")  # gagal cepat (503) bila belum ada model sama sekali
         tid = uuid.uuid4().hex[:12]
         now = _now()
         self.db.execute(
@@ -297,15 +323,11 @@ class AgentService:
                 return json.loads(row["checkpoint"])["messages"]
             except (ValueError, KeyError):
                 pass
-        def sig(t) -> str:
-            return ", ".join(k + ("" if a.required else "?") + ": " + a.type for k, a in t.args.items())
-
-        tools = "\n".join(f"- {t.name}({sig(t)}): {t.description}" for t in agent_tools.available(ai_perms))
         proj = self.svc.projects.get(row["project_id"], self._owner(row))
         user_msg = (f"Proyek: {proj['name']} (bahasa utama: {proj.get('language') or '-'})\n"
                     f"Auto-apply: {'ya (risiko HIGH tetap butuh persetujuan)' if row['auto_apply'] else 'tidak (semua editan menunggu persetujuan)'}\n"
                     f"Batas langkah: {row['max_steps']}\n\nTUGAS:\n{row['description']}")
-        return [{"role": "system", "content": SYSTEM_PROMPT.format(tools=tools)},
+        return [{"role": "system", "content": system_prompt(ai_perms)},
                 {"role": "user", "content": user_msg}]
 
     @staticmethod
@@ -340,22 +362,77 @@ class AgentService:
             return round(done / len(plan), 3)
         return round(min(0.9, steps_used / max(1, max_steps)), 3)
 
-    async def _ask_model(self, messages: list[dict]) -> tuple[str, str]:
+    # ---------- pemilihan model (peran & eskalasi) ----------
+    def _target(self, role: str) -> tuple[str, str]:
+        """(connection_id, model) untuk peran; peran kosong turun ke peran lain lalu ke model aktif."""
         ai = self.svc.ai
-        row, prov, model = ai._ready_provider()
+        order = {"planner": ("planner", "executor"), "executor": ("executor",),
+                 "reviewer": ("reviewer", "planner", "executor"), "online": ("online",)}[role]
+        for r in order:
+            t = ai.role_target(r)
+            if t:
+                return t
+        t = ai.default_target()
+        if not t:
+            raise AppError("Belum ada model AI. Buka menu Model AI: terapkan model atau atur peran model agent.",
+                           code="ai_not_configured", status_code=503)
+        return t
+
+    @staticmethod
+    def _pick_role(task: dict) -> str:
+        if task.get("_esc_left", 0) > 0 and task.get("_esc_role"):
+            return task["_esc_role"]
+        if task.get("_review_pending"):
+            return "reviewer"
+        if not task["_plan"]:
+            return "planner"
+        return "executor"
+
+    def _escalate(self, task_id: str, task: dict, reason: str, current: tuple[str, str]) -> bool:
+        """Naikkan ke model yang lebih kuat: Perencana, lalu model Online (hanya bila diizinkan)."""
+        conf = self.svc.ai.agent_models()
+        chain: list[tuple[str, tuple[str, str]]] = []
+        try:
+            chain.append(("planner", self._target("planner")))
+        except AppError:
+            pass
+        if conf.get("allow_online") and conf.get("online"):
+            chain.append(("online", (conf["online"]["connection_id"], conf["online"]["model"])))
+        cur_level = ESC_LEVEL.get(task.get("_esc_role") or "", 0) if task.get("_esc_left", 0) > 0 else 0
+        for role, tgt in chain:
+            if ESC_LEVEL[role] > cur_level and tgt != current:
+                task["_esc_role"], task["_esc_left"] = role, ESC_STEPS
+                self._event(task_id, "escalation", {"to_role": role, "to_model": tgt[1], "from_model": current[1],
+                                                    "reason": reason})
+                log.info("Task %s eskalasi ke %s (%s): %s", task_id, role, tgt[1], reason)
+                return True
+        return False
+
+    async def _ask_model(self, task_id: str, messages: list[dict], target: tuple[str, str]) -> tuple[str, str, dict]:
+        ai = self.svc.ai
+        cid, model = target
+        row, prov = await ai.acquire(cid, model, on_status=lambda m: self._update(task_id, current_op=m,
+                                                                                 last_activity=_now()))
         conf = ai.settings()
         parts: list[str] = []
-        ai.state["last_activity"] = _now()
+        started = time.time()
 
         async def collect() -> None:
             async for kind, text in prov.stream_chat(model, messages, min(float(conf.get("temperature") or 0.2), 0.4),
                                                      max(int(conf.get("max_tokens") or 2048), 2048)):
                 if kind == "delta":
                     parts.append(text)
-                ai.state["last_activity"] = _now()
+                ai.touch(cid, model)
 
         await asyncio.wait_for(collect(), self.s.agent_model_timeout)
-        return "".join(parts), model
+        secs = time.time() - started
+        text = "".join(parts)
+        st = dict(prov.last_stats)
+        tokens = int(st.get("completion_tokens") or max(1, len(text) // 4))
+        stats = {"seconds": round(secs, 1), "tokens": tokens,
+                 "tps": round(float(st.get("gen_tps") or tokens / max(secs, 0.01)), 2),
+                 "prompt_tokens": st.get("prompt_tokens"), "connection": row["name"], "location": row["location"]}
+        return text, model, stats
 
     async def _run(self, task_id: str, user: dict) -> None:
         async with self._sem:
@@ -369,6 +446,9 @@ class AgentService:
                     self._update(task_id, status="CANCELLED", current_op="Dibatalkan", finished_at=_now())
                     self._event(task_id, "status", {"status": "CANCELLED", "message": "Dibatalkan"})
                 raise
+            except AppError as e:
+                log.warning("Task agen %s gagal: %s", task_id, e.message)
+                self._fail(task_id, e.message)
             except Exception as e:  # jangan biarkan task menggantung tanpa status
                 log.exception("Task agen %s error", task_id)
                 self._fail(task_id, f"Kesalahan internal: {e}")
@@ -389,8 +469,13 @@ class AgentService:
         svc.projects.get(row["project_id"], user)  # akses proyek masih sah?
         ai_perms = intersect_for_ai(user["perms"])
         ck = json.loads(row["checkpoint"]) if row.get("checkpoint") else {}
+        ast = ck.get("agent_state") or {}
         task = {"id": task_id, "project_id": row["project_id"], "auto_apply": bool(row["auto_apply"]),
-                "_plan": json.loads(row.get("plan") or "[]"), "_runs": ck.get("runs", [])}
+                "_plan": json.loads(row.get("plan") or "[]"), "_runs": ck.get("runs", []),
+                # status peran/eskalasi/peninjauan (ikut checkpoint agar bertahan saat dijeda/restart)
+                "_esc_role": ast.get("esc_role"), "_esc_left": int(ast.get("esc_left") or 0),
+                "_reviews": int(ast.get("reviews") or 0), "_review_pending": bool(ast.get("review_pending")),
+                "_fail_runs": int(ast.get("fail_runs") or 0)}
         messages = self._messages(row, ai_perms)
         steps_used = row["steps_used"]
         parse_fails = 0
@@ -399,11 +484,17 @@ class AgentService:
         self._set_stage(task_id, "PLANNING" if not task["_plan"] else "EXECUTING", "Menghubungi model AI")
         pending_call = ck.get("pending_call")
         last_failed_run = False
+        fail_limit = max(1, int(svc.ai.agent_models().get("escalate_after_failures") or 2))
+
+        def extra(pc: dict | None = None) -> dict:
+            return {"runs": task["_runs"], "pending_call": pc, "agent_state": {
+                "esc_role": task["_esc_role"], "esc_left": task["_esc_left"], "reviews": task["_reviews"],
+                "review_pending": task["_review_pending"], "fail_runs": task["_fail_runs"]}}
 
         while True:
             if task_id in self._pause:
                 self._pause.discard(task_id)
-                self._save_checkpoint(task_id, messages, {"runs": task["_runs"], "pending_call": pending_call})
+                self._save_checkpoint(task_id, messages, extra(pending_call))
                 self._set_stage(task_id, "PAUSED", "Dijeda pengguna")
                 return
             if pending_call is None:
@@ -411,30 +502,67 @@ class AgentService:
                     self._finish(task_id, task, steps_used, {"summary": None},
                                  incomplete=f"Batas {row['max_steps']} langkah tercapai sebelum agen memanggil finish")
                     return
-                # Sinyal untuk UI (animasi "Berpikir"): model sedang menyusun langkah berikutnya.
-                self._update(task_id, current_op="Model AI sedang berpikir…", last_activity=_now())
-                self._event(task_id, "thinking", {"step": steps_used + 1})
-                text, model = await self._ask_model(self._compact(messages))
+                role = self._pick_role(task)
+                target = self._target(role)
+                # Sinyal untuk UI (animasi "Berpikir"): model mana yang sedang menyusun langkah berikutnya.
+                self._update(task_id, current_op=f"{ROLE_LABEL[role]} ({target[1]}) sedang berpikir…",
+                             last_activity=_now())
+                self._event(task_id, "thinking", {"step": steps_used + 1, "role": role, "model": target[1]})
+                try:
+                    text, model, stats = await self._ask_model(task_id, self._compact(messages), target)
+                except (AppError, asyncio.TimeoutError) as e:
+                    msg = e.message if isinstance(e, AppError) else \
+                        f"tidak menjawab dalam {self.s.agent_model_timeout} detik"
+                    self._event(task_id, "error", {"message": f"Model {target[1]} gagal: {msg}"})
+                    if self._escalate(task_id, task, f"Model {target[1]} gagal: {msg}", target):
+                        self._save_checkpoint(task_id, messages, extra())
+                        continue
+                    self._save_checkpoint(task_id, messages, extra())
+                    raise AppError(f"Model {target[1]} gagal: {msg}", code="ai_error")
                 steps_used += 1
-                self._update(task_id, steps_used=steps_used, model=model,
-                             connection_id=svc.ai.state.get("connection_id"))
+                self._update(task_id, steps_used=steps_used, model=model, connection_id=target[0])
                 messages.append({"role": "assistant", "content": text})
                 try:
                     call, code = extract_call(text)
                     parse_fails = 0
                 except ValueError as e:
                     parse_fails += 1
-                    self._event(task_id, "error", {"message": f"Balasan model tidak valid: {e}", "raw": text[:2000]})
-                    if parse_fails >= MAX_PARSE_FAILS:
-                        self._save_checkpoint(task_id, messages, {"runs": task["_runs"]})
-                        self._fail(task_id, "Model berulang kali tidak mengikuti format JSON tool. Coba model lain.")
-                        return
+                    self._event(task_id, "error", {"message": f"Balasan {model} tidak valid: {e}", "raw": text[:2000],
+                                                   "role": role, "model": model})
                     messages.append({"role": "user", "content": "[hasil tool] FORMAT SALAH: balas dengan tepat satu "
                                      "blok ```json berisi {\"thought\", \"tool\", \"args\"}."})
+                    if parse_fails >= ESCALATE_AFTER_PARSE and self._escalate(
+                            task_id, task, f"{model} berulang kali salah format JSON tool", target):
+                        parse_fails = 0
+                        self._save_checkpoint(task_id, messages, extra())
+                        continue
+                    if parse_fails >= MAX_PARSE_FAILS:
+                        self._save_checkpoint(task_id, messages, extra())
+                        self._fail(task_id, "Model berulang kali tidak mengikuti format JSON tool. Coba model lain "
+                                            "atau atur model Perencana/Online untuk eskalasi.")
+                        return
                     continue
+                if task["_esc_left"] > 0 and role == task["_esc_role"]:
+                    task["_esc_left"] -= 1
+                    if task["_esc_left"] == 0:
+                        self._event(task_id, "escalation_end", {"role": task["_esc_role"], "model": model})
+                        task["_esc_role"] = None
                 pending_call = {"tool": call["tool"], "args": call.get("args") or {}, "code": code,
                                 "thought": str(call.get("thought", ""))[:2000]}
-                self._event(task_id, "thought", {"text": pending_call["thought"]})
+                self._event(task_id, "thought", {"text": pending_call["thought"], "role": role, "model": model, **stats})
+                if role == "reviewer":
+                    task["_review_pending"] = False
+                    self._event(task_id, "review", {"model": model, "approved": call["tool"] == "finish"})
+                elif (call["tool"] == "finish" and svc.ai.role_target("reviewer") is not None
+                      and task["_reviews"] < MAX_REVIEWS):
+                    # Tahan dulu: Peninjau memeriksa hasil sebelum task dinyatakan selesai.
+                    task["_reviews"] += 1
+                    task["_review_pending"] = True
+                    messages.append({"role": "user", "content": REVIEW_PROMPT})
+                    self._set_stage(task_id, "REVIEWING", "Peninjau memeriksa hasil sebelum task selesai")
+                    self._save_checkpoint(task_id, messages, extra())
+                    pending_call = None
+                    continue
 
             name = pending_call["tool"]
             tool = agent_tools.TOOLS.get(name)
@@ -451,7 +579,7 @@ class AgentService:
                 obs = await agent_tools.call(ctx, name, pending_call["args"])
                 ok = True
             except NeedsApproval:
-                self._save_checkpoint(task_id, messages, {"runs": task["_runs"], "pending_call": pending_call})
+                self._save_checkpoint(task_id, messages, extra(pending_call))
                 self._set_stage(task_id, "WAITING_APPROVAL",
                                 "Menunggu persetujuan proposal sebelum menjalankan/menguji kode")
                 self._event(task_id, "approval", {"pending": self.public(self._row(task_id))["pending_proposals"]})
@@ -462,13 +590,18 @@ class AgentService:
             if len(task["_runs"]) > runs_before:
                 r = task["_runs"][-1]
                 last_failed_run = not (r["status"] == "COMPLETED" and r["exit_code"] == 0)
+                task["_fail_runs"] = task["_fail_runs"] + 1 if last_failed_run else 0
+                if task["_fail_runs"] >= fail_limit and task["_esc_left"] == 0:
+                    cur = self._target(self._pick_role(task))
+                    if self._escalate(task_id, task, f"Verifikasi gagal {task['_fail_runs']} kali berturut-turut", cur):
+                        task["_fail_runs"] = 0
             self._event(task_id, "observation", {"tool": name, "ok": ok, "text": obs[:8000]})
             if name == "update_plan" and ok:
                 self._update(task_id, plan=json.dumps(task["_plan"], ensure_ascii=False))
                 self._event(task_id, "plan", {"steps": task["_plan"]})
             self._update(task_id, progress=self._progress(task, steps_used, row["max_steps"]))
             messages.append({"role": "user", "content": f"[hasil tool {name}]\n{obs}"})
-            self._save_checkpoint(task_id, messages, {"runs": task["_runs"]})
+            self._save_checkpoint(task_id, messages, extra())
             if name == "finish" and ok:
                 self._finish(task_id, task, steps_used, task.get("_finish") or {})
                 return

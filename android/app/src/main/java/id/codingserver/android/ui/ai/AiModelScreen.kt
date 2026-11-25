@@ -68,7 +68,7 @@ import kotlinx.coroutines.launch
 
 /** Pengaturan Model AI: pilih Lokal / Online -> koneksi -> model -> Terapkan (seperti ai_asisten). */
 @Composable
-fun AiModelScreen(vm: AppViewModel, onOpenChat: () -> Unit) {
+fun AiModelScreen(vm: AppViewModel, onOpenBench: () -> Unit = {}, onOpenChat: () -> Unit) {
     val client by vm.client.collectAsState()
     val user by vm.user.collectAsState()
     val isAdmin = user?.permissions?.contains("admin") == true
@@ -222,7 +222,10 @@ fun AiModelScreen(vm: AppViewModel, onOpenChat: () -> Unit) {
                  else "Model online langsung aktif (butuh internet & API key).", style = MaterialTheme.typography.labelSmall)
         }
 
-        // ---- 4. parameter ----
+        // ---- 4. model per peran agent + uji model ----
+        AgentModelsCard(vm, c, conns, isAdmin, onOpenBench)
+
+        // ---- 5. parameter ----
         status?.let { st -> if (isAdmin) ParamsCard(st.settings) { s ->
             scope.launch { apiCall { c.api.aiSettings(s) }.onSuccess { status = it; vm.toast("Pengaturan AI disimpan") }.onFailure { error = it.message } }
         } }

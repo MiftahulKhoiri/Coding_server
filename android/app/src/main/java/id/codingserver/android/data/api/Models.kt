@@ -210,6 +210,43 @@ import kotlinx.serialization.json.JsonElement
     val system_prompt: String = "", val temperature: Double = 0.7, val max_tokens: Int = 2048,
     val idle_unload_minutes: Int = 15, val history_messages: Int = 20,
 )
+// ---------- Peran model agent & Uji Model ----------
+@Serializable data class AgentModelTarget(val connection_id: String, val model: String)
+@Serializable data class AgentRoleModel(
+    val connection_id: String, val model: String, val connection_name: String = "", val location: String = "local",
+)
+@Serializable data class AgentModels(
+    val planner: AgentRoleModel? = null, val executor: AgentRoleModel? = null, val reviewer: AgentRoleModel? = null,
+    val online: AgentRoleModel? = null, val allow_online: Boolean = false, val escalate_after_failures: Int = 2,
+    val max_loaded_models: Int = 2, val default: AgentModelTarget? = null,
+)
+@Serializable data class BenchSummary(
+    val score: Double = 0.0, val passed: Int = 0, val total: Int = 0, val format_ok: Int = 0,
+    val avg_tps: Double? = null, val avg_seconds: Double = 0.0, val total_seconds: Double = 0.0, val tokens: Int = 0,
+    val verdict: String = "",
+)
+@Serializable data class BenchCaseResult(
+    val id: String, val title: String = "", val category: String = "", val format_ok: Boolean = false,
+    val score: Double = 0.0, val note: String = "", val tool: String? = null, val seconds: Double = 0.0,
+    val tokens: Int = 0, val tps: Double? = null, val prompt_tokens: Int? = null, val output: String = "",
+)
+@Serializable data class BenchRun(
+    val id: String, val connection_id: String = "", val model: String = "", val connection_name: String = "",
+    val location: String = "local", val status: String = "PENDING", val current: String = "", val error: String = "",
+    val created_at: Double = 0.0, val started_at: Double? = null, val finished_at: Double? = null,
+    val done_cases: Int = 0, val total_cases: Int = 0, val summary: BenchSummary? = null,
+    val results: List<BenchCaseResult> = emptyList(),
+)
+@Serializable data class BenchCase(val id: String, val title: String = "", val category: String = "", val description: String = "")
+@Serializable data class BenchPick(val connection_id: String, val model: String, val score: Double = 0.0, val avg_tps: Double? = null)
+@Serializable data class BenchRecommendation(val planner: BenchPick? = null, val executor: BenchPick? = null, val reviewer: BenchPick? = null)
+@Serializable data class BenchOverview(
+    val runs: List<BenchRun> = emptyList(), val leaderboard: List<BenchRun> = emptyList(),
+    val recommendation: BenchRecommendation = BenchRecommendation(), val cases: List<BenchCase> = emptyList(),
+)
+@Serializable data class BenchStart(val targets: List<AgentModelTarget>)
+@Serializable data class BenchRuns(val runs: List<BenchRun> = emptyList())
+
 @Serializable data class AISelected(val connection_id: String? = null, val model: String? = null)
 @Serializable data class AIStatus(
     val status: String = "idle", val connection_id: String? = null, val model: String? = null, val message: String = "",

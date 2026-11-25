@@ -480,7 +480,8 @@ private fun AnimatedDots(color: Color) {
 
 /** Kartu besar di atas detail task: animasi fase, langkah yang sedang dikerjakan, progres, waktu, dan tahapan. */
 @Composable
-fun AgentStatusHero(t: AgentTask, lastEventKind: String?, lastThought: String?, lastStage: String?) {
+fun AgentStatusHero(t: AgentTask, lastEventKind: String?, lastThought: String?, lastStage: String?,
+                    worker: String? = null, escalated: Boolean = false) {
     val phase = agentPhase(t.status, lastEventKind)
     val prog by animateFloatAsState(t.progress.toFloat().coerceIn(0f, 1f), tween(900), label = "prog")
     val bg by androidx.compose.animation.animateColorAsState(phase.color.copy(alpha = 0.10f), tween(500), label = "bg")
@@ -513,6 +514,13 @@ fun AgentStatusHero(t: AgentTask, lastEventKind: String?, lastThought: String?, 
                         val stage = agentPhase(t.status)
                         Text("tahap: ${stage.title}", style = MaterialTheme.typography.labelSmall, color = stage.color)
                     }
+                    // Model & peran yang sedang bekerja (multi-model), plus tanda eskalasi.
+                    if (phase.active && worker != null) Text(
+                        (if (escalated) "⬆️ " else "🤖 ") + worker + if (escalated) " (eskalasi)" else "",
+                        style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold,
+                        color = if (escalated) Color(0xFFF4511E) else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                     val detail = when {
                         phase == AgentPhase.THINKING && !lastThought.isNullOrBlank() -> "💭 $lastThought"
                         phase == AgentPhase.FAILED && t.error.isNotBlank() -> t.error

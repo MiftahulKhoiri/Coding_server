@@ -78,10 +78,17 @@ async def _sse_lines(resp: httpx.Response) -> AsyncIterator[str]:
             yield line[5:].strip()
 
 
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
 class Provider:
     def __init__(self, base_url: str, api_key: str = ""):
         self.base = normalize_base(base_url)
         self.key = api_key
+        # Statistik panggilan stream_chat terakhir (bila penyedia mengirimnya): prompt_tokens,
+        # completion_tokens, gen_tps (token/detik generasi), prompt_tps. Dipakai agent & Uji Model.
+        self.last_stats: dict = {}
 
     supports_load = False
 
@@ -134,6 +141,7 @@ class OpenAIProvider(Provider):
         return sorted(out, key=lambda x: x["id"].lower())
 
     async def stream_chat(self, model, messages, temperature, max_tokens):
+        self.last_stats = {}
         body = {"model": model, "messages": messages, "stream": True}
         if temperature is not None:
             body["temperature"] = temperature
@@ -153,6 +161,7 @@ class OpenAIProvider(Provider):
                             continue
                         if j.get("error"):
                             raise AppError(f"Penyedia AI: {j['error']}", code="ai_error", status_code=502)
+                        self._collect_stats(j)
                         for ch in j.get("choices") or []:
                             d = ch.get("delta") or {}
                             if d.get("reasoning_content"):
@@ -163,6 +172,17 @@ class OpenAIProvider(Provider):
                                 yield "delta", d["content"]
             except httpx.HTTPError as e:
                 raise AppError(f"Koneksi ke penyedia AI terputus: {e}", code="ai_unreachable", status_code=502)
+
+
+    def _collect_stats(self, j: dict) -> None:
+        t = j.get("timings") if isinstance(j.get("timings"), dict) else {}   # llama-server
+        u = j.get("usage") if isinstance(j.get("usage"), dict) else {}       # OpenAI-compatible
+        for key, val in (("prompt_tokens", _num(t.get("prompt_n")) or _num(u.get("prompt_tokens"))),
+                         ("completion_tokens", _num(t.get("predicted_n")) or _num(u.get("completion_tokens"))),
+                         ("gen_tps", _num(t.get("predicted_per_second"))),
+                         ("prompt_tps", _num(t.get("prompt_per_second")))):
+            if val:
+                self.last_stats[key] = val
 
 
 class LlamaRouterProvider(OpenAIProvider):
@@ -218,6 +238,7 @@ class AnthropicProvider(Provider):
         system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
         msgs = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] in ("user", "assistant")]
         body = {"model": model, "messages": msgs, "max_tokens": max_tokens or 4096, "stream": True}
+        self.last_stats = {}
         if system:
             body["system"] = system
         if temperature is not None:
@@ -234,6 +255,11 @@ class AnthropicProvider(Provider):
                             continue
                         if j.get("type") == "error":
                             raise AppError(f"Anthropic: {j.get('error', {}).get('message')}", code="ai_error", status_code=502)
+                        usage = (j.get("message") or {}).get("usage") or j.get("usage") or {}
+                        if _num(usage.get("input_tokens")):
+                            self.last_stats["prompt_tokens"] = usage["input_tokens"]
+                        if _num(usage.get("output_tokens")):
+                            self.last_stats["completion_tokens"] = usage["output_tokens"]
                         if j.get("type") == "content_block_delta":
                             d = j.get("delta", {})
                             if d.get("type") == "text_delta":
@@ -275,6 +301,7 @@ class GeminiProvider(Provider):
         if max_tokens:
             body["generationConfig"]["maxOutputTokens"] = max_tokens
         url = f"{self.base}/v1beta/models/{model}:streamGenerateContent?alt=sse"
+        self.last_stats = {}
         async with http_client() as c:
             try:
                 async with c.stream("POST", url, headers=self.headers(), json=body) as r:
@@ -285,6 +312,11 @@ class GeminiProvider(Provider):
                             j = json.loads(data)
                         except json.JSONDecodeError:
                             continue
+                        um = j.get("usageMetadata") or {}
+                        if _num(um.get("promptTokenCount")):
+                            self.last_stats["prompt_tokens"] = um["promptTokenCount"]
+                        if _num(um.get("candidatesTokenCount")):
+                            self.last_stats["completion_tokens"] = um["candidatesTokenCount"]
                         for cand in j.get("candidates") or []:
                             for part in (cand.get("content") or {}).get("parts") or []:
                                 if part.get("text"):

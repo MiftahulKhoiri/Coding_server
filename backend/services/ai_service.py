@@ -44,6 +44,18 @@ DEFAULT_SETTINGS = {
 }
 MAX_CONTEXT_CHARS = 60_000
 
+# Peran model untuk AI Coding Agent. None = pakai model aktif (menu Model AI) seperti sebelumnya.
+AGENT_ROLES = ("planner", "executor", "reviewer", "online")
+DEFAULT_AGENT_MODELS = {
+    "planner": None,        # memahami tugas, memeriksa proyek, menyusun rencana; target eskalasi pertama
+    "executor": None,       # langkah rutin: baca/edit file, jalankan build/test
+    "reviewer": None,       # meninjau hasil sebelum task dinyatakan selesai (opsional)
+    "online": None,         # model online untuk eskalasi terakhir (hanya bila allow_online)
+    "allow_online": False,  # 100% lokal secara default
+    "escalate_after_failures": 2,  # verifikasi gagal berturut-turut sebelum eskalasi
+    "max_loaded_models": 2,        # model lokal yang boleh termuat bersamaan (RAM Pi)
+}
+
 
 class AIService:
     def __init__(self, settings: Settings, db: Database, files: FileService):
@@ -54,6 +66,8 @@ class AIService:
         self._lock = asyncio.Lock()
         self.state: dict = {"status": "idle", "connection_id": None, "model": None, "message": "",
                             "loaded_by_us": False, "last_activity": 0.0, "target": None}
+        # Model llama-server yang dimuat untuk agent / Uji Model (selain model chat aktif): (cid, model) -> terakhir dipakai
+        self._agent_loaded: dict[tuple[str, str], float] = {}
         self._bootstrap()
 
     # ---------- pengaturan & koneksi ----------
@@ -144,6 +158,152 @@ class AIService:
         _, p = self.provider(cid)
         return await p.list_models()
 
+    # ---------- peran model agent ----------
+    def _target_ok(self, t) -> bool:
+        return (isinstance(t, dict) and bool(t.get("connection_id")) and bool(t.get("model"))
+                and self.db.one("SELECT 1 AS x FROM ai_connections WHERE id=?", (t["connection_id"],)) is not None)
+
+    def agent_models(self) -> dict:
+        conf = self.settings().get("agent_models") or {}
+        out = dict(DEFAULT_AGENT_MODELS)
+        out.update({k: v for k, v in conf.items() if k in DEFAULT_AGENT_MODELS})
+        for r in AGENT_ROLES:  # koneksi yang sudah dihapus = peran kosong
+            if out.get(r) is not None and not self._target_ok(out[r]):
+                out[r] = None
+        return out
+
+    def public_agent_models(self) -> dict:
+        conf = self.agent_models()
+        out = {k: conf[k] for k in DEFAULT_AGENT_MODELS if k not in AGENT_ROLES}
+        for r in AGENT_ROLES:
+            t = conf.get(r)
+            if t:
+                row = self._conn_row(t["connection_id"])
+                out[r] = {"connection_id": t["connection_id"], "model": t["model"],
+                          "connection_name": row["name"], "location": row["location"]}
+            else:
+                out[r] = None
+        d = self.default_target()
+        out["default"] = {"connection_id": d[0], "model": d[1]} if d else None
+        return out
+
+    def save_agent_models(self, patch: dict) -> dict:
+        cur = self.agent_models()
+        for k, v in patch.items():
+            if k in AGENT_ROLES:
+                if not v:
+                    cur[k] = None
+                else:
+                    self._conn_row(v["connection_id"])
+                    if not str(v.get("model") or "").strip():
+                        raise AppError("Model wajib dipilih", code="no_model")
+                    cur[k] = {"connection_id": v["connection_id"], "model": str(v["model"]).strip()}
+            elif k == "allow_online" and v is not None:
+                cur[k] = bool(v)
+            elif k == "escalate_after_failures" and v is not None:
+                cur[k] = max(1, min(int(v), 10))
+            elif k == "max_loaded_models" and v is not None:
+                cur[k] = max(1, min(int(v), 4))
+        self.save_settings({"agent_models": cur})
+        return self.public_agent_models()
+
+    def role_target(self, role: str) -> tuple[str, str] | None:
+        t = self.agent_models().get(role)
+        return (t["connection_id"], t["model"]) if t else None
+
+    def default_target(self) -> tuple[str, str] | None:
+        """Model aktif (atau yang terakhir dipilih di menu Model AI walau sedang dibongkar)."""
+        st = self.state
+        if st["status"] == "ready" and st["model"] and st["connection_id"]:
+            return st["connection_id"], st["model"]
+        conf = self.settings()
+        if conf.get("connection_id") and conf.get("model"):
+            try:
+                self._conn_row(conf["connection_id"])
+                return conf["connection_id"], conf["model"]
+            except NotFound:
+                return None
+        return None
+
+    def connection_info(self, cid: str) -> dict:
+        return self._public_conn(self._conn_row(cid))
+
+    async def _unload_key(self, key: tuple[str, str]) -> None:
+        try:
+            _, p = self.provider(key[0])
+            await p.unload(key[1])
+            log.info("Model %s dibongkar (memberi RAM ke model lain)", key[1])
+        except Exception as e:
+            log.warning("Gagal membongkar %s: %s", key[1], e)
+        self._agent_loaded.pop(key, None)
+
+    async def _make_room(self, key: tuple[str, str]) -> None:
+        """Bongkar model lokal yang paling lama tidak dipakai bila batas max_loaded_models tercapai."""
+        limit = int(self.agent_models().get("max_loaded_models") or 2)
+        st = self.state
+        active = (st["connection_id"], st["model"]) if st["status"] == "ready" and st["loaded_by_us"] else None
+        ours = [k for k in self._agent_loaded if k != key and k != active]
+        count = len(ours) + (1 if active and active != key else 0)
+        for k in sorted(ours, key=lambda k: self._agent_loaded[k]):
+            if count < limit:
+                return
+            await self._unload_key(k)
+            count -= 1
+        if count >= limit and active and active != key:
+            await self._unload_key(active)
+            st.update(status="idle", model=None, loaded_by_us=False, target=None,
+                      message="Dibongkar sementara untuk memberi RAM ke agent (muat otomatis saat dipakai lagi)")
+
+    def touch(self, cid: str, model: str) -> None:
+        now = time.time()
+        if (cid, model) in self._agent_loaded:
+            self._agent_loaded[(cid, model)] = now
+        if (self.state["connection_id"], self.state["model"]) == (cid, model):
+            self.state["last_activity"] = now
+
+    async def acquire(self, cid: str, model: str, on_status=None) -> tuple[dict, Provider]:
+        """Pastikan model siap dipakai agent/Uji Model (memuat di llama-server router bila perlu).
+
+        Berbeda dengan apply(): pilihan model chat di menu Model AI tidak diubah."""
+        row, prov = self.provider(cid)
+        key = (cid, model)
+        if not prov.supports_load:
+            self.touch(cid, model)
+            return row, prov
+        async with self._lock:
+            st = await prov.model_status(model)
+            if st is None:
+                raise AppError(f"Model {model} tidak ada di {row['name']}", code="no_model", status_code=502)
+            if st != "loaded":
+                await self._make_room(key)
+                if on_status:
+                    on_status(f"Memuat model {model} …")
+                if st != "loading":
+                    log.info("Memuat model %s untuk agent", model)
+                    await prov.load(model)
+                start = time.time()
+                while True:
+                    await asyncio.sleep(2)
+                    st = await prov.model_status(model)
+                    if st == "loaded":
+                        break
+                    if st == "failed":
+                        raise AppError(f"llama-server gagal memuat {model} (RAM kurang / berkas rusak?)",
+                                       code="load_failed", status_code=502)
+                    if time.time() - start > 300:
+                        raise AppError(f"Model {model} belum siap setelah 5 menit", code="load_timeout", status_code=502)
+                    if on_status:
+                        on_status(f"Memuat model {model} … {int(time.time() - start)} dtk")
+                conf = self.settings()
+                if (conf.get("connection_id"), conf.get("model")) == key and self.state["status"] != "loading":
+                    # model chat pilihan pengguna: tandai siap lagi
+                    self.state.update(status="ready", connection_id=cid, model=model, loaded_by_us=True,
+                                      message="", target=None, last_activity=time.time())
+                else:
+                    self._agent_loaded[key] = time.time()
+        self.touch(cid, model)
+        return row, prov
+
     # ---------- status, terapkan, bongkar ----------
     async def status(self, user: dict) -> dict:
         st = dict(self.state)
@@ -197,6 +357,7 @@ class AIService:
                     if st is None:
                         raise AppError(f"Model {model} tidak ada di {row['name']}", code="no_model")
                     if st != "loaded":
+                        await self._make_room((cid, model))
                         if st != "loading":
                             log.info("Memuat model %s di %s", model, row["base_url"])
                             await prov.load(model)
@@ -219,8 +380,10 @@ class AIService:
                     models = [m["id"] for m in await prov.list_models()]
                     if models and model not in models:
                         raise AppError(f"Model {model} tidak tersedia di {row['name']}", code="no_model")
+                # Model yang tadinya dimuat agent kini jadi model chat aktif (tetap "milik kita").
+                was_agent = self._agent_loaded.pop((cid, model), None) is not None
                 self.state.update(status="ready", connection_id=cid, model=model, message="", target=None,
-                                  loaded_by_us=loaded_by_us, last_activity=time.time())
+                                  loaded_by_us=loaded_by_us or was_agent, last_activity=time.time())
                 log.info("Model AI siap: %s (%s)", model, row["name"])
             except Exception as e:
                 msg = e.message if isinstance(e, AppError) else str(e)
@@ -257,6 +420,12 @@ class AIService:
                     log.info("Model %s idle %d menit, dibongkar otomatis", st["model"], minutes)
                     await self.unload()
                     self.state["message"] = f"Dibongkar otomatis setelah idle {minutes} menit"
+                if minutes > 0:
+                    for key, used in list(self._agent_loaded.items()):
+                        if time.time() - used > minutes * 60:
+                            async with self._lock:
+                                if key in self._agent_loaded and time.time() - self._agent_loaded[key] > minutes * 60:
+                                    await self._unload_key(key)
             except Exception as e:
                 log.warning("idle_loop: %s", e)
 
