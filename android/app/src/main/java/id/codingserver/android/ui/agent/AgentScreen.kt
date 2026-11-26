@@ -19,6 +19,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -157,6 +158,7 @@ private fun TaskList(vm: AppViewModel, c: ApiClient, projectId: String, projectN
         Column(Modifier.padding(pad).fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Proyek: $projectName", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+                IconButton(onClick = onOpenModels) { Icon(Icons.Default.Psychology, "Model AI Agent") }
                 IconButton(onClick = { reload++ }) { Icon(Icons.Default.Refresh, "Muat ulang") }
             }
             error?.let { ErrorCard(it) { reload++ } }
@@ -171,7 +173,7 @@ private fun TaskList(vm: AppViewModel, c: ApiClient, projectId: String, projectN
                             "Agen akan memeriksa proyek, membuat rencana, mengusulkan perubahan (perlu persetujuanmu), " +
                             "menjalankan build/test di sandbox, lalu memberi laporan.\n\nAgen berjalan di server: aplikasi " +
                             "boleh ditutup, notifikasi muncul saat selesai / butuh persetujuan.\n\nPastikan model sudah " +
-                            "diterapkan di menu Model AI (atau atur peran di Model Agent).")
+                            "diterapkan di menu Model AI (atau atur peran di Model AI → AI Agent).")
                 }
                 else -> LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(list.orEmpty(), key = { it.id }) { t -> TaskRow(t) { onOpen(t.id) } }

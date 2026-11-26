@@ -129,6 +129,17 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun requestRoute(route: String) { _openRoute.value = route }
     fun consumeRoute() { _openRoute.value = null }
 
+    // ---------- Model AI (pusat pengelolaan model) ----------
+    /** Bagian Model AI yang sedang dibuka (kunci AiModelTab); bertahan saat pindah ke AI Chat lalu kembali. */
+    private val _aiModelTab = MutableStateFlow("ringkasan")
+    val aiModelTab: StateFlow<String> = _aiModelTab.asStateFlow()
+    fun selectAiModelTab(key: String) { _aiModelTab.value = key }
+
+    /** Sub-bagian Konfigurasi AI: "profil" (Profil Model) atau "parameter" (Parameter Chat). */
+    private val _aiConfigSection = MutableStateFlow("profil")
+    val aiConfigSection: StateFlow<String> = _aiConfigSection.asStateFlow()
+    fun selectAiConfigSection(key: String) { _aiConfigSection.value = key }
+
     /** Nyalakan pemantau latar belakang bila masih ada task agent / Uji Model yang berjalan di server. */
     private fun resumeAgentMonitor(c: ApiClient) {
         viewModelScope.launch {

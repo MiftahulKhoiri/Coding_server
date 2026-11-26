@@ -42,8 +42,6 @@ import androidx.compose.material.icons.filled.Http
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Monitor
 import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material.icons.filled.Science
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
@@ -90,8 +88,7 @@ import id.codingserver.android.ui.EditorTab
 import id.codingserver.android.ui.agent.AgentScreen
 import id.codingserver.android.ui.ai.AiChatScreen
 import id.codingserver.android.ui.ai.AiModelScreen
-import id.codingserver.android.ui.ai.ModelBenchScreen
-import id.codingserver.android.ui.ai.ModelProfilesScreen
+import id.codingserver.android.ui.ai.AiModelTab
 import id.codingserver.android.ui.dashboard.DashboardScreen
 import id.codingserver.android.ui.database.DatabaseScreen
 import id.codingserver.android.ui.editor.EditorController
@@ -111,6 +108,9 @@ import id.codingserver.android.ui.theme.CodingServerTheme
 import id.codingserver.android.ui.theme.isAppDark
 import kotlinx.coroutines.launch
 
+/** Rute lama (notifikasi Uji Model, tautan internal) → bagian Model AI yang sesuai. */
+private val AI_ROUTE_ALIAS = mapOf("ai_bench" to AiModelTab.LAB, "ai_profiles" to AiModelTab.CONFIG)
+
 private data class Dest(val route: String, val label: String, val icon: ImageVector, val section: String)
 
 // Menu dikelompokkan per area kerja agar tetap ringkas di layar kecil.
@@ -121,11 +121,10 @@ private val DESTS = listOf(
     Dest("editor", "Code Editor", Icons.Default.Code, "WORKSPACE"),
     Dest("terminal", "Terminal", Icons.Default.Terminal, "DEVELOPMENT"),
     Dest("output", "Build Output", Icons.AutoMirrored.Filled.Article, "DEVELOPMENT"),
+    // Uji Model & Profil Model ada di dalam Model AI (Laboratorium & Konfigurasi), bukan menu terpisah.
     Dest("ai_chat", "AI Chat", Icons.Default.SmartToy, "AI DEVELOPMENT"),
-    Dest("agent", "Agent Tasks", Icons.Default.AutoFixHigh, "AI DEVELOPMENT"),
     Dest("ai_models", "Model AI", Icons.Default.Psychology, "AI DEVELOPMENT"),
-    Dest("ai_bench", "Uji Model", Icons.Default.Science, "AI DEVELOPMENT"),
-    Dest("ai_profiles", "Profil Model", Icons.Default.Tune, "AI DEVELOPMENT"),
+    Dest("agent", "AI Agent", Icons.Default.AutoFixHigh, "AI DEVELOPMENT"),
     Dest("git", "Git", Icons.Default.AccountTree, "PROJECT TOOLS"),
     Dest("database", "Database", Icons.Default.Storage, "PROJECT TOOLS"),
     Dest("http", "HTTP Client", Icons.Default.Http, "PROJECT TOOLS"),
@@ -226,8 +225,11 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
     }
     val openRoute by vm.openRoute.collectAsState()
     LaunchedEffect(openRoute, auth) {
-        val r = openRoute ?: return@LaunchedEffect
+        val requested = openRoute ?: return@LaunchedEffect
         if (auth == AuthState.LOGGED_IN) {
+            val alias = AI_ROUTE_ALIAS[requested]
+            if (alias != null) vm.selectAiModelTab(alias.key)
+            val r = if (alias != null) "ai_models" else requested
             if (r != route) nav.navigate(r) { launchSingleTop = true; popUpTo("dashboard") }
             vm.consumeRoute()
         }
@@ -338,6 +340,17 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
         vm.addOrFocusTab(EditorTab(p.id, e.path, null, language = e.language))
         nav.navigate("editor") { launchSingleTop = true }
     }
+    /**
+     * Pindah antar-layar AI (Chat ⇄ Model AI ⇄ Agent) tanpa menumpuk back stack: bila layar tujuan sudah ada
+     * di bawah, kembali ke sana (state-nya tetap); bila belum, buka di atas layar sekarang.
+     */
+    fun openAiRoute(target: String) {
+        if (!nav.popBackStack(target, inclusive = false)) nav.navigate(target) { launchSingleTop = true }
+    }
+    fun openAi(tab: AiModelTab) {
+        vm.selectAiModelTab(tab.key)
+        openAiRoute("ai_models")
+    }
     NavHost(nav, startDestination = "servers", modifier = modifier) {
         composable("servers") {
             ServersScreen(vm) {
@@ -366,18 +379,22 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
                          onAskAi = { nav.navigate("ai_chat") { launchSingleTop = true } })
         }
         composable("ai_chat") {
-            AiChatScreen(vm, editor, onOpenModels = { nav.navigate("ai_models") { launchSingleTop = true } },
+            AiChatScreen(vm, editor, onOpenModels = { openAi(AiModelTab.MODELS) },
                          onOpenEditor = { nav.navigate("editor") { launchSingleTop = true } })
         }
         composable("ai_models") {
-            AiModelScreen(vm, onOpenBench = { nav.navigate("ai_bench") { launchSingleTop = true } },
-                          onOpenProfiles = { nav.navigate("ai_profiles") { launchSingleTop = true } }) {
-                nav.navigate("ai_chat") { launchSingleTop = true }
+            AiModelScreen(vm, onOpenChat = { openAiRoute("ai_chat") }, onOpenAgentTasks = { openAiRoute("agent") })
+        }
+        // Rute lama tetap terdaftar (notifikasi/APK lama): diarahkan ke bagian yang sesuai di Model AI.
+        AI_ROUTE_ALIAS.forEach { (alias, tab) ->
+            composable(alias) {
+                LaunchedEffect(Unit) {
+                    vm.selectAiModelTab(tab.key)
+                    nav.navigate("ai_models") { popUpTo(alias) { inclusive = true }; launchSingleTop = true }
+                }
             }
         }
-        composable("ai_bench") { ModelBenchScreen(vm) { nav.navigate("ai_profiles") { launchSingleTop = true } } }
-        composable("ai_profiles") { ModelProfilesScreen(vm) { nav.navigate("ai_bench") { launchSingleTop = true } } }
-        composable("agent") { AgentScreen(vm, onOpenModels = { nav.navigate("ai_models") { launchSingleTop = true } }) }
+        composable("agent") { AgentScreen(vm, onOpenModels = { openAi(AiModelTab.AGENT) }) }
         composable("database") { DatabaseScreen(vm) }
         composable("git") { GitScreen(vm) }
         composable("http") { HttpScreen(vm) }

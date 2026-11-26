@@ -163,10 +163,11 @@ fun ModelProfilesScreen(vm: AppViewModel, onOpenBench: () -> Unit) {
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
-            Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            FlowRow(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.Center,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { reload++ }) { Text("Muat ulang") }
                 if (isAdmin) OutlinedButton(onClick = { importer.launch("*/*") }) { Text("📥 Impor") }
+                OutlinedButton(onClick = onOpenBench) { Text("🧪 Lab") }
                 InfoButton("Profil Model",
                     "Setiap model punya pengaturan sendiri: suhu (temperature), top_p/top_k, mode berpikir, max token, " +
                         "dan aturan prompt tambahan.\n\n" +
