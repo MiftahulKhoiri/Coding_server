@@ -72,7 +72,8 @@ private fun AgentModels.role(key: String): AgentRoleModel? = when (key) {
 
 /** Kartu "Model Agent": peran model untuk AI Coding Agent + eskalasi + tombol Uji Model. */
 @Composable
-fun AgentModelsCard(vm: AppViewModel, c: ApiClient, conns: List<AIConnection>, isAdmin: Boolean, onOpenBench: () -> Unit) {
+fun AgentModelsCard(vm: AppViewModel, c: ApiClient, conns: List<AIConnection>, isAdmin: Boolean, onOpenBench: () -> Unit,
+                    onOpenProfiles: () -> Unit = {}) {
     var cfg by remember { mutableStateOf<AgentModels?>(null) }
     var picking by remember { mutableStateOf<RoleInfo?>(null) }
     val scope = rememberCoroutineScope()
@@ -146,8 +147,9 @@ fun AgentModelsCard(vm: AppViewModel, c: ApiClient, conns: List<AIConnection>, i
                     save(JsonObject(mapOf("max_loaded_models" to JsonPrimitive(it))))
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(onClick = onOpenBench, modifier = Modifier.weight(1f)) { Text("🧪 Uji Model") }
+                OutlinedButton(onClick = onOpenProfiles, modifier = Modifier.weight(1f)) { Text("🎛 Profil Model") }
                 InfoButton("Uji Model", "Bandingkan model dengan kasus yang meniru kerja agent, lihat peringkat, lalu " +
                     "terapkan rekomendasi peran dengan satu ketukan.")
             }

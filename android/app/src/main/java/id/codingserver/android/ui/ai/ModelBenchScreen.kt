@@ -33,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -94,7 +95,7 @@ private fun runLabel(s: String) = when (s) {
 
 /** Uji Model: jalankan kasus uji agent yang sama ke beberapa model, bandingkan skor & kecepatan. */
 @Composable
-fun ModelBenchScreen(vm: AppViewModel) {
+fun ModelBenchScreen(vm: AppViewModel, onOpenProfiles: () -> Unit = {}) {
     val client by vm.client.collectAsState()
     val user by vm.user.collectAsState()
     val isAdmin = user?.permissions?.contains("admin") == true
@@ -189,15 +190,21 @@ fun ModelBenchScreen(vm: AppViewModel) {
         }
     }
 
-    if (showStart) StartDialog(c, onDismiss = { showStart = false }) { targets ->
+    if (showStart) StartDialog(c, onDismiss = { showStart = false }) { targets, mode ->
         showStart = false
         scope.launch {
-            apiCall { c.api.benchStart(BenchStart(targets)) }
-                .onSuccess { vm.toast("Uji ${targets.size} model dimulai di latar belakang"); reload++ }
+            apiCall { c.api.benchStart(BenchStart(targets, mode)) }
+                .onSuccess {
+                    vm.toast((if (mode == "kalibrasi") "Kalibrasi " else "Uji ") + "${targets.size} model dimulai di latar belakang")
+                    reload++
+                }
                 .onFailure { error = it.message }
         }
     }
-    detail?.let { id -> RunDetailDialog(c, id, isAdmin, onDismiss = { detail = null }, onChanged = { reload++ }) }
+    detail?.let { id ->
+        RunDetailDialog(c, id, isAdmin, onDismiss = { detail = null }, onChanged = { reload++ },
+                        onOpenProfiles = { detail = null; onOpenProfiles() }, onSaved = { vm.toast("Profil disimpan") })
+    }
 }
 
 @Composable
@@ -285,7 +292,8 @@ private fun RunRow(c: ApiClient, r: BenchRun, expanded: Boolean, onToggle: () ->
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (active) { CircularProgressIndicator(Modifier.heightIn(max = 18.dp).width(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
-                Text(r.model, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text((if (r.mode == "kalibrasi") "🎯 " else "") + r.model, Modifier.weight(1f),
+                     style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 val col = when (r.status) { "COMPLETED" -> OkGreen; "FAILED" -> ErrRed; "RUNNING" -> WarnAmber; else -> Color.Gray }
                 if (!active && r.summary != null) ScoreBadge(r.summary.score)
                 else Text(runLabel(r.status), color = col, style = MaterialTheme.typography.labelMedium)
@@ -316,7 +324,8 @@ private fun RunRow(c: ApiClient, r: BenchRun, expanded: Boolean, onToggle: () ->
 }
 
 @Composable
-private fun StartDialog(c: ApiClient, onDismiss: () -> Unit, onStart: (List<AgentModelTarget>) -> Unit) {
+private fun StartDialog(c: ApiClient, onDismiss: () -> Unit, onStart: (List<AgentModelTarget>, String) -> Unit) {
+    var mode by remember { mutableStateOf("kalibrasi") }
     var conns by remember { mutableStateOf<List<AIConnection>>(emptyList()) }
     val models = remember { mutableStateListOf<Pair<AIConnection, String>>() }
     val chosen = remember { mutableStateListOf<AgentModelTarget>() }
@@ -332,6 +341,15 @@ private fun StartDialog(c: ApiClient, onDismiss: () -> Unit, onStart: (List<Agen
         title = { Text("Pilih model untuk diuji") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(mode == "kalibrasi", { mode = "kalibrasi" }, label = { Text("🎯 Kalibrasi (3 varian)") })
+                    FilterChip(mode == "cepat", { mode = "cepat" }, label = { Text("Uji cepat") })
+                    InfoButton("Mode uji", "🎯 Kalibrasi: model diuji dengan 3 varian pengaturan (mis. berpikir ON, " +
+                        "berpikir OFF, suhu rendah). Varian terbaik menjadi preset ⭐ kualitas, varian tercepat yang skornya " +
+                        "hampir sama menjadi preset ⚡ cepat. Bila hasilnya bagus (skor ≥ 60, format JSON selalu benar) " +
+                        "profil disimpan otomatis ke server & GitHub; bila belum, kamu dapat saran penyesuaian. " +
+                        "Butuh waktu ±3× uji cepat.\n\nUji cepat: menguji profil yang berlaku sekarang (1 varian).")
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Centang model yang mau diuji", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
                     InfoButton("Cara kerja uji", "Model lokal diuji satu per satu (dimuat bergantian ke RAM Pi). Tiap model bisa " +
@@ -357,13 +375,14 @@ private fun StartDialog(c: ApiClient, onDismiss: () -> Unit, onStart: (List<Agen
                 }
             }
         },
-        confirmButton = { TextButton(enabled = chosen.isNotEmpty(), onClick = { onStart(chosen.toList()) }) { Text("Mulai (${chosen.size})") } },
+        confirmButton = { TextButton(enabled = chosen.isNotEmpty(), onClick = { onStart(chosen.toList(), mode) }) { Text("Mulai (${chosen.size})") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } },
     )
 }
 
 @Composable
-private fun RunDetailDialog(c: ApiClient, id: String, isAdmin: Boolean, onDismiss: () -> Unit, onChanged: () -> Unit) {
+private fun RunDetailDialog(c: ApiClient, id: String, isAdmin: Boolean, onDismiss: () -> Unit, onChanged: () -> Unit,
+                            onOpenProfiles: () -> Unit, onSaved: () -> Unit) {
     var run by remember(id) { mutableStateOf<BenchRun?>(null) }
     var open by remember(id) { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -389,6 +408,51 @@ private fun RunDetailDialog(c: ApiClient, id: String, isAdmin: Boolean, onDismis
                 }
                 if (r.current.isNotBlank()) Text(r.current, style = MaterialTheme.typography.bodySmall)
                 if (r.error.isNotBlank()) Text(r.error, color = ErrRed, style = MaterialTheme.typography.bodySmall)
+                // ---- kalibrasi: hasil per varian + keputusan profil ----
+                if (r.variants.size > 1) {
+                    HorizontalDivider()
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🎯 Varian kalibrasi", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        InfoButton("Varian kalibrasi", "⭐ = dipilih jadi preset kualitas (skor tertinggi).\n" +
+                            "⚡ = dipilih jadi preset cepat (paling cepat per kasus, skor paling banyak 5 poin di bawah terbaik).")
+                    }
+                    val pick = r.profile_decision?.pilihan.orEmpty()
+                    r.variants.forEach { v ->
+                        val badge = listOfNotNull(if (pick["kualitas"] == v.key) "⭐" else null,
+                                                  if (pick["cepat"] == v.key) "⚡" else null).joinToString("")
+                        Column {
+                            Text("$badge ${v.key} · ${v.label}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                            v.describe?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                            v.summary?.let { s ->
+                                Text("skor ${s.score.toInt()} · ${s.avg_seconds.toInt()} dtk/kasus · format ${s.format_ok}/${s.total}" +
+                                         (if (s.thinking_tokens > 0) " · ±${s.thinking_tokens} token berpikir" else ""),
+                                     color = scoreColor(s.score), style = MaterialTheme.typography.labelSmall)
+                            } ?: Text("${v.results.size}/6 kasus…", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    r.profile_decision?.let { d ->
+                        val saved = d.saved
+                        Card(colors = CardDefaults.cardColors(containerColor = (if (saved) OkGreen else WarnAmber).copy(alpha = 0.12f))) {
+                            Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(if (saved) "💾 Profil disimpan otomatis (server & GitHub)"
+                                     else "⚠ Perlu penyesuaian — profil belum disimpan",
+                                     fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                d.saran.forEach { Text("💡 $it", style = MaterialTheme.typography.labelSmall) }
+                                Row {
+                                    if (!saved && isAdmin) TextButton(onClick = {
+                                        scope.launch {
+                                            apiCall { c.api.benchSaveProfile(id) }.onSuccess {
+                                                onSaved(); apiCall { c.api.benchRun(id) }.onSuccess { run = it }
+                                            }
+                                        }
+                                    }) { Text("Simpan tetap") }
+                                    TextButton(onClick = onOpenProfiles) { Text("Buka Profil Model") }
+                                }
+                            }
+                        }
+                    }
+                    Text("Hasil per kasus di bawah = varian terbaik.", style = MaterialTheme.typography.labelSmall)
+                }
                 HorizontalDivider()
                 r.results.forEach { cr ->
                     val icon = when { cr.score >= 0.99 -> "✅"; cr.score >= 0.5 -> "🟡"; !cr.format_ok -> "🚫"; else -> "❌" }

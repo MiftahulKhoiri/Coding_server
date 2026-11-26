@@ -65,7 +65,7 @@ def build_services(settings: Settings, registry: EngineRegistry) -> Services:
         monitor=MonitorService(settings), backup=BackupService(settings), build=BuildService(settings),
         ai=AIService(settings, db, files), lsp=LspService(settings),
         login_limiter=RateLimiter(settings.rate_limit_login_per_minute, 60.0),
-        api_limiter=RateLimiter(600, 60.0),
+        api_limiter=RateLimiter(settings.rate_limit_api_per_minute, 60.0),
         agent=AgentService(settings, db, lambda: holder["svc"]),
         bench=ModelBench(settings, db, lambda: holder["svc"]),
     )

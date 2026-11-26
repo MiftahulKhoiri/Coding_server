@@ -113,10 +113,34 @@ def _find_block(lines: list[str], search: list[str], strip_indent: bool) -> int:
     return hits[0] if len(hits) == 1 else -2
 
 
+_LINE_NO = re.compile(r"^\s*\d+\| ?")
+
+
+def strip_line_numbers(search: str, replace: str) -> tuple[str, str]:
+    """Model kadang menyalin nomor baris dari hasil read_file ("    2|     return x"). Bila SEMUA baris
+    SEARCH bernomor, buang nomor itu dari SEARCH dan REPLACE."""
+    s_lines = [l for l in search.splitlines() if l.strip()]
+    if not s_lines or not all(_LINE_NO.match(l) for l in s_lines):
+        return search, replace
+    strip = lambda t: "\n".join(_LINE_NO.sub("", l, count=1) for l in t.split("\n"))  # noqa: E731
+    return strip(search), strip(replace)
+
+
+def _indent_continuation(prefix: str, replace: str) -> str:
+    """SEARCH ditemukan di tengah baris setelah indentasi (mis. hanya "return x"): baris lanjutan REPLACE
+    diberi indentasi yang sama, kecuali model sudah menulis indentasi lengkap untuk semua baris lanjutan."""
+    lines = replace.split("\n")
+    rest = [l for l in lines[1:] if l.strip()]
+    if not prefix or prefix.strip() or not rest or all(l.startswith(prefix) for l in rest):
+        return replace
+    return "\n".join([lines[0]] + [(prefix + l) if l.strip() else l for l in lines[1:]])
+
+
 def apply_replace(original: str, blocks: list[tuple[str, str]]) -> str:
-    """Terapkan SEARCH/REPLACE berurutan. Toleran terhadap spasi di akhir baris dan indentasi."""
+    """Terapkan SEARCH/REPLACE berurutan. Toleran terhadap spasi di akhir baris, indentasi, dan nomor baris."""
     text = original
     for idx, (search, replace) in enumerate(blocks, 1):
+        search, replace = strip_line_numbers(search, replace)
         if not search.strip():
             # SEARCH kosong = tambahkan di akhir file (pola umum untuk file baru/sisipan)
             text = text + ("" if not text or text.endswith("\n") else "\n") + replace
@@ -124,7 +148,9 @@ def apply_replace(original: str, blocks: list[tuple[str, str]]) -> str:
         if search in text:
             if text.count(search) > 1:
                 raise EditError(f"Blok #{idx}: teks SEARCH muncul lebih dari sekali, perlu konteks lebih unik")
-            text = text.replace(search, replace, 1)
+            at = text.index(search)
+            prefix = text[text.rfind("\n", 0, at) + 1:at]
+            text = text[:at] + _indent_continuation(prefix, replace) + text[at + len(search):]
             continue
         lines = text.splitlines(keepends=True)
         s_lines = search.splitlines()

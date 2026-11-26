@@ -6,7 +6,9 @@ from backend.core.exceptions import AppError, Forbidden
 from backend.core.permissions import intersect_for_ai
 from backend.dependencies import Services, current_user, project_dir, require, services, ws_user
 from backend.schemas.models import (AgentModelsIn, AIApply, AIChat, AIConnectionIn, AIConversationIn, AIDecision,
-                                    AIProposal, AISettingsIn, ModelBenchIn, OkResponse)
+                                    AIProposal, AISettingsIn, ModelBenchIn, ModelProfileImport, ModelProfileIn,
+                                    OkResponse)
+from backend.services.model_profiles import PURPOSES
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 ws_router = APIRouter(tags=["websocket"])
@@ -95,12 +97,67 @@ def bench_list(_: dict = Depends(require("read")), svc: Services = Depends(servi
 
 @router.post("/bench", status_code=201, summary="Mulai Uji Model (berjalan di latar belakang, bergiliran)")
 async def bench_start(body: ModelBenchIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
-    return {"runs": svc.bench.create(user, [t.model_dump() for t in body.targets])}
+    return {"runs": svc.bench.create(user, [t.model_dump() for t in body.targets], body.mode)}
 
 
 @router.get("/bench/{run_id}", summary="Detail Uji Model: hasil per kasus")
 def bench_get(run_id: str, _: dict = Depends(require("read")), svc: Services = Depends(services)):
     return svc.bench.get(run_id)
+
+
+@router.post("/bench/{run_id}/save-profile", summary="Simpan draf profil hasil kalibrasi walau belum memenuhi syarat")
+def bench_save_profile(run_id: str, _: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    return svc.bench.save_draft(run_id)
+
+
+# ---------- profil model ----------
+@router.get("/profiles", summary="Profil semua model (file JSON per model) + daftar kegunaan")
+async def profiles(_: dict = Depends(require("read")), svc: Services = Depends(services)):
+    models: list[str] = []
+    for c in svc.ai.connections():
+        if c["location"] == "local":
+            try:
+                models += [m["id"] for m in await svc.ai.list_models(c["id"])]
+            except AppError:
+                pass
+    return {"profiles": svc.ai.profiles.list(models),
+            "purposes": [{"key": k, "label": v} for k, v in PURPOSES.items()],
+            "dir": str(svc.settings.model_profiles_dir), "git": svc.settings.model_profiles_git}
+
+
+@router.get("/profiles/item", summary="Profil satu model (bawaan bila belum pernah disimpan)")
+def profile_get(model: str, _: dict = Depends(require("read")), svc: Services = Depends(services)):
+    return svc.ai.profiles.get(model)
+
+
+@router.put("/profiles/item", summary="Ubah profil manual (disimpan ke file + GitHub)")
+def profile_update(model: str, body: ModelProfileIn, user: dict = Depends(require("admin")),
+                   svc: Services = Depends(services)):
+    out = svc.ai.profiles.update(model, body.model_dump(exclude_unset=True))
+    svc.db.audit("model_profile_update", user=user, target=model)
+    return out
+
+
+@router.delete("/profiles/item", summary="Kembalikan profil ke bawaan (hapus file)")
+def profile_reset(model: str, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    out = svc.ai.profiles.delete(model)
+    svc.db.audit("model_profile_reset", user=user, target=model)
+    return out
+
+
+@router.post("/profiles/item/sync", summary="Sinkronkan file profil ke GitHub sekarang")
+async def profile_sync(model: str, _: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    if not svc.ai.profiles.stored(model):
+        raise AppError("Profil masih bawaan (belum ada file untuk disinkronkan)", code="no_profile_file")
+    await svc.ai.profiles.sync(model, f"profil model {model}: sinkron manual")
+    return svc.ai.profiles.get(model)
+
+
+@router.post("/profiles/import", summary="Impor file profil model (JSON hasil ekspor)")
+def profile_import(body: ModelProfileImport, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    out = svc.ai.profiles.import_profile(body.profile)
+    svc.db.audit("model_profile_import", user=user, target=out["model"])
+    return out
 
 
 @router.post("/bench/{run_id}/cancel")

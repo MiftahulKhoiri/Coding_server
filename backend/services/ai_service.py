@@ -29,6 +29,7 @@ from backend.database.db import Database
 from backend.services.ai_edits import EDIT_PROTOCOL, Edit, EditError, apply_replace, looks_truncated, parse_edits, unified_diff
 from backend.services.ai_risk import HIGH, classify_change
 from backend.services.ai_providers import PRESETS, Provider, make_provider, normalize_base
+from backend.services.model_profiles import ModelProfiles
 from backend.services.file_service import FileService
 from backend.services.secret_store import SecretStore
 
@@ -64,6 +65,7 @@ class AIService:
         self.files = files
         self.secrets = SecretStore(settings.secret_key)
         self._lock = asyncio.Lock()
+        self.profiles = ModelProfiles(settings, db)
         self.state: dict = {"status": "idle", "connection_id": None, "model": None, "message": "",
                             "loaded_by_us": False, "last_activity": 0.0, "target": None}
         # Model llama-server yang dimuat untuk agent / Uji Model (selain model chat aktif): (cid, model) -> terakhir dipakai
@@ -593,12 +595,20 @@ class AIService:
         self._add_message(conv_id, "user", content)
         self.db.execute("UPDATE ai_conversations SET connection_id=?, model=? WHERE id=?", (row["id"], model, conv_id))
         conf = self.settings()
-        yield {"type": "start", "model": model, "connection": row["name"], "conversation_id": conv_id}
+        # Profil model (preset "kualitas") menentukan sampling/berpikir/prompt tambahan; nonaktif = pengaturan chat.
+        temp, max_tok, extra = conf.get("temperature"), conf.get("max_tokens"), None
+        opts = self.profiles.request_options(row, model, "kualitas")
+        if opts:
+            temp, extra = opts["temperature"], opts["extra"]
+            max_tok = max(int(conf.get("max_tokens") or 0), int(opts["max_tokens"]))
+            messages = self.profiles.with_prompt_extra(messages, opts["prompt_extra"])
+        yield {"type": "start", "model": model, "connection": row["name"], "conversation_id": conv_id,
+               "profile": bool(opts)}
         answer, reasoning = [], []
         started = time.time()
         self.state["last_activity"] = time.time()
         try:
-            async for kind, text in prov.stream_chat(model, messages, conf.get("temperature"), conf.get("max_tokens")):
+            async for kind, text in prov.stream_chat(model, messages, temp, max_tok, extra):
                 (answer if kind == "delta" else reasoning).append(text)
                 self.state["last_activity"] = time.time()
                 yield {"type": kind, "text": text}
@@ -635,8 +645,15 @@ class AIService:
         if context:
             msgs.insert(1 if conf.get("system_prompt") else 0, {"role": "system", "content": "Konteks file proyek:\n\n" + context})
         out, reasoning = [], []
-        async for kind, text in prov.stream_chat(model, msgs, opts.get("temperature", conf.get("temperature")),
-                                                 opts.get("max_tokens") or conf.get("max_tokens")):
+        temp, max_tok, extra = opts.get("temperature", conf.get("temperature")), opts.get("max_tokens") or conf.get("max_tokens"), None
+        po = self.profiles.request_options(row, model, "kualitas")
+        if po:
+            extra = po["extra"]
+            if "temperature" not in opts:
+                temp = po["temperature"]
+            max_tok = max(int(max_tok or 0), int(po["max_tokens"]))
+            msgs = self.profiles.with_prompt_extra(msgs, po["prompt_extra"])
+        async for kind, text in prov.stream_chat(model, msgs, temp, max_tok, extra):
             (out if kind == "delta" else reasoning).append(text)
         self.state["last_activity"] = time.time()
         return {"content": "".join(out), "reasoning": "".join(reasoning), "model": model}

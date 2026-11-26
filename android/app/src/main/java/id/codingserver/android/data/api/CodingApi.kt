@@ -120,6 +120,13 @@ interface CodingApi {
     @POST("api/v1/ai/bench") suspend fun benchStart(@Body body: BenchStart): BenchRuns
     @GET("api/v1/ai/bench/{id}") suspend fun benchRun(@Path("id") id: String): BenchRun
     @POST("api/v1/ai/bench/{id}/cancel") suspend fun benchCancel(@Path("id") id: String): BenchRun
+    @POST("api/v1/ai/bench/{id}/save-profile") suspend fun benchSaveProfile(@Path("id") id: String): ModelProfile
+    @GET("api/v1/ai/profiles") suspend fun modelProfiles(): ModelProfiles
+    @GET("api/v1/ai/profiles/item") suspend fun modelProfile(@Query("model") model: String): ModelProfile
+    @PUT("api/v1/ai/profiles/item") suspend fun modelProfileUpdate(@Query("model") model: String, @Body body: ModelProfileUpdate): ModelProfile
+    @DELETE("api/v1/ai/profiles/item") suspend fun modelProfileReset(@Query("model") model: String): ModelProfile
+    @POST("api/v1/ai/profiles/item/sync") suspend fun modelProfileSync(@Query("model") model: String): ModelProfile
+    @POST("api/v1/ai/profiles/import") suspend fun modelProfileImport(@Body body: ModelProfileImport): ModelProfile
     @DELETE("api/v1/ai/bench/{id}") suspend fun benchDelete(@Path("id") id: String): OkResponse
     @GET("api/v1/ai/conversations") suspend fun aiConversations(): AIConversations
     @GET("api/v1/ai/conversations/{id}") suspend fun aiConversation(@Path("id") id: Int): AIConversationDetail

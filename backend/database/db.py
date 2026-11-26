@@ -24,6 +24,9 @@ MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     ],
     "model_bench_runs": [
         ("log", "TEXT NOT NULL DEFAULT '[]'"),  # log proses Uji Model (tahap, token, hasil sandbox)
+        ("mode", "TEXT NOT NULL DEFAULT 'cepat'"),  # cepat (profil saat ini) | kalibrasi (3 varian)
+        ("variants", "TEXT NOT NULL DEFAULT '[]'"),  # hasil per varian pengaturan
+        ("profile", "TEXT"),  # keputusan kalibrasi: disimpan otomatis / draf perlu penyesuaian
     ],
 }
 

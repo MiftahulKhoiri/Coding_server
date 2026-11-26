@@ -367,6 +367,32 @@ class AgentModelsIn(BaseModel):
 
 class ModelBenchIn(BaseModel):
     targets: list[AgentModelTarget] = Field(min_length=1, max_length=10)
+    mode: Literal["cepat", "kalibrasi"] = "cepat"
+
+
+class ModelPresetIn(BaseModel):
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    top_p: float | None = Field(default=None, ge=0, le=1)
+    top_k: int | None = Field(default=None, ge=0, le=500)
+    min_p: float | None = Field(default=None, ge=0, le=1)
+    presence_penalty: float | None = Field(default=None, ge=-2, le=2)
+    repeat_penalty: float | None = Field(default=None, ge=0.5, le=2)
+    thinking: bool | None = None
+    max_tokens: int = Field(default=2048, ge=64, le=32768)
+
+
+class ModelProfileIn(BaseModel):
+    """Ubah profil secara manual. Kolom yang tidak dikirim tidak diubah."""
+    active: bool | None = None
+    kegunaan: list[str] | None = None
+    catatan: str | None = Field(default=None, max_length=2000)
+    prompt_tambahan: str | None = Field(default=None, max_length=4000)
+    kualitas: ModelPresetIn | None = None
+    cepat: ModelPresetIn | None = None
+
+
+class ModelProfileImport(BaseModel):
+    profile: dict
 
 
 class AIConversationIn(BaseModel):

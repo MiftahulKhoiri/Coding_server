@@ -88,7 +88,12 @@ class Settings:
     agent_model_timeout: int = 1800  # detik per jawaban model (model besar di CPU Pi bisa lambat)
     agent_task_timeout: int = 21600  # detik per sesi berjalan (6 jam; task berjalan di latar belakang)
 
+    # Profil model (file JSON per model, ikut repo) + sinkron otomatis ke GitHub
+    model_profiles_dir: Path = field(default=Path())
+    model_profiles_git: bool = True
+
     rate_limit_login_per_minute: int = 10
+    rate_limit_api_per_minute: int = 600  # per token; tes menaikkannya karena polling cepat
     cors_origins: str = ""
 
     @property
@@ -150,18 +155,20 @@ def build_settings(env: dict[str, str] | None = None) -> Settings:
     s.cache_dir = ws / "cache"
     s.logs_dir = Path(g("logs_dir") or base / "logs").resolve()
     s.backups_dir = Path(g("backups_dir") or base / "backups").resolve()
+    s.model_profiles_dir = Path(g("model_profiles_dir") or base / "model_profiles").resolve()
 
     for name in (
         "access_token_minutes", "refresh_token_days", "max_concurrent_jobs", "max_queued_jobs",
         "run_timeout", "build_timeout", "memory_limit_mb", "min_free_memory_mb",
         "output_limit_bytes", "max_file_size_bytes", "terminal_idle_timeout",
         "max_terminal_sessions", "http_timeout", "backup_retention", "rate_limit_login_per_minute",
+        "rate_limit_api_per_minute",
         "agent_max_concurrent", "agent_max_steps", "agent_model_timeout", "agent_task_timeout",
     ):
         val = g(name)
         if val:
             setattr(s, name, int(val))
-    for name in ("sandbox_network", "terminal_network", "http_allow_private"):
+    for name in ("sandbox_network", "terminal_network", "http_allow_private", "model_profiles_git"):
         setattr(s, name, _bool(g(name), getattr(s, name)))
     for name in ("sandbox", "admin_username", "admin_password", "ai_base_url", "ai_model", "ai_api_key", "cors_origins"):
         val = g(name)

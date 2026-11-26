@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Monitor
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Science
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Storage
@@ -90,6 +91,7 @@ import id.codingserver.android.ui.agent.AgentScreen
 import id.codingserver.android.ui.ai.AiChatScreen
 import id.codingserver.android.ui.ai.AiModelScreen
 import id.codingserver.android.ui.ai.ModelBenchScreen
+import id.codingserver.android.ui.ai.ModelProfilesScreen
 import id.codingserver.android.ui.dashboard.DashboardScreen
 import id.codingserver.android.ui.database.DatabaseScreen
 import id.codingserver.android.ui.editor.EditorController
@@ -123,6 +125,7 @@ private val DESTS = listOf(
     Dest("agent", "Agent Tasks", Icons.Default.AutoFixHigh, "AI DEVELOPMENT"),
     Dest("ai_models", "Model AI", Icons.Default.Psychology, "AI DEVELOPMENT"),
     Dest("ai_bench", "Uji Model", Icons.Default.Science, "AI DEVELOPMENT"),
+    Dest("ai_profiles", "Profil Model", Icons.Default.Tune, "AI DEVELOPMENT"),
     Dest("git", "Git", Icons.Default.AccountTree, "PROJECT TOOLS"),
     Dest("database", "Database", Icons.Default.Storage, "PROJECT TOOLS"),
     Dest("http", "HTTP Client", Icons.Default.Http, "PROJECT TOOLS"),
@@ -367,11 +370,13 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
                          onOpenEditor = { nav.navigate("editor") { launchSingleTop = true } })
         }
         composable("ai_models") {
-            AiModelScreen(vm, onOpenBench = { nav.navigate("ai_bench") { launchSingleTop = true } }) {
+            AiModelScreen(vm, onOpenBench = { nav.navigate("ai_bench") { launchSingleTop = true } },
+                          onOpenProfiles = { nav.navigate("ai_profiles") { launchSingleTop = true } }) {
                 nav.navigate("ai_chat") { launchSingleTop = true }
             }
         }
-        composable("ai_bench") { ModelBenchScreen(vm) }
+        composable("ai_bench") { ModelBenchScreen(vm) { nav.navigate("ai_profiles") { launchSingleTop = true } } }
+        composable("ai_profiles") { ModelProfilesScreen(vm) { nav.navigate("ai_bench") { launchSingleTop = true } } }
         composable("agent") { AgentScreen(vm, onOpenModels = { nav.navigate("ai_models") { launchSingleTop = true } }) }
         composable("database") { DatabaseScreen(vm) }
         composable("git") { GitScreen(vm) }

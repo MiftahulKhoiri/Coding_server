@@ -59,10 +59,11 @@ ulangi verifikasi → perbarui status rencana → finish.
 Aturan:
 - Setiap balasan berisi TEPAT SATU objek JSON dalam blok ```json:
   {{"thought": "alasan singkat", "tool": "nama_tool", "args": {{...}}}}
-- Untuk write_file/edit_file, isi file boleh ditulis di blok kode TERPISAH tepat setelah blok json
-  (lebih aman daripada di-escape di JSON). Untuk edit_file pakai format:
+- Hanya SATU tool per balasan; jangan menulis beberapa blok JSON sekaligus.
+- Untuk write_file/edit_file, JANGAN taruh isi file di dalam JSON. Tulis isi file di blok kode TERPISAH
+  tepat setelah blok json (JSON hanya berisi path & reason). Untuk edit_file pakai format:
 <<<<<<< SEARCH
-teks lama persis
+teks lama persis (sertakan baris di sekitarnya agar unik, mis. nama fungsinya)
 =======
 teks baru
 >>>>>>> REPLACE
@@ -91,6 +92,53 @@ def system_prompt(ai_perms: set[str]) -> str:
     return SYSTEM_PROMPT.format(tools=tools_text(ai_perms))
 
 
+_STR_KEYS = ("thought", "path", "content", "search", "replace", "query", "id", "summary", "limitations",
+             "remaining", "reason", "stdin")
+_END_OF_VALUE = re.compile(r'"\s*(?:,\s*"[A-Za-z_]+"\s*:|})')
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f"}
+
+
+def _lenient_string(text: str, key: str) -> tuple[str, int] | None:
+    """Nilai string untuk key, toleran terhadap baris baru mentah & tanda kutip tak ter-escape di dalamnya.
+    Nilai dianggap berakhir pada tanda kutip yang diikuti ', "key":' atau '}'."""
+    m = re.search(r'"' + key + r'"\s*:\s*"', text)
+    if not m:
+        return None
+    i, n = m.end(), len(text)
+    out: list[str] = []
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n:
+            nx = text[i + 1]
+            if nx == "u" and re.match(r"[0-9a-fA-F]{4}", text[i + 2:i + 6]):
+                out.append(chr(int(text[i + 2:i + 6], 16)))
+                i += 6
+                continue
+            out.append(_ESCAPES.get(nx, "\\" + nx))
+            i += 2
+            continue
+        if ch == '"' and _END_OF_VALUE.match(text, i):
+            return "".join(out), i + 1
+        out.append(ch)
+        i += 1
+    return None
+
+
+def _lenient_call(text: str) -> tuple[dict, int] | None:
+    m = re.search(r'"tool"\s*:\s*"([A-Za-z_]+)"', text)
+    if not m:
+        return None
+    obj: dict = {"tool": m.group(1), "args": {}}
+    end = m.end()
+    for key in _STR_KEYS:
+        got = _lenient_string(text, key)
+        if got is not None:
+            (obj if key == "thought" else obj["args"])[key] = got[0]
+            end = max(end, got[1])
+    close = text.find("}", end)
+    return obj, (close + 1 if close >= 0 else end)
+
+
 def extract_call(text: str) -> tuple[dict, str | None]:
     """Ambil objek JSON pertama (utamakan blok ```json) + blok kode pertama SETELAH JSON."""
     candidates: list[tuple[int, int]] = []
@@ -115,6 +163,11 @@ def extract_call(text: str) -> tuple[dict, str | None]:
             if isinstance(o, dict) and "tool" in o:
                 obj, end = o, m.start() + n
                 break
+    if obj is None:
+        # JSON rusak (biasanya isi file di dalam string tanpa escape yang benar): coba baca secara toleran
+        lenient = _lenient_call(text)
+        if lenient is not None:
+            obj, end = lenient
     if obj is None or not isinstance(obj.get("tool"), str):
         raise ValueError("Balasan tidak berisi objek JSON dengan field \"tool\"")
     code = None
@@ -411,20 +464,30 @@ class AgentService:
                 return True
         return False
 
-    async def _ask_model(self, task_id: str, messages: list[dict], target: tuple[str, str]) -> tuple[str, str, dict]:
+    async def _ask_model(self, task_id: str, messages: list[dict], target: tuple[str, str],
+                         role: str = "executor") -> tuple[str, str, dict]:
         ai = self.svc.ai
         cid, model = target
         row, prov = await ai.acquire(cid, model, on_status=lambda m: self._update(task_id, current_op=m,
                                                                                  last_activity=_now()))
         conf = ai.settings()
         parts: list[str] = []
+        thinking = {"tokens": 0}
         started = time.time()
+        # Profil model: Perencana/Peninjau/Online memakai preset "kualitas", Pelaksana preset "cepat".
+        opts = ai.profiles.request_options(row, model, "cepat" if role == "executor" else "kualitas")
+        if opts:
+            temp, max_tok, extra = opts["temperature"], opts["max_tokens"], opts["extra"]
+            messages = ai.profiles.with_prompt_extra(messages, opts["prompt_extra"])
+        else:  # profil dimatikan: perilaku lama
+            temp, max_tok, extra = min(float(conf.get("temperature") or 0.2), 0.4), max(int(conf.get("max_tokens") or 2048), 2048), None
 
         async def collect() -> None:
-            async for kind, text in prov.stream_chat(model, messages, min(float(conf.get("temperature") or 0.2), 0.4),
-                                                     max(int(conf.get("max_tokens") or 2048), 2048)):
+            async for kind, text in prov.stream_chat(model, messages, temp, max_tok, extra):
                 if kind == "delta":
                     parts.append(text)
+                else:
+                    thinking["tokens"] += max(1, len(text) // 4)
                 ai.touch(cid, model)
 
         ai.hold(cid, model)  # cegah model dibongkar selama dipakai
@@ -438,7 +501,9 @@ class AgentService:
         tokens = int(st.get("completion_tokens") or max(1, len(text) // 4))
         stats = {"seconds": round(secs, 1), "tokens": tokens,
                  "tps": round(float(st.get("gen_tps") or tokens / max(secs, 0.01)), 2),
-                 "prompt_tokens": st.get("prompt_tokens"), "connection": row["name"], "location": row["location"]}
+                 "prompt_tokens": st.get("prompt_tokens"), "connection": row["name"], "location": row["location"],
+                 "thinking_tokens": thinking["tokens"], "profile": "cepat" if role == "executor" else "kualitas",
+                 "temperature": temp}
         return text, model, stats
 
     async def _run(self, task_id: str, user: dict) -> None:
@@ -516,7 +581,7 @@ class AgentService:
                              last_activity=_now())
                 self._event(task_id, "thinking", {"step": steps_used + 1, "role": role, "model": target[1]})
                 try:
-                    text, model, stats = await self._ask_model(task_id, self._compact(messages), target)
+                    text, model, stats = await self._ask_model(task_id, self._compact(messages), target, role)
                 except (AppError, asyncio.TimeoutError) as e:
                     msg = e.message if isinstance(e, AppError) else \
                         f"tidak menjawab dalam {self.s.agent_model_timeout} detik"

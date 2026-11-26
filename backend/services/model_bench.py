@@ -30,6 +30,7 @@ from backend.database.db import Database
 from backend.services import agent_tools
 from backend.services.agent_service import extract_call, system_prompt
 from backend.services.ai_edits import EditError, apply_replace, parse_edits
+from backend.services.model_profiles import describe
 
 log = get_logger("bench")
 
@@ -66,6 +67,13 @@ TEST_STATS = ("from stats import rata_rata, median\n\n\ndef test_isi():\n    ass
 
 T_CALC = "Fungsi add di calc.py memberi hasil salah (test_calc.py gagal). Perbaiki dan pastikan test lulus."
 T_STATS = "Test di proyek gagal. Cari penyebabnya di stats.py lalu perbaiki; rata_rata dari list kosong harus 0.0."
+MAIN = ("from calc import add, sub\n\n\ndef main():\n    a = float(input('a: '))\n    b = float(input('b: '))\n"
+        "    op = input('operasi (+ -): ')\n    if op == '+':\n        print(add(a, b))\n    elif op == '-':\n"
+        "        print(sub(a, b))\n    else:\n        print('operasi tidak dikenal')\n\n\nif __name__ == '__main__':\n"
+        "    main()\n")
+T_FEATURE = ("Tambahkan fitur perkalian dan pembagian:\n1. fungsi kali(a, b) dan bagi(a, b) di calc.py "
+             "(bagi dengan 0 harus memunculkan ValueError),\n2. operasi '*' dan '/' di menu main.py,\n"
+             "3. tes untuk keduanya di test_calc.py.\nPastikan semua tes lulus.")
 T_UTIL = ("Buat file teks_util.py berisi dua fungsi:\n"
           "- is_palindrome(s): True bila s palindrom; abaikan huruf besar/kecil, spasi, dan tanda baca.\n"
           "- word_count(s): jumlah kata (dipisah spasi/tab/baris baru apa pun); string kosong = 0.")
@@ -127,9 +135,13 @@ async def _check_plan(bench: "ModelBench", call: dict, code: str | None) -> tupl
         good = [s for s in steps or [] if isinstance(s, dict) and str(s.get("description", "")).strip()]
         if len(good) >= 2:
             return 1.0, f"rencana {len(good)} langkah"
-        return 0.4, "update_plan tanpa langkah yang valid"
+        if len(good) == 1:
+            return 0.7, "rencana hanya 1 langkah untuk tugas 3 bagian"
+        return 0.3, "update_plan tanpa langkah yang valid (steps harus daftar objek berisi description)"
+    if tool in ("read_file", "list_tests", "search", "list_dir"):
+        return 0.6, f"masih memeriksa ({tool}) sebelum merencanakan"
     if tool in ("edit_file", "write_file"):
-        return 0.5, "langsung mengedit tanpa rencana"
+        return 0.4, "langsung mengedit tugas multi-file tanpa rencana"
     if tool in agent_tools.TOOLS:
         return 0.3, f"memanggil {tool}, bukan menyusun rencana"
     return 0.1, f"tool tidak dikenal: {tool}"
@@ -175,10 +187,15 @@ CASES: list[Case] = [
          "Diberi tugas perbaikan bug: apakah model mengikuti format JSON dan memeriksa proyek dulu?",
          [{"role": "user", "content": task_msg("kalkulator", T_CALC)}], _check_first),
     Case("rencana", "Menyusun rencana", "perencanaan",
-         "Setelah membaca file, apakah model menyusun rencana (update_plan) yang masuk akal?",
-         [{"role": "user", "content": task_msg("kalkulator", T_CALC)},
+         "Tugas 3 bagian (calc.py, main.py, test_calc.py): setelah membaca file, apakah model menyusun rencana "
+         "(update_plan) bertahap sebelum mengedit?",
+         [{"role": "user", "content": task_msg("kalkulator", T_FEATURE)},
+          {"role": "assistant", "content": J("list_dir", "lihat isi proyek")},
+          {"role": "user", "content": "[hasil tool list_dir]\ncalc.py\nmain.py\ntest_calc.py"},
           {"role": "assistant", "content": J("read_file", "baca kode", path="calc.py")},
           {"role": "user", "content": numbered("calc.py", CALC)},
+          {"role": "assistant", "content": J("read_file", "baca menu", path="main.py")},
+          {"role": "user", "content": numbered("main.py", MAIN)},
           {"role": "assistant", "content": J("read_file", "baca test", path="test_calc.py")},
           {"role": "user", "content": numbered("test_calc.py", TEST_CALC)}], _check_plan),
     Case("perbaiki_bug", "Perbaiki bug (edit presisi)", "kode",
@@ -255,6 +272,8 @@ def summarize(results: list[dict]) -> dict:
         "avg_seconds": round(sum(r["seconds"] for r in results) / n, 1),
         "total_seconds": round(sum(r["seconds"] for r in results), 1),
         "tokens": toks,
+        "thinking_tokens": sum(r.get("thinking_tokens") or 0 for r in results),
+        "empty_answers": sum(1 for r in results if r.get("empty")),
         "verdict": verdict(score),
     }
 
@@ -293,14 +312,26 @@ class ModelBench:
         out = {k: row[k] for k in ("id", "connection_id", "model", "connection_name", "location", "status",
                                    "current", "error", "created_at", "started_at", "finished_at")}
         results = json.loads(row["results"] or "[]")
-        out["done_cases"] = len(results)
-        out["total_cases"] = len(CASES)
+        variants = json.loads(row.get("variants") or "[]")
+        out["mode"] = row.get("mode") or "cepat"
+        if variants:  # kalibrasi: progres dihitung dari semua varian
+            out["done_cases"] = sum(len(v.get("results") or []) for v in variants)
+            out["total_cases"] = len(CASES) * len(variants)
+        else:
+            out["done_cases"] = len(results)
+            out["total_cases"] = len(CASES)
         out["summary"] = json.loads(row["summary"]) if row.get("summary") else None
         live = self._live.get(row["id"])
         out["live"] = dict(live, elapsed=round(time.time() - live["started"], 1)) if live else None
+        prof = json.loads(row["profile"]) if row.get("profile") else None
+        out["profile_decision"] = ({k: prof[k] for k in ("saved", "status", "saran", "pilihan") if k in prof}
+                                   if prof else None)
+        out["variants"] = [{k: v.get(k) for k in ("key", "label", "params", "summary", "describe")} for v in variants]
         if detail:
             out["results"] = results
             out["log"] = json.loads(row.get("log") or "[]")
+            for o, v in zip(out["variants"], variants):
+                o["results"] = v.get("results") or []
         return out
 
     def _update(self, run_id: str, **f) -> None:
@@ -340,19 +371,23 @@ class ModelBench:
                                                    -((x["summary"] or {}).get("avg_tps") or 0)))
 
     def recommendation(self) -> dict:
-        """Perencana = skor tertinggi; Pelaksana = yang tercepat di antara yang skornya >= 60."""
+        """Perencana = skor tertinggi; Pelaksana = paling cepat PER KASUS (bukan tok/dtk: model yang banyak
+        "berpikir" bisa tinggi tok/dtk-nya tapi lama selesainya) di antara yang skornya >= 60."""
         board = [b for b in self.leaderboard() if b["location"] == "local" and b["summary"]]
         if not board:
             return {}
         planner = board[0]
         execs = [b for b in board if b["summary"]["score"] >= 60] or board[:1]
-        executor = max(execs, key=lambda b: (b["summary"].get("avg_tps") or 0, b["summary"]["score"]))
+        executor = min(execs, key=lambda b: (b["summary"].get("avg_seconds") or 1e9, -b["summary"]["score"]))
         pick = lambda b: {"connection_id": b["connection_id"], "model": b["model"],  # noqa: E731
-                          "score": b["summary"]["score"], "avg_tps": b["summary"].get("avg_tps")}
+                          "score": b["summary"]["score"], "avg_tps": b["summary"].get("avg_tps"),
+                          "avg_seconds": b["summary"].get("avg_seconds")}
         return {"planner": pick(planner), "executor": pick(executor), "reviewer": pick(planner)}
 
     # ---------- menjalankan ----------
-    def create(self, user: dict, targets: list[dict]) -> list[dict]:
+    def create(self, user: dict, targets: list[dict], mode: str = "cepat") -> list[dict]:
+        if mode not in ("cepat", "kalibrasi"):
+            raise AppError("Mode uji harus cepat atau kalibrasi", code="bad_mode")
         if not targets:
             raise AppError("Pilih minimal satu model untuk diuji", code="no_model")
         out = []
@@ -363,10 +398,10 @@ class ModelBench:
                 raise AppError("Model wajib dipilih", code="no_model")
             rid = uuid.uuid4().hex[:12]
             self.db.execute("INSERT INTO model_bench_runs(id, user_id, connection_id, model, connection_name, location, "
-                            "status, current, created_at) VALUES(?,?,?,?,?,?,?,?,?)",
+                            "status, current, created_at, mode) VALUES(?,?,?,?,?,?,?,?,?,?)",
                             (rid, user["id"], conn["id"], model, conn["name"], conn["location"], "PENDING",
-                             "Menunggu giliran", time.time()))
-            self.db.audit("model_bench_start", user=user, target=rid, detail={"model": model})
+                             "Menunggu giliran", time.time(), mode))
+            self.db.audit("model_bench_start", user=user, target=rid, detail={"model": model, "mode": mode})
             t_ = asyncio.get_running_loop().create_task(self._run(rid))
             self._tasks[rid] = t_
             t_.add_done_callback(lambda _t, rid=rid: self._tasks.pop(rid, None))
@@ -386,6 +421,19 @@ class ModelBench:
             self._update(run_id, status="CANCELLED", current="", finished_at=time.time())
         return self.get(run_id)
 
+    def save_draft(self, run_id: str) -> dict:
+        """Simpan draf profil hasil kalibrasi walau belum memenuhi syarat simpan otomatis (keputusan pengguna)."""
+        row = self._row(run_id)
+        prof = json.loads(row["profile"]) if row.get("profile") else None
+        if not prof or not prof.get("draft"):
+            raise AppError("Uji ini tidak punya draf profil (jalankan mode Kalibrasi)", code="no_draft")
+        saved = self.svc.ai.profiles.save(prof["draft"], "kalibrasi")
+        prof["saved"] = True
+        prof["status"] = "disimpan_manual"
+        self._update(run_id, profile=json.dumps(prof, ensure_ascii=False, default=str))
+        self._log(run_id, "💾 Draf profil disimpan atas permintaan pengguna", "done")
+        return saved
+
     def delete(self, run_id: str) -> None:
         row = self._row(run_id)
         if row["status"] in ("PENDING", "RUNNING"):
@@ -399,37 +447,74 @@ class ModelBench:
     async def _run(self, run_id: str) -> None:
         row = self._row(run_id)
         cid, model = row["connection_id"], row["model"]
+        profiles = self.svc.ai.profiles
         try:
             self._update(run_id, current="Menunggu agent / uji lain selesai…")
             self._log(run_id, "⏳ Menunggu giliran (task agent / uji lain dipakai bergantian)", "wait")
             async with self.svc.agent._sem:  # bergiliran dengan task agent (CPU & RAM Pi terbatas)
                 self._update(run_id, status="RUNNING", started_at=time.time(), current="Menyiapkan model…")
-                self._log(run_id, f"🚀 Mulai uji {model} ({row['connection_name']})", "start")
+                calib = (row.get("mode") or "cepat") == "kalibrasi"
+                prof = profiles.get(model)
+                if calib:
+                    variants = profiles.variants(model)
+                else:  # uji cepat: pakai preset "kualitas" profil yang berlaku sekarang
+                    variants = [{"key": "P", "label": f"Profil saat ini ({prof['source']})", "params": prof["preset"]["kualitas"]}]
+                for v in variants:
+                    v["describe"] = describe(v["params"])
+                    v["results"] = []
+                self._update(run_id, variants=json.dumps(variants, ensure_ascii=False))
+                self._log(run_id, f"🚀 Mulai {'KALIBRASI 3 varian' if calib else 'uji cepat'} {model} "
+                                  f"({row['connection_name']})", "start")
                 t0 = time.time()
                 self._live[run_id] = {"phase": "loading", "started": t0}
-                _, prov = await self.svc.ai.acquire(cid, model, on_status=lambda m: self._status(run_id, m))
+                conn_row, prov = await self.svc.ai.acquire(cid, model, on_status=lambda m: self._status(run_id, m))
                 self._log(run_id, f"✅ Model siap ({round(time.time() - t0)} dtk)", "load")
-                results: list[dict] = []
                 self.svc.ai.hold(cid, model)  # model tidak boleh dibongkar selama uji berjalan
                 try:
-                    for i, case in enumerate(CASES, 1):
-                        self._update(run_id, current=f"Kasus {i}/{len(CASES)}: {case.title}")
-                        self._log(run_id, f"▶ Kasus {i}/{len(CASES)}: {case.title} — {case.description}", "case")
-                        res = await self._run_case(run_id, case, prov, cid, model)
-                        results.append(res)
-                        self._update(run_id, results=json.dumps(results, ensure_ascii=False))
-                        icon = "✅" if res["score"] >= 0.99 else "🟡" if res["score"] >= 0.5 else "❌"
-                        self._log(run_id, f"{icon} Skor kasus {int(res['score'] * 100)}: {res['note']}", "score")
-                        if res["note"].startswith("error penyedia") and i < len(CASES):
-                            # server model mati/terputus: hentikan, jangan beri skor 0 palsu ke kasus sisanya
-                            raise AppError(f"Uji dihentikan: {res['note']}", code="ai_error")
+                    for vi, v in enumerate(variants, 1):
+                        opts = profiles.options_from(conn_row, v["params"], prof.get("thinking_supported"),
+                                                     prof.get("prompt_tambahan") or "")
+                        if len(variants) > 1:
+                            self._log(run_id, f"🔀 Varian {v['key']} ({vi}/{len(variants)}): {v['label']} — {v['describe']}",
+                                      "variant")
+                        for i, case in enumerate(CASES, 1):
+                            tag = f"Varian {v['key']} · " if len(variants) > 1 else ""
+                            self._update(run_id, current=f"{tag}Kasus {i}/{len(CASES)}: {case.title}")
+                            self._log(run_id, f"▶ {tag}Kasus {i}/{len(CASES)}: {case.title} — {case.description}", "case")
+                            res = await self._run_case(run_id, case, prov, cid, model, opts)
+                            v["results"].append(res)
+                            self._update(run_id, variants=json.dumps(variants, ensure_ascii=False))
+                            icon = "✅" if res["score"] >= 0.99 else "🟡" if res["score"] >= 0.5 else "❌"
+                            self._log(run_id, f"{icon} Skor kasus {int(res['score'] * 100)}: {res['note']}", "score")
+                            if res["note"].startswith("error penyedia"):
+                                # server model mati/terputus: hentikan, jangan beri skor 0 palsu ke kasus sisanya
+                                raise AppError(f"Uji dihentikan: {res['note']}", code="ai_error")
+                        v["summary"] = summarize(v["results"])
+                        self._update(run_id, variants=json.dumps(variants, ensure_ascii=False))
+                        if len(variants) > 1:
+                            s_ = v["summary"]
+                            self._log(run_id, f"📊 Varian {v['key']}: skor {s_['score']}, {int(s_['avg_seconds'])} dtk/kasus, "
+                                              f"format {s_['format_ok']}/{s_['total']}", "score")
                 finally:
                     self.svc.ai.release(cid, model)
-                summary = summarize(results)
+                best = max(variants, key=lambda v: (v["summary"]["score"], -v["summary"]["avg_seconds"]))
+                summary = dict(best["summary"], variant=best["key"])
+                decision = None
+                if calib:
+                    decision = profiles.decide(model, variants, run_id)
+                    if decision["saved"]:
+                        self._log(run_id, f"💾 Profil disimpan otomatis: kualitas = varian {decision['pilihan']['kualitas']}, "
+                                          f"cepat = varian {decision['pilihan']['cepat']}", "done")
+                    else:
+                        self._log(run_id, "⚠ Hasil belum cukup bagus: profil TIDAK disimpan otomatis (perlu penyesuaian)",
+                                  "error")
+                    for tip in decision["saran"]:
+                        self._log(run_id, f"💡 Saran: {tip}", "info")
                 self._update(run_id, status="COMPLETED", summary=json.dumps(summary), current="",
-                             finished_at=time.time())
+                             results=json.dumps(best["results"], ensure_ascii=False), finished_at=time.time(),
+                             profile=json.dumps(decision, ensure_ascii=False, default=str) if decision else None)
                 self._log(run_id, f"🏁 Selesai: skor {summary['score']} — {summary['verdict']}", "done")
-                log.info("Uji model %s selesai: skor %s", model, summary["score"])
+                log.info("Uji model %s selesai (%s): skor %s", model, row.get("mode"), summary["score"])
         except asyncio.CancelledError:
             self._update(run_id, status="CANCELLED", current="", finished_at=time.time())
             self._log(run_id, "⏹ Uji dibatalkan", "error")
@@ -442,8 +527,10 @@ class ModelBench:
         finally:
             self._live.pop(run_id, None)
 
-    async def _run_case(self, run_id: str, case: Case, prov, cid: str, model: str) -> dict:
-        messages = [{"role": "system", "content": system_prompt(ALL_PERMS)}, *case.messages]
+    async def _run_case(self, run_id: str, case: Case, prov, cid: str, model: str, opts: dict | None = None) -> dict:
+        opts = opts or {"temperature": 0.2, "max_tokens": 2048, "extra": None, "prompt_extra": ""}
+        messages = self.svc.ai.profiles.with_prompt_extra(
+            [{"role": "system", "content": system_prompt(ALL_PERMS)}, *case.messages], opts.get("prompt_extra") or "")
         approx_prompt = sum(len(m["content"]) for m in messages) // 4
         parts: list[str] = []
         started = time.time()
@@ -454,7 +541,7 @@ class ModelBench:
                           f"(di CPU Pi ini bagian paling lama)", "prompt")
 
         async def collect() -> None:
-            async for kind, text in prov.stream_chat(model, messages, 0.2, 2048):
+            async for kind, text in prov.stream_chat(model, messages, opts["temperature"], opts["max_tokens"], opts.get("extra")):
                 now = time.time()
                 if live["first_token_s"] is None:
                     live["first_token_s"] = round(now - started, 1)
@@ -477,7 +564,8 @@ class ModelBench:
                 self.svc.ai.touch(cid, model)
 
         res = {"id": case.id, "title": case.title, "category": case.category, "format_ok": False, "score": 0.0,
-               "note": "", "tool": None, "seconds": 0.0, "tokens": 0, "tps": None, "prompt_tokens": None, "output": ""}
+               "note": "", "tool": None, "seconds": 0.0, "tokens": 0, "tps": None, "prompt_tokens": None, "output": "",
+               "thinking_tokens": 0, "empty": False}
         try:
             await asyncio.wait_for(collect(), self.s.agent_model_timeout)
         except asyncio.TimeoutError:
@@ -493,7 +581,8 @@ class ModelBench:
         st = dict(prov.last_stats)
         tokens = int(st.get("completion_tokens") or max(1, len(text) // 4))
         res.update(seconds=round(secs, 1), tokens=tokens, output=text[:4000], prompt_tokens=st.get("prompt_tokens"),
-                   tps=round(float(st.get("gen_tps") or tokens / max(secs, 0.01)), 2))
+                   tps=round(float(st.get("gen_tps") or tokens / max(secs, 0.01)), 2),
+                   thinking_tokens=live["reasoning_tokens"], empty=not text.strip())
         self._log(run_id, f"📝 Jawaban selesai: {tokens} token, {res['tps']} tok/dtk, total {res['seconds']} dtk"
                           + (f" (prompt {st['prompt_tokens']} token)" if st.get("prompt_tokens") else ""), "answer")
         if not text.strip() and live["reasoning_tokens"]:

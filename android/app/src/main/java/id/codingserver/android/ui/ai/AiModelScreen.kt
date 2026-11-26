@@ -70,7 +70,7 @@ import kotlinx.coroutines.launch
 
 /** Pengaturan Model AI: pilih Lokal / Online -> koneksi -> model -> Terapkan (seperti ai_asisten). */
 @Composable
-fun AiModelScreen(vm: AppViewModel, onOpenBench: () -> Unit = {}, onOpenChat: () -> Unit) {
+fun AiModelScreen(vm: AppViewModel, onOpenBench: () -> Unit = {}, onOpenProfiles: () -> Unit = {}, onOpenChat: () -> Unit) {
     val client by vm.client.collectAsState()
     val user by vm.user.collectAsState()
     val isAdmin = user?.permissions?.contains("admin") == true
@@ -234,7 +234,7 @@ fun AiModelScreen(vm: AppViewModel, onOpenBench: () -> Unit = {}, onOpenChat: ()
         }
 
         // ---- 4. model per peran agent + uji model ----
-        AgentModelsCard(vm, c, conns, isAdmin, onOpenBench)
+        AgentModelsCard(vm, c, conns, isAdmin, onOpenBench, onOpenProfiles)
 
         // ---- 5. parameter ----
         status?.let { st -> if (isAdmin) ParamsCard(st.settings) { s ->
@@ -287,7 +287,8 @@ private fun ParamsCard(initial: AISettings, onSave: (AISettings) -> Unit) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             TitleWithInfo("5. Parameter chat", "System prompt: instruksi dasar untuk AI Chat.\nTemperature: makin tinggi makin " +
                 "kreatif, makin rendah makin konsisten (agent selalu memakai ≤ 0,4).\nMax token: panjang jawaban maksimum.\n" +
-                "Riwayat pesan: jumlah pesan lama yang ikut dikirim.\nBongkar otomatis: model lokal dilepas dari RAM bila " +
+                "Riwayat pesan: jumlah pesan lama yang ikut dikirim.\n\nCatatan: bila model punya Profil Model aktif, suhu & " +
+                "pengaturan sampling diambil dari profil (preset kualitas); suhu di sini dipakai bila profil dinonaktifkan.\nBongkar otomatis: model lokal dilepas dari RAM bila " +
                 "tidak dipakai sekian menit (0 = tidak pernah).", style = MaterialTheme.typography.titleSmall)
             OutlinedTextField(prompt, { prompt = it }, label = { Text("System prompt") }, modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp))
             Text("Temperature: ${"%.2f".format(temp)}")

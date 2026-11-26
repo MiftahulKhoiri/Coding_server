@@ -223,12 +223,13 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class BenchSummary(
     val score: Double = 0.0, val passed: Int = 0, val total: Int = 0, val format_ok: Int = 0,
     val avg_tps: Double? = null, val avg_seconds: Double = 0.0, val total_seconds: Double = 0.0, val tokens: Int = 0,
-    val verdict: String = "",
+    val verdict: String = "", val thinking_tokens: Int = 0, val empty_answers: Int = 0, val variant: String? = null,
 )
 @Serializable data class BenchCaseResult(
     val id: String, val title: String = "", val category: String = "", val format_ok: Boolean = false,
     val score: Double = 0.0, val note: String = "", val tool: String? = null, val seconds: Double = 0.0,
     val tokens: Int = 0, val tps: Double? = null, val prompt_tokens: Int? = null, val output: String = "",
+    val thinking_tokens: Int = 0, val empty: Boolean = false,
 )
 @Serializable data class BenchRun(
     val id: String, val connection_id: String = "", val model: String = "", val connection_name: String = "",
@@ -237,7 +238,52 @@ import kotlinx.serialization.json.JsonElement
     val done_cases: Int = 0, val total_cases: Int = 0, val summary: BenchSummary? = null,
     val results: List<BenchCaseResult> = emptyList(),
     val live: BenchLive? = null, val log: List<BenchLogEntry> = emptyList(),
+    val mode: String = "cepat", val variants: List<BenchVariant> = emptyList(),
+    val profile_decision: ProfileDecision? = null,
 )
+@Serializable data class BenchVariant(
+    val key: String = "", val label: String = "", val params: ModelPreset = ModelPreset(), val describe: String? = null,
+    val summary: BenchSummary? = null, val results: List<BenchCaseResult> = emptyList(),
+)
+@Serializable data class ProfileDecision(
+    val saved: Boolean = false, val status: String = "", val saran: List<String> = emptyList(),
+    val pilihan: Map<String, String> = emptyMap(),
+)
+
+// ---------- Profil model ----------
+@Serializable data class ModelPreset(
+    val temperature: Double? = null, val top_p: Double? = null, val top_k: Int? = null, val min_p: Double? = null,
+    val presence_penalty: Double? = null, val repeat_penalty: Double? = null, val thinking: Boolean? = null,
+    val max_tokens: Int = 2048,
+)
+@Serializable data class ModelPresets(val kualitas: ModelPreset = ModelPreset(), val cepat: ModelPreset = ModelPreset())
+@Serializable data class CalibVariant(
+    val key: String = "", val label: String = "", val score: Double? = null, val avg_seconds: Double? = null,
+    val format_ok: Int? = null, val total: Int? = null, val passed: Int? = null, val avg_tps: Double? = null,
+    val thinking_tokens: Int? = null,
+)
+@Serializable data class Calibration(
+    val tanggal: Double = 0.0, val run_id: String? = null, val pilihan: Map<String, String> = emptyMap(),
+    val varian: List<CalibVariant> = emptyList(), val saran: List<String> = emptyList(),
+)
+@Serializable data class ProfileSync(val status: String = "", val message: String = "", val at: Double = 0.0)
+@Serializable data class ModelProfile(
+    val model: String, val family: String = "", val thinking_supported: Boolean? = null, val source: String = "bawaan",
+    val status: String = "ok", val active: Boolean = true, val kegunaan: List<String> = emptyList(),
+    val catatan: String = "", val prompt_tambahan: String = "", val preset: ModelPresets = ModelPresets(),
+    val kalibrasi: Calibration? = null, val updated_at: Double? = null, val sync: ProfileSync? = null,
+    val file: String = "",
+)
+@Serializable data class ProfilePurpose(val key: String, val label: String)
+@Serializable data class ModelProfiles(
+    val profiles: List<ModelProfile> = emptyList(), val purposes: List<ProfilePurpose> = emptyList(),
+    val dir: String = "", val git: Boolean = true,
+)
+@Serializable data class ModelProfileUpdate(
+    val active: Boolean? = null, val kegunaan: List<String>? = null, val catatan: String? = null,
+    val prompt_tambahan: String? = null, val kualitas: ModelPreset? = null, val cepat: ModelPreset? = null,
+)
+@Serializable data class ModelProfileImport(val profile: kotlinx.serialization.json.JsonObject)
 /** Keadaan langsung uji yang sedang berjalan. phase: loading|prompt|thinking|writing|checking */
 @Serializable data class BenchLive(
     val phase: String = "", val case: String? = null, val elapsed: Double = 0.0, val tokens: Int = 0,
@@ -252,7 +298,7 @@ import kotlinx.serialization.json.JsonElement
     val runs: List<BenchRun> = emptyList(), val leaderboard: List<BenchRun> = emptyList(),
     val recommendation: BenchRecommendation = BenchRecommendation(), val cases: List<BenchCase> = emptyList(),
 )
-@Serializable data class BenchStart(val targets: List<AgentModelTarget>)
+@Serializable data class BenchStart(val targets: List<AgentModelTarget>, val mode: String = "cepat")
 @Serializable data class BenchRuns(val runs: List<BenchRun> = emptyList())
 
 @Serializable data class AISelected(val connection_id: String? = null, val model: String? = null)

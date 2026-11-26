@@ -11,6 +11,12 @@ os.environ.setdefault("CS_BACKUPS_DIR", str(_TMP / "backups"))
 os.environ.setdefault("CS_ADMIN_PASSWORD", "admin-pass-123")
 os.environ.setdefault("CS_RUN_TIMEOUT", "20")
 os.environ.setdefault("CS_MIN_FREE_MEMORY_MB", "64")
+# Profil model uji di folder sementara, tanpa commit/push ke GitHub.
+os.environ.setdefault("CS_MODEL_PROFILES_DIR", str(_TMP / "model_profiles"))
+os.environ.setdefault("CS_MODEL_PROFILES_GIT", "0")
+# Tes melakukan polling status berkali-kali per detik (agent, Uji Model): batas 600/menit bawaan bisa
+# terlampaui di mesin yang lebih lambat/cepat (mis. CI) sehingga tes-tes berikutnya kena 429.
+os.environ.setdefault("CS_RATE_LIMIT_API_PER_MINUTE", "100000")
 
 from fastapi.testclient import TestClient  # noqa: E402
 

@@ -11,14 +11,17 @@ from backend.services.model_bench import CASES, J
 # Antrean balasan per nama model; SEEN mencatat (model, pesan) setiap panggilan chat.
 REPLIES: dict[str, list[str]] = {}
 SEEN: list[tuple[str, list[dict]]] = []
+BODIES: list[dict] = []
 DEFAULT = '```json\n{"tool": "finish", "args": {"summary": "skrip habis"}}\n```'
 
 
 async def _handler(request: httpx.Request) -> httpx.Response:
     if request.url.path == "/v1/models":
-        return httpx.Response(200, json={"data": [{"id": m} for m in ("kecil", "besar", "pintar", "bodoh")]})
+        return httpx.Response(200, json={"data": [{"id": m} for m in ("kecil", "besar", "pintar", "bodoh",
+                                                                       "Qwen3.5-uji", "Llama-uji")]})
     body = json.loads(request.content)
     SEEN.append((body["model"], body["messages"]))
+    BODIES.append(body)
     q = REPLIES.get(body["model"]) or []
     text = q.pop(0) if q else DEFAULT
     chunks = [{"choices": [{"delta": {"content": text}}]},
@@ -33,6 +36,7 @@ def fake(monkeypatch):
                         lambda timeout=30.0: httpx.AsyncClient(transport=httpx.MockTransport(_handler), timeout=timeout))
     REPLIES.clear()
     SEEN.clear()
+    BODIES.clear()
 
 
 @pytest.fixture()
@@ -69,7 +73,7 @@ def run_task(client, auth, project, desc="tugas"):
         if t["status"] in ("COMPLETED", "FAILED", "WAITING_APPROVAL"):
             ev = client.get(f"/api/v1/agent/tasks/{tid}/events", headers=auth).json()["events"]
             return t, ev
-        time.sleep(0.1)
+        time.sleep(0.25)
     raise AssertionError("task tidak selesai")
 
 
@@ -163,7 +167,7 @@ def wait_bench(client, auth, rid):
         r = client.get(f"/api/v1/ai/bench/{rid}", headers=auth).json()
         if r["status"] not in ("PENDING", "RUNNING"):
             return r
-        time.sleep(0.1)
+        time.sleep(0.25)
     raise AssertionError("uji model tidak selesai")
 
 
@@ -258,3 +262,133 @@ def test_unload_refused_while_model_in_use(client, auth, conn):
     finally:
         ai.release(conn, "kecil")
     assert client.post("/api/v1/ai/unload", headers=auth).status_code == 200
+
+
+
+# ---------------- profil model & kalibrasi ----------------
+def test_profile_defaults_and_options(client):
+    from backend.services.model_profiles import family_of
+
+    prof = client.app.state.services.ai.profiles
+    q = prof.default("Qwen3.5-9B-Q4_K_M")
+    assert q["family"] == "qwen3.5" and q["thinking_supported"] is True
+    assert q["preset"]["kualitas"]["thinking"] is True and q["preset"]["kualitas"]["temperature"] == 0.6
+    assert q["preset"]["cepat"]["thinking"] is False and q["preset"]["cepat"]["top_p"] == 0.8
+    assert family_of("Qwen3_1.7B.Q4_K_M")["family"] == "qwen3"
+    assert family_of("Qwen2.5-Coder-7B-Instruct-Q4_K_M")["family"] == "qwen2.5-coder"
+    assert family_of("gemma-4-E4B-it-Q4_K_M")["family"] == "gemma-4"
+    llama = prof.variants("Llama-3.2-3B-Instruct-Q4_K_M")
+    assert [v["params"]["thinking"] for v in llama] == [None, None, None] and len(llama) == 3
+    qv = prof.variants("Qwen3.5-9B-Q4_K_M")
+    assert [v["params"]["thinking"] for v in qv] == [True, False, False] and qv[2]["params"]["temperature"] == 0.2
+    local = prof.options_from({"location": "local", "kind": "llama_router"}, q["preset"]["kualitas"], True)
+    assert local["extra"]["chat_template_kwargs"] == {"enable_thinking": True} and local["extra"]["top_k"] == 20
+    online = prof.options_from({"location": "online", "kind": "openai"}, q["preset"]["kualitas"], True)
+    assert online["extra"] == {"top_p": 0.95}  # API online tidak dikirimi parameter khusus llama-server
+
+
+def test_calibration_saves_good_profile(client, auth, conn):
+    import pathlib
+
+    REPLIES["Qwen3.5-uji"] = [GOOD[c.id] for c in CASES] * 3
+    r = client.post("/api/v1/ai/bench", json={"targets": [{"connection_id": conn, "model": "Qwen3.5-uji"}],
+                                             "mode": "kalibrasi"}, headers=auth)
+    assert r.status_code == 201, r.text
+    run = wait_bench(client, auth, r.json()["runs"][0]["id"])
+    assert run["status"] == "COMPLETED" and run["mode"] == "kalibrasi", run
+    assert len(run["variants"]) == 3 and run["done_cases"] == run["total_cases"] == 3 * len(CASES)
+    assert run["profile_decision"]["saved"] is True and run["profile_decision"]["status"] == "ok"
+    # varian A mengirim berpikir ON, varian B/C OFF (kontrol thinking per permintaan llama-server)
+    kw = [b.get("chat_template_kwargs") for b in BODIES]
+    assert kw[0] == {"enable_thinking": True} and kw[-1] == {"enable_thinking": False}
+    assert BODIES[-1]["temperature"] == 0.2
+    p = client.get("/api/v1/ai/profiles/item", params={"model": "Qwen3.5-uji"}, headers=auth).json()
+    assert p["source"] == "kalibrasi" and "perencana" in p["kegunaan"] and "pelaksana_coding" in p["kegunaan"]
+    assert p["kalibrasi"]["pilihan"]["kualitas"] in "ABC" and len(p["kalibrasi"]["varian"]) == 3
+    assert p["sync"]["status"] == "tidak_aktif"  # tes: sinkron GitHub dimatikan
+    f = pathlib.Path(client.app.state.services.settings.model_profiles_dir) / p["file"]
+    data = json.loads(f.read_text())
+    assert data["model"] == "Qwen3.5-uji" and data["kegunaan_label"]
+    listed = client.get("/api/v1/ai/profiles", headers=auth).json()
+    assert any(x["model"] == "Qwen3.5-uji" and x["source"] == "kalibrasi" for x in listed["profiles"])
+    assert {x["key"] for x in listed["purposes"]} >= {"perencana", "pelaksana_coding", "penjelasan_coding"}
+    client.delete("/api/v1/ai/profiles/item", params={"model": "Qwen3.5-uji"}, headers=auth)
+    client.delete(f"/api/v1/ai/bench/{run['id']}", headers=auth)
+
+
+def test_calibration_bad_result_needs_tuning(client, auth, conn):
+    REPLIES["Llama-uji"] = ["tidak tahu"] * 18
+    r = client.post("/api/v1/ai/bench", json={"targets": [{"connection_id": conn, "model": "Llama-uji"}],
+                                             "mode": "kalibrasi"}, headers=auth)
+    run = wait_bench(client, auth, r.json()["runs"][0]["id"])
+    d = run["profile_decision"]
+    assert d["saved"] is False and d["status"] == "perlu_penyesuaian" and d["saran"], d
+    assert client.get("/api/v1/ai/profiles/item", params={"model": "Llama-uji"}, headers=auth).json()["source"] == "bawaan"
+    # pengguna tetap boleh menyimpan draf
+    saved = client.post(f"/api/v1/ai/bench/{run['id']}/save-profile", headers=auth).json()
+    assert saved["source"] == "kalibrasi" and saved["status"] == "perlu_penyesuaian"
+    client.delete("/api/v1/ai/profiles/item", params={"model": "Llama-uji"}, headers=auth)
+    client.delete(f"/api/v1/ai/bench/{run['id']}", headers=auth)
+
+
+def test_profile_manual_edit_import_and_agent_use(client, auth, conn, project):
+    body = {"kegunaan": ["pelaksana_coding", "bukan-kegunaan"], "catatan": "cepat untuk edit kecil",
+            "prompt_tambahan": "Selalu sertakan nama fungsi di SEARCH.",
+            "cepat": {"temperature": 0.33, "top_p": 0.7, "max_tokens": 1024},
+            "kualitas": {"temperature": 0.44, "top_p": 0.9, "max_tokens": 3000}}
+    p = client.put("/api/v1/ai/profiles/item", params={"model": "kecil"}, json=body, headers=auth).json()
+    assert p["source"] == "manual" and p["kegunaan"] == ["pelaksana_coding"]
+    # agent: Perencana (preset kualitas) lalu Pelaksana (preset cepat) + prompt tambahan di system prompt
+    roles(client, auth, planner={"connection_id": conn, "model": "kecil"}, executor={"connection_id": conn, "model": "kecil"})
+    REPLIES["kecil"] = [PLAN, J("finish", summary="beres")]
+    t, ev = run_task(client, auth, project)
+    assert t["status"] == "COMPLETED", t
+    assert [b["temperature"] for b in BODIES] == [0.44, 0.33] and BODIES[1]["max_tokens"] == 1024
+    assert "Selalu sertakan nama fungsi" in BODIES[0]["messages"][0]["content"]
+    thought = [e["data"] for e in ev if e["kind"] == "thought"]
+    assert [d["profile"] for d in thought] == ["kualitas", "cepat"]
+    # profil nonaktif -> perilaku lama
+    client.put("/api/v1/ai/profiles/item", params={"model": "kecil"}, json={"active": False}, headers=auth)
+    BODIES.clear()
+    REPLIES["kecil"] = [PLAN, J("finish", summary="beres")]
+    run_task(client, auth, project)
+    assert BODIES[0]["temperature"] <= 0.4 and "top_p" not in BODIES[0]
+    # ekspor -> reset -> impor
+    exported = client.get("/api/v1/ai/profiles/item", params={"model": "kecil"}, headers=auth).json()
+    assert client.delete("/api/v1/ai/profiles/item", params={"model": "kecil"}, headers=auth).json()["source"] == "bawaan"
+    imp = client.post("/api/v1/ai/profiles/import", json={"profile": exported}, headers=auth).json()
+    assert imp["source"] == "impor" and imp["preset"]["cepat"]["temperature"] == 0.33
+    client.delete("/api/v1/ai/profiles/item", params={"model": "kecil"}, headers=auth)
+
+
+def test_profile_git_sync_commits_only_profile_file(client, tmp_path):
+    """Sinkron: commit HANYA file profil lalu push; file lain yang sedang diubah tidak ikut ter-commit."""
+    import subprocess
+    import types
+
+    from backend.services.model_profiles import ModelProfiles
+
+    def git(*a, cwd):
+        return subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+    remote, repo = tmp_path / "remote.git", tmp_path / "repo"
+    git("init", "-q", "--bare", "-b", "main", str(remote), cwd=tmp_path)
+    git("clone", "-q", str(remote), str(repo), cwd=tmp_path)
+    git("config", "user.email", "t@t", cwd=repo); git("config", "user.name", "t", cwd=repo)
+    (repo / "kode.py").write_text("a = 1\n"); git("add", ".", cwd=repo); git("commit", "-qm", "awal", cwd=repo)
+    git("push", "-q", "origin", "HEAD:main", cwd=repo)
+    (repo / "kode.py").write_text("a = 2  # perubahan lain yang belum di-commit\n")
+    settings = types.SimpleNamespace(base_dir=repo, model_profiles_dir=repo / "model_profiles", model_profiles_git=True)
+    prof = ModelProfiles(settings, client.app.state.services.db)
+
+    async def go():
+        p = prof.default("Qwen3.5-9B-Q4_K_M")
+        prof.save(p, "manual", sync=False)
+        return await prof.sync("Qwen3.5-9B-Q4_K_M", "uji sinkron")
+
+    st = client.portal.call(go)  # jalankan di event loop server tes (bukan asyncio.run di thread utama)
+    assert st["status"] == "ok", st
+    files = git("show", "--name-only", "--format=%s", "main", cwd=remote)
+    assert "chore(model-profiles): uji sinkron" in files and "model_profiles/Qwen3.5-9B-Q4_K_M.json" in files
+    assert "kode.py" not in files  # perubahan lain tidak ikut
+    assert "a = 2" in (repo / "kode.py").read_text()  # dan tetap ada di working tree

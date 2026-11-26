@@ -96,7 +96,9 @@ class Provider:
         raise NotImplementedError
 
     def stream_chat(self, model: str, messages: list[dict], temperature: float | None,
-                    max_tokens: int | None) -> AsyncIterator[tuple[str, str]]:
+                    max_tokens: int | None, extra: dict | None = None) -> AsyncIterator[tuple[str, str]]:
+        """extra: parameter tambahan dari profil model (top_p, top_k, min_p, presence_penalty, repeat_penalty,
+        chat_template_kwargs). Penyedia memetakan yang ia dukung saja."""
         raise NotImplementedError
 
     async def load(self, model: str) -> None:
@@ -140,13 +142,15 @@ class OpenAIProvider(Provider):
                         "context_length": m.get("context_length")})
         return sorted(out, key=lambda x: x["id"].lower())
 
-    async def stream_chat(self, model, messages, temperature, max_tokens):
+    async def stream_chat(self, model, messages, temperature, max_tokens, extra=None):
         self.last_stats = {}
         body = {"model": model, "messages": messages, "stream": True}
         if temperature is not None:
             body["temperature"] = temperature
         if max_tokens:
             body["max_tokens"] = max_tokens
+        if extra:
+            body.update({k: v for k, v in extra.items() if v is not None})
         async with http_client() as c:
             try:
                 async with c.stream("POST", f"{self.base}/v1/chat/completions", headers=self.headers(), json=body) as r:
@@ -234,10 +238,13 @@ class AnthropicProvider(Provider):
             raise _err(r, r.text)
         return [{"id": m["id"], "status": None, "context_length": None} for m in r.json().get("data", [])]
 
-    async def stream_chat(self, model, messages, temperature, max_tokens):
+    async def stream_chat(self, model, messages, temperature, max_tokens, extra=None):
         system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
         msgs = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] in ("user", "assistant")]
         body = {"model": model, "messages": msgs, "max_tokens": max_tokens or 4096, "stream": True}
+        for k in ("top_p", "top_k"):
+            if extra and extra.get(k) is not None:
+                body[k] = extra[k]
         self.last_stats = {}
         if system:
             body["system"] = system
@@ -289,7 +296,7 @@ class GeminiProvider(Provider):
                             "context_length": m.get("inputTokenLimit")})
         return out
 
-    async def stream_chat(self, model, messages, temperature, max_tokens):
+    async def stream_chat(self, model, messages, temperature, max_tokens, extra=None):
         system = "\n\n".join(m["content"] for m in messages if m["role"] == "system")
         contents = [{"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
                     for m in messages if m["role"] in ("user", "assistant")]
@@ -300,6 +307,9 @@ class GeminiProvider(Provider):
             body["generationConfig"]["temperature"] = temperature
         if max_tokens:
             body["generationConfig"]["maxOutputTokens"] = max_tokens
+        for k, g in (("top_p", "topP"), ("top_k", "topK")):
+            if extra and extra.get(k) is not None:
+                body["generationConfig"][g] = extra[k]
         url = f"{self.base}/v1beta/models/{model}:streamGenerateContent?alt=sse"
         self.last_stats = {}
         async with http_client() as c:
