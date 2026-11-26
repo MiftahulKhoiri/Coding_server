@@ -60,6 +60,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val servers: StateFlow<List<ServerProfile>> = serverStore.servers.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val editorPrefs: StateFlow<EditorPrefs> = serverStore.editorPrefs.stateIn(viewModelScope, SharingStarted.Eagerly, EditorPrefs())
     val appTheme: StateFlow<AppTheme> = serverStore.appTheme.stateIn(viewModelScope, SharingStarted.Eagerly, AppTheme())
+    val terminalPrefs: StateFlow<id.codingserver.android.data.settings.TerminalPrefs> =
+        serverStore.terminalPrefs.stateIn(viewModelScope, SharingStarted.Eagerly, id.codingserver.android.data.settings.TerminalPrefs())
+    fun setTerminalPrefs(p: id.codingserver.android.data.settings.TerminalPrefs) { viewModelScope.launch { serverStore.setTerminalPrefs(p) } }
 
     private val _client = MutableStateFlow<ApiClient?>(null)
     val client: StateFlow<ApiClient?> = _client.asStateFlow()

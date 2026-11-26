@@ -39,6 +39,18 @@ data class EditorPrefs(
     val lsp: Boolean = true,
 )
 
+/** Pengaturan tampilan terminal (disesuaikan manual seperti terminal pada umumnya). */
+data class TerminalPrefs(
+    val fontSize: Int = 13,
+    val theme: String = "dark",          // dark | light | solarized | monokai | retro
+    val cursorStyle: String = "block",   // block | bar | underline
+    val cursorBlink: Boolean = true,
+    val lineHeight: Float = 1.0f,
+    val showKeys: Boolean = true,        // baris tombol khusus (ESC, TAB, ^C …)
+    val tapKeyboard: Boolean = true,     // ketuk terminal -> keyboard muncul
+    val extraKeys: Boolean = false,      // baris tombol tambahan (^A ^E ^R ^U ^W PGUP PGDN)
+)
+
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "coding_server")
 
 class ServerStore(private val context: Context) {
@@ -56,6 +68,32 @@ class ServerStore(private val context: Context) {
     private val kThemeMode = stringPreferencesKey("app_theme_mode")
     private val kThemeAccent = stringPreferencesKey("app_theme_accent")
     private val kThemeAmoled = booleanPreferencesKey("app_theme_amoled")
+    private val kTermFont = intPreferencesKey("term_font")
+    private val kTermTheme = stringPreferencesKey("term_theme")
+    private val kTermCursor = stringPreferencesKey("term_cursor")
+    private val kTermBlink = booleanPreferencesKey("term_blink")
+    private val kTermLine = stringPreferencesKey("term_line_height")
+    private val kTermKeys = booleanPreferencesKey("term_keys")
+    private val kTermTap = booleanPreferencesKey("term_tap_keyboard")
+    private val kTermExtra = booleanPreferencesKey("term_extra_keys")
+
+    val terminalPrefs: Flow<TerminalPrefs> = context.dataStore.data.map {
+        TerminalPrefs(it[kTermFont] ?: 13, it[kTermTheme] ?: "dark", it[kTermCursor] ?: "block", it[kTermBlink] ?: true,
+                      it[kTermLine]?.toFloatOrNull() ?: 1.0f, it[kTermKeys] ?: true, it[kTermTap] ?: true, it[kTermExtra] ?: false)
+    }
+
+    suspend fun setTerminalPrefs(p: TerminalPrefs) {
+        context.dataStore.edit {
+            it[kTermFont] = p.fontSize
+            it[kTermTheme] = p.theme
+            it[kTermCursor] = p.cursorStyle
+            it[kTermBlink] = p.cursorBlink
+            it[kTermLine] = p.lineHeight.toString()
+            it[kTermKeys] = p.showKeys
+            it[kTermTap] = p.tapKeyboard
+            it[kTermExtra] = p.extraKeys
+        }
+    }
 
     val servers: Flow<List<ServerProfile>> = context.dataStore.data.map { decode(it[kServers]) }
     val activeId: Flow<String?> = context.dataStore.data.map { it[kActive] }

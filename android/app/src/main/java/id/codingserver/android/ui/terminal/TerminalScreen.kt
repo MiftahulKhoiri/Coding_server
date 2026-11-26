@@ -21,6 +21,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.runtime.DisposableEffect
+import id.codingserver.android.data.settings.TerminalPrefs
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
@@ -64,8 +67,10 @@ import kotlinx.serialization.builtins.serializer
 class TerminalBridge(private val c: TerminalController) {
     @JavascriptInterface fun onStatus(s: String?) { c.status.value = s ?: "" }
     @JavascriptInterface fun onReady() { c.ready.value = true }
-    /** Terminal disentuh: munculkan keyboard. */
-    @JavascriptInterface fun onTap() { c.showKeyboard() }
+    /** Terminal diketuk: munculkan keyboard (bila diaktifkan di pengaturan). */
+    @JavascriptInterface fun onTap() { if (c.tapKeyboard) c.showKeyboard() }
+    /** Ukuran huruf diubah dengan cubit dua jari: simpan ke pengaturan. */
+    @JavascriptInterface fun onFontSize(px: Int) { c.onFontSizeChanged?.invoke(px) }
 }
 
 /** WebView xterm.js yang bertahan selama Activity; terhubung ke /ws/terminal/{id}. */
@@ -75,6 +80,8 @@ class TerminalController(context: Context) {
     val ready = MutableStateFlow(false)
     var sessionId: String? = null
         private set
+    @Volatile var tapKeyboard: Boolean = true
+    var onFontSizeChanged: ((Int) -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
 
     val webView: WebView = WebView(context).apply {
@@ -102,6 +109,13 @@ class TerminalController(context: Context) {
     fun key(k: String) = js("CS_TERM.sendKey(${q(k)})")
     fun text(t: String) = js("CS_TERM.sendText(${q(t)})")
     fun fontSize(px: Int) = js("CS_TERM.setFontSize($px)")
+
+    /** Terapkan pengaturan tampilan ke xterm.js. */
+    fun apply(p: TerminalPrefs) {
+        tapKeyboard = p.tapKeyboard
+        js("CS_TERM.setOptions({fontSize:${p.fontSize},lineHeight:${p.lineHeight},theme:${q(p.theme)}," +
+           "cursorStyle:${q(p.cursorStyle)},cursorBlink:${p.cursorBlink}})")
+    }
     fun focus() = js("CS_TERM.focus()")
     /** Hitung ulang kolom/baris (dipanggil saat ukuran WebView berubah, mis. keyboard muncul/hilang). */
     fun fit() = js("CS_TERM.fit()")
@@ -131,6 +145,15 @@ fun TerminalScreen(vm: AppViewModel, term: TerminalController, onMenu: () -> Uni
     var current by remember { mutableStateOf(term.sessionId) }
     val scope = rememberCoroutineScope()
     val imeVisible = WindowInsets.isImeVisible
+    val prefs by vm.terminalPrefs.collectAsState()
+    var showSettings by remember { mutableStateOf(false) }
+
+    // Pengaturan tampilan diterapkan saat halaman terminal siap dan setiap kali diubah.
+    LaunchedEffect(ready, prefs) { if (ready) term.apply(prefs) }
+    DisposableEffect(prefs) {
+        term.onFontSizeChanged = { px -> vm.setTerminalPrefs(vm.terminalPrefs.value.copy(fontSize = px)) }
+        onDispose { term.onFontSizeChanged = null }
+    }
 
     LaunchedEffect(client, reload) {
         val c = client ?: return@LaunchedEffect
@@ -188,7 +211,10 @@ fun TerminalScreen(vm: AppViewModel, term: TerminalController, onMenu: () -> Uni
                 else -> Color.Gray to "terputus"
             }
             Box(Modifier.size(8.dp).clip(RoundedCornerShape(50)).background(dot))
-            Text(label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 4.dp, end = 6.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(start = 4.dp))
+            IconButton(onClick = { showSettings = true }, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.Settings, "Pengaturan tampilan terminal", Modifier.size(20.dp))
+            }
         }
         if (sessions.isEmpty()) Text("Tidak ada sesi. Tekan + untuk membuka terminal di folder proyek (${project?.name ?: "-"}).",
                                      Modifier.padding(horizontal = 8.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall)
@@ -196,7 +222,14 @@ fun TerminalScreen(vm: AppViewModel, term: TerminalController, onMenu: () -> Uni
             AndroidView(factory = { term.detach(); term.webView }, modifier = Modifier.fillMaxSize())
         }
         // ---- baris tombol khusus (ringkas) ----
-        Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)
+        if (prefs.extraKeys) Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)
+                .horizontalScroll(rememberScrollState()).padding(start = 4.dp, end = 4.dp, top = 3.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf("CTRL_A" to "^A", "CTRL_E" to "^E", "CTRL_R" to "^R", "CTRL_U" to "^U", "CTRL_W" to "^W",
+                   "PGUP" to "PgUp", "PGDN" to "PgDn").forEach { (k, l) -> KeyButton(l) { term.key(k); term.focus() } }
+            listOf("$", "*", "'", "\"", ";", ":", "=", "_").forEach { t -> KeyButton(t) { term.text(t); term.focus() } }
+        }
+        if (prefs.showKeys) Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)
                 .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 3.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             KeyButton(if (imeVisible) "⌨ ▼" else "⌨ ▲", highlight = true) {
@@ -209,6 +242,7 @@ fun TerminalScreen(vm: AppViewModel, term: TerminalController, onMenu: () -> Uni
             listOf("|", "/", "-", "~", "&&", ">").forEach { t -> KeyButton(t) { term.text(t); term.focus() } }
         }
     }
+    if (showSettings) TerminalSettingsDialog(prefs, onChange = { vm.setTerminalPrefs(it) }, onDismiss = { showSettings = false })
 }
 
 @Composable
