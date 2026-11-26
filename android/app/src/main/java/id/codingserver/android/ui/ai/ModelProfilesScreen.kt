@@ -5,6 +5,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -343,13 +351,31 @@ private fun PresetEditor(title: String, p: ModelPreset, thinkingSupported: Boole
                     onChange(p.copy(presence_penalty = it.toDoubleOrNull()))
                 }
             }
-            if (thinkingSupported != false) Row(verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("Berpikir:", style = MaterialTheme.typography.labelMedium)
-                listOf(null to "Bawaan model", true to "ON", false to "OFF").forEach { (v, l) ->
-                    FilterChip(p.thinking == v, { onChange(p.copy(thinking = v)) },
-                               label = { Text(l, style = MaterialTheme.typography.labelSmall) })
-                }
+            if (thinkingSupported != false) {
+                Text("Mode berpikir", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+                ThinkingSelector(p.thinking) { onChange(p.copy(thinking = it)) }
+            }
+        }
+    }
+}
+
+/** Pilihan mode berpikir: 3 tombol sama lebar; ON hijau, OFF merah, Bawaan netral. */
+@Composable
+private fun ThinkingSelector(value: Boolean?, onChange: (Boolean?) -> Unit) {
+    val options = listOf(Triple<Boolean?, String, Color>(null, "Bawaan", MaterialTheme.colorScheme.primary),
+                         Triple(true, "ON", OkGreen), Triple(false, "OFF", ErrRed))
+    Row(Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(20.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))) {
+        options.forEachIndexed { i, (v, label, color) ->
+            val selected = value == v
+            if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.outline))
+            Box(Modifier.weight(1f).fillMaxHeight()
+                    .background(if (selected) color else Color.Transparent)
+                    .selectable(selected = selected, role = Role.RadioButton, onClick = { onChange(v) }),
+                contentAlignment = Alignment.Center) {
+                Text((if (selected) "✓ " else "") + label, maxLines = 1, style = MaterialTheme.typography.labelLarge,
+                     fontWeight = if (selected) FontWeight.Bold else null,
+                     color = if (selected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
