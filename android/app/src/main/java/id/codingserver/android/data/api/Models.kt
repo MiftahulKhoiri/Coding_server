@@ -224,6 +224,17 @@ import kotlinx.serialization.json.JsonElement
 )
 @Serializable data class AIModel(val id: String, val status: String? = null, val context_length: Long? = null)
 @Serializable data class AIModels(val models: List<AIModel> = emptyList())
+/** Konteks model llama-server: ctx = yang sedang dipakai; configured = dari pengaturan; override = khusus model. */
+@Serializable data class ContextModel(val id: String, val status: String? = null, val ctx: Int? = null,
+                                      val configured: Int? = null, val override: Int? = null)
+@Serializable data class ContextStatus(
+    val connection_id: String, val preset_file: String = "", val default_ctx: Int? = null,
+    val models: List<ContextModel> = emptyList(), val problems: List<String> = emptyList(), val ready: Boolean = false,
+    val fix_command: String = "",
+)
+/** models: nama -> token; 0 = kembali ikut bawaan. */
+@Serializable data class ContextIn(val connection_id: String, val default_ctx: Int? = null,
+                                   val models: Map<String, Int>? = null)
 @Serializable data class AIApply(val connection_id: String, val model: String, val wait: Boolean = false)
 @Serializable data class AISettings(
     val system_prompt: String = "", val temperature: Double = 0.7, val max_tokens: Int = 2048,

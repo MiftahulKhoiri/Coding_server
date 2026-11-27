@@ -69,6 +69,8 @@ interface CodingApi {
     @POST("api/v1/execution/build") suspend fun build(@Body body: RunRequest): Job
     @GET("api/v1/execution/install") suspend fun installPlan(@Query("project_id") projectId: String): InstallPlan
     @POST("api/v1/execution/install") suspend fun install(@Body body: InstallRequest): Job
+    @GET("api/v1/ai/context") suspend fun aiContext(@Query("connection_id") connectionId: String): ContextStatus
+    @PUT("api/v1/ai/context") suspend fun aiContextSave(@Body body: ContextIn): ContextStatus
     @GET("api/v1/execution") suspend fun executions(@Query("project_id") projectId: String? = null, @Query("limit") limit: Int = 50): JobList
     @GET("api/v1/execution/{pid}") suspend fun job(@Path("pid") pid: String): Job
     @POST("api/v1/execution/{pid}/stop") suspend fun stop(@Path("pid") pid: String): Job

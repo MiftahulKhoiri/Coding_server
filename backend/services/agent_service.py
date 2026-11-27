@@ -533,9 +533,22 @@ class AgentService:
 
     _ctx_tokens: dict[str, int] = {}  # model -> ukuran konteks (token) yang diketahui dari error server
 
+    def any_active(self) -> bool:
+        ph = ",".join("?" * len(ACTIVE))
+        return self.db.one(f"SELECT 1 AS x FROM agent_tasks WHERE status IN ({ph}) LIMIT 1", tuple(ACTIVE)) is not None
+
+    def forget_context(self) -> None:
+        """Konteks model diubah pengguna: lupakan ukuran yang dipelajari dari error server."""
+        AgentService._ctx_tokens.clear()
+
     def _budget(self, model: str, max_tokens: int) -> int:
-        """Anggaran karakter riwayat untuk model, dari ukuran konteks yang sudah diketahui."""
+        """Anggaran karakter riwayat untuk model, dari ukuran konteks yang diketahui/dikonfigurasi."""
         n_ctx = self._ctx_tokens.get(model)
+        if not n_ctx:
+            try:  # dari pengaturan Konteks model (file preset llama-server)
+                n_ctx = self.svc.llama_ctx.ctx_for(model)
+            except Exception:
+                n_ctx = None
         if not n_ctx:
             return CONTEXT_BUDGET
         # Sisakan ruang untuk jawaban (maks sepertiga konteks) agar model masih bisa menulis isi file.

@@ -49,6 +49,7 @@ class Services:
     lsp: "LspService"
     agent: AgentService
     bench: ModelBench
+    llama_ctx: "LlamaContextService"
     login_limiter: RateLimiter
     api_limiter: RateLimiter
 
@@ -68,7 +69,11 @@ def build_services(settings: Settings, registry: EngineRegistry) -> Services:
         api_limiter=RateLimiter(settings.rate_limit_api_per_minute, 60.0),
         agent=AgentService(settings, db, lambda: holder["svc"]),
         bench=ModelBench(settings, db, lambda: holder["svc"]),
+        llama_ctx=None,  # diisi di bawah (butuh AIService)
     )
+    from backend.services.llama_context import LlamaContextService
+
+    svc.llama_ctx = LlamaContextService(settings, svc.ai)
     holder["svc"] = svc
     return svc
 

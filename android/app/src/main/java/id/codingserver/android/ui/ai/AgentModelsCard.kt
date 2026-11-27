@@ -228,6 +228,9 @@ fun AgentModelsSection(vm: AppViewModel, hub: AiModelHubState, isAdmin: Boolean,
                 if (isAdmin) UnloadAllButton(vm, hub)
             }
 
+            // ---- konteks model ----
+            ModelContextSection(vm, hub.c, hub.conns, isAdmin)
+
             // ---- rekomendasi & task ----
             AiSection("Rekomendasi model", "Laboratorium Model menguji model dengan kasus yang meniru kerja agent, lalu " +
                 "merekomendasikan model terbaik untuk tiap peran (dapat diterapkan dengan satu ketukan).") {

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from backend.core.exceptions import AppError, Forbidden
 from backend.core.permissions import intersect_for_ai
 from backend.dependencies import Services, current_user, project_dir, require, services, ws_user
+from backend.schemas.models import ContextIn
 from backend.schemas.models import (AgentModelsIn, AIApply, AIChat, AIConnectionIn, AIConversationIn, AIDecision,
                                     AIProposal, AISettingsIn, ModelBenchIn, ModelProfileImport, ModelProfileIn,
                                     OkResponse)
@@ -92,6 +93,21 @@ def agent_models(_: dict = Depends(current_user), svc: Services = Depends(servic
 def update_agent_models(body: AgentModelsIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
     out = svc.ai.save_agent_models(body.model_dump(exclude_unset=True))
     svc.db.audit("ai_agent_models", user=user, detail={k: v for k, v in out.items() if k != "default"})
+    return out
+
+
+# ---------- ukuran konteks model (llama-server router) ----------
+@router.get("/context", summary="Ukuran konteks per model llama-server (dikonfigurasi & yang sedang dipakai) + diagnosis")
+async def context_status(connection_id: str, _: dict = Depends(current_user), svc: Services = Depends(services)):
+    return await svc.llama_ctx.status(connection_id)
+
+
+@router.put("/context", summary="Atur ukuran konteks (bawaan & per model); router memuat ulang preset tanpa restart")
+async def context_save(body: ContextIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    busy = svc.agent.any_active()
+    out = await svc.llama_ctx.save(body.connection_id, body.default_ctx, body.models, busy)
+    svc.agent.forget_context()  # anggaran riwayat agen dihitung ulang dari konteks baru
+    svc.db.audit("ai_context", user=user, detail={"default": body.default_ctx, "models": body.models})
     return out
 
 

@@ -397,6 +397,13 @@ class AgentModelsIn(BaseModel):
     approval_mode: Literal["manual", "otomatis", "penuh"] | None = None
 
 
+class ContextIn(BaseModel):
+    """Ukuran konteks llama-server. default_ctx null = tidak diubah; models: {nama: angka | null (ikut bawaan)}."""
+    connection_id: str
+    default_ctx: int | None = Field(default=None, ge=2048, le=131072)
+    models: dict[str, int | None] | None = None
+
+
 class ModelBenchIn(BaseModel):
     targets: list[AgentModelTarget] = Field(min_length=1, max_length=10)
     mode: Literal["cepat", "kalibrasi"] = "cepat"

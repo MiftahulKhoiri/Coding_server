@@ -97,6 +97,8 @@ class Settings:
 
     # Profil model (file JSON per model, ikut repo) + sinkron otomatis ke GitHub
     model_profiles_dir: Path = field(default=Path())
+    # File preset llama-server router (ukuran konteks per model), dibaca router via --models-preset.
+    llama_presets_file: Path = field(default=Path())
     model_profiles_git: bool = True
 
     rate_limit_login_per_minute: int = 10
@@ -163,6 +165,7 @@ def build_settings(env: dict[str, str] | None = None) -> Settings:
     s.logs_dir = Path(g("logs_dir") or base / "logs").resolve()
     s.backups_dir = Path(g("backups_dir") or base / "backups").resolve()
     s.model_profiles_dir = Path(g("model_profiles_dir") or base / "model_profiles").resolve()
+    s.llama_presets_file = Path(g("llama_presets_file") or Path.home() / "models" / "coding_server_presets.ini").expanduser()
 
     for name in (
         "access_token_minutes", "refresh_token_days", "max_concurrent_jobs", "max_queued_jobs",
