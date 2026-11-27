@@ -31,7 +31,10 @@ log = get_logger("agent")
 ACTIVE = {"PENDING", "PLANNING", "INSPECTING", "EXECUTING", "BUILDING", "TESTING", "REVIEWING", "FIXING"}
 TERMINAL = {"COMPLETED", "FAILED", "CANCELLED"}
 STATUSES = ACTIVE | TERMINAL | {"PAUSED", "WAITING_APPROVAL"}
-CONTEXT_BUDGET = 48_000   # karakter percakapan yang dikirim ke model
+CONTEXT_BUDGET = 48_000   # karakter percakapan maksimum (dipersempit otomatis sesuai konteks model)
+CHARS_PER_TOKEN = 3       # perkiraan aman untuk kode/teks campuran (Qwen ±3,5–4 karakter per token)
+_CTX_ERR = re.compile(r"exceeds? the (?:available )?context|context size|context length", re.I)
+_CTX_SIZE = re.compile(r"context (?:size|length)\D{0,20}(\d{3,7})", re.I)
 KEEP_RECENT = 6           # hasil tool terakhir yang tidak dipangkas
 MAX_PARSE_FAILS = 3
 ESCALATE_AFTER_PARSE = 2  # balasan salah format berturut-turut sebelum eskalasi ke model yang lebih kuat
@@ -128,6 +131,51 @@ def _lenient_string(text: str, key: str) -> tuple[str, int] | None:
     return None
 
 
+# Akhir nilai "content" yang ditulis model kecil dengan gaya Python, mis. ...\n''', reason="...")
+# atau ..."}} ; penutup string boleh ''' / """ / ".
+_Q = r"""(?:'''|\"\"\"|")"""
+_CONTENT_START = re.compile(r'"content"\s*:\s*' + _Q)
+_CONTENT_END = re.compile(_Q + r'\s*,\s*"?reason"?\s*[:=]|' + _Q + r"\s*}\s*}?\s*\)?\s*(?:```)?\s*$")
+
+
+def _decode_escapes(raw: str) -> str:
+    out, i = [], 0
+    while i < len(raw):
+        if raw[i] == "\\" and i + 1 < len(raw):
+            nx = raw[i + 1]
+            if nx == "u" and re.match(r"[0-9a-fA-F]{4}", raw[i + 2:i + 6]):
+                out.append(chr(int(raw[i + 2:i + 6], 16)))
+                i += 6
+                continue
+            out.append(_ESCAPES.get(nx, "\\" + nx))
+            i += 2
+            continue
+        out.append(raw[i])
+        i += 1
+    return "".join(out)
+
+
+def _recover_content(text: str) -> tuple[str, int] | None:
+    """Selamatkan isi file dari args.content yang bukan JSON valid (jangan dibuang diam-diam).
+
+    Batas akhir = kemunculan TERAKHIR penutup string sebelum `reason` / akhir objek, karena isi file
+    sendiri boleh memuat ''' atau tanda kutip. Escape JSON (backslash-n, backslash-kutip) di-decode
+    bila isinya memakai escape, bukan baris baru asli."""
+    m = _CONTENT_START.search(text)
+    if not m:
+        return None
+    ends = list(_CONTENT_END.finditer(text, m.end()))
+    if not ends:
+        return None
+    cut = ends[-1]
+    raw = text[m.end():cut.start()]
+    if raw.count("\\n") > raw.count("\n"):
+        raw = _decode_escapes(raw)
+    if not raw.strip():
+        return None
+    return raw, cut.end()
+
+
 def _lenient_call(text: str) -> tuple[dict, int] | None:
     m = re.search(r'"tool"\s*:\s*"([A-Za-z_]+)"', text)
     if not m:
@@ -136,9 +184,15 @@ def _lenient_call(text: str) -> tuple[dict, int] | None:
     end = m.end()
     for key in _STR_KEYS:
         got = _lenient_string(text, key)
+        if got is None and key == "content" and obj["tool"] == "write_file":
+            got = _recover_content(text)
         if got is not None:
             (obj if key == "thought" else obj["args"])[key] = got[0]
             end = max(end, got[1])
+    if obj["tool"] == "write_file" and "reason" not in obj["args"]:
+        r = re.search(r'reason"?\s*[:=]\s*"([^"\n]{0,300})"', text)
+        if r:
+            obj["args"]["reason"] = r.group(1)
     close = text.find("}", end)
     return obj, (close + 1 if close >= 0 else end)
 
@@ -406,26 +460,68 @@ class AgentService:
                 {"role": "user", "content": user_msg}]
 
     @staticmethod
-    def _compact(messages: list[dict]) -> list[dict]:
-        """Pangkas hasil tool lama agar muat konteks; file asli tetap sumber kebenaran (bisa dibaca ulang)."""
+    def _compact(messages: list[dict], budget: int = CONTEXT_BUDGET) -> list[dict]:
+        """Pangkas riwayat lama agar muat konteks model; file asli tetap sumber kebenaran (bisa dibaca ulang).
+
+        Urutan: (1) hasil tool lama, (2) balasan model lama yang panjang (mis. isi file yang sudah ditulis),
+        (3) buang langkah tertua. System prompt, tugas, dan 2 pesan terakhir selalu dipertahankan."""
         total = sum(len(m["content"]) for m in messages)
-        if total <= CONTEXT_BUDGET:
+        if total <= budget:
             return messages
         out = [dict(m) for m in messages]
-        obs_idx = [i for i, m in enumerate(out) if m["role"] == "user" and m["content"].startswith("[hasil tool")]
-        for i in obs_idx[:-KEEP_RECENT]:
-            if total <= CONTEXT_BUDGET:
-                break
+        recent_from = max(2, len(out) - 2 * KEEP_RECENT)
+
+        def shrink(i: int, keep: int, note: str) -> None:
+            nonlocal total
             old = out[i]["content"]
-            if old.endswith("[dipangkas]"):
-                continue
-            out[i]["content"] = old[:300] + "\n…[dipangkas; baca ulang file bila perlu]"
+            if len(old) <= keep + len(note) + 20:
+                return
+            out[i]["content"] = old[:keep] + note
             total -= len(old) - len(out[i]["content"])
-        # Masih terlalu panjang: buang pasangan langkah tertua (setelah system + tugas).
-        while total > CONTEXT_BUDGET and len(out) > 6:
+
+        for i in range(2, recent_from):
+            if total <= budget:
+                break
+            if out[i]["role"] == "user" and out[i]["content"].startswith("[hasil tool"):
+                shrink(i, 300, "\n…[dipangkas; baca ulang file bila perlu]")
+        for i in range(2, len(out) - 2):
+            if total <= budget:
+                break
+            if out[i]["role"] == "assistant":
+                shrink(i, 400, "\n…[balasan lama dipangkas]")
+        for i in range(2, len(out) - 2):  # hasil tool terbaru pun dipangkas bila masih belum muat
+            if total <= budget:
+                break
+            if out[i]["role"] == "user" and out[i]["content"].startswith("[hasil tool"):
+                shrink(i, 1500, "\n…[dipangkas]")
+        # Masih terlalu panjang: buang langkah tertua (setelah system + tugas).
+        while total > budget and len(out) > 4:
             removed = out.pop(2)
             total -= len(removed["content"])
+        # Upaya terakhir: pesan terbaru sendiri terlalu besar (mis. hasil tool 12 ribu karakter) →
+        # sisakan awal & akhirnya saja supaya permintaan tetap muat konteks model.
+        for i in range(len(out) - 1, 1, -1):
+            if total <= budget:
+                break
+            old = out[i]["content"]
+            fixed = total - len(old)
+            room = max(600, budget - fixed)
+            if len(old) > room:
+                head, tail = room * 2 // 3, room // 3 - 40
+                out[i]["content"] = old[:head] + "\n…[dipangkas agar muat konteks]…\n" + old[-max(tail, 0):]
+                total = fixed + len(out[i]["content"])
         return out
+
+    _ctx_tokens: dict[str, int] = {}  # model -> ukuran konteks (token) yang diketahui dari error server
+
+    def _budget(self, model: str, max_tokens: int) -> int:
+        """Anggaran karakter riwayat untuk model, dari ukuran konteks yang sudah diketahui."""
+        n_ctx = self._ctx_tokens.get(model)
+        if not n_ctx:
+            return CONTEXT_BUDGET
+        # Sisakan ruang untuk jawaban (maks sepertiga konteks) agar model masih bisa menulis isi file.
+        room = max(1024, n_ctx - min(max_tokens, n_ctx // 3) - 256)
+        return min(CONTEXT_BUDGET, room * CHARS_PER_TOKEN)
 
     def _save_checkpoint(self, task_id: str, messages: list[dict], extra: dict) -> None:
         self._update(task_id, checkpoint=json.dumps({"messages": messages, **extra}, ensure_ascii=False))
@@ -515,6 +611,8 @@ class AgentService:
         else:  # profil dimatikan: perilaku lama
             temp, max_tok, extra = min(float(conf.get("temperature") or 0.2), 0.4), max(int(conf.get("max_tokens") or 2048), 2048), None
 
+        messages = self._compact(messages, self._budget(model, int(max_tok or 2048)))
+        live["approx_prompt_tokens"] = sum(len(str(m.get("content") or "")) for m in messages) // 4
         live.update(phase="prompt", started=time.time())
 
         async def collect() -> None:
@@ -540,7 +638,25 @@ class AgentService:
 
         ai.hold(cid, model)  # cegah model dibongkar selama dipakai
         try:
-            await asyncio.wait_for(collect(), self.s.agent_model_timeout)
+            try:
+                await asyncio.wait_for(collect(), self.s.agent_model_timeout)
+            except AppError as e:
+                m = _CTX_ERR.search(e.message or "")
+                if not m or parts:
+                    raise
+                # Konteks model terlampaui: catat ukurannya, pangkas riwayat lebih kuat, coba sekali lagi.
+                sent = sum(len(str(x.get("content") or "")) for x in messages)
+                size = _CTX_SIZE.search(e.message or "")
+                known = int(size.group(1)) if size else max(2048, int(sent / CHARS_PER_TOKEN * 0.8))
+                self._ctx_tokens[model] = min(self._ctx_tokens.get(model, known), known)
+                budget = min(int(sent * 0.7), self._budget(model, int(max_tok or 2048)))
+                messages = self._compact(messages, budget)
+                self._event(task_id, "context_trim", {"model": model, "n_ctx": self._ctx_tokens[model],
+                                                      "chars_before": sent,
+                                                      "chars_after": sum(len(x["content"]) for x in messages)})
+                log.info("Task %s: konteks %s terlampaui (%s token), riwayat dipangkas %d -> %d karakter",
+                         task_id, model, self._ctx_tokens[model], sent, budget)
+                await asyncio.wait_for(collect(), self.s.agent_model_timeout)
         finally:
             ai.release(cid, model)
         secs = time.time() - started
@@ -604,6 +720,7 @@ class AgentService:
         self._set_stage(task_id, "PLANNING" if not task["_plan"] else "EXECUTING", "Menghubungi model AI")
         pending_call = ck.get("pending_call")
         last_failed_run = False
+        same_err = {"sig": None, "n": 0}  # error tool yang sama berturut-turut (model terjebak mengulang)
         fail_limit = max(1, int(svc.ai.agent_models().get("escalate_after_failures") or 2))
 
         def extra(pc: dict | None = None) -> dict:
@@ -707,6 +824,16 @@ class AgentService:
             except ToolError as e:
                 obs, ok = f"ERROR: {e}", False
             pending_call = None
+            sig = f"{name}|{obs[:200]}" if not ok else None
+            same_err["n"] = (same_err["n"] + 1 if sig == same_err["sig"] else 1) if sig else 0
+            same_err["sig"] = sig
+            if same_err["n"] >= 2:
+                obs += ("\nPERINGATAN: kesalahan yang SAMA terulang. Jangan kirim panggilan yang sama lagi; "
+                        "ikuti contoh format di atas dengan tepat.")
+                if task["_esc_left"] == 0:
+                    cur = self._target(self._pick_role(task))
+                    if self._escalate(task_id, task, f"Error yang sama terulang {same_err['n']}x ({name})", cur):
+                        same_err["n"] = 0
             if len(task["_runs"]) > runs_before:
                 r = task["_runs"][-1]
                 last_failed_run = not (r["status"] == "COMPLETED" and r["exit_code"] == 0)

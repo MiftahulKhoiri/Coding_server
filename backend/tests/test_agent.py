@@ -12,6 +12,7 @@ from backend.services.agent_tools import TOOLS, ToolError
 SCRIPT: list[str] = []
 SEEN: list[dict] = []
 DELAY = {"s": 0.0}
+CTX_FAIL = {"n": 0}  # jumlah permintaan berikutnya yang ditolak "konteks terlampaui" (seperti llama-server)
 
 
 async def _handler(request: httpx.Request) -> httpx.Response:
@@ -20,6 +21,11 @@ async def _handler(request: httpx.Request) -> httpx.Response:
     await asyncio.sleep(DELAY["s"])
     if request.url.path == "/v1/models":
         return httpx.Response(200, json={"data": [{"id": "coder"}]})
+    if CTX_FAIL["n"] > 0:
+        CTX_FAIL["n"] -= 1
+        SEEN.append({"rejected": True, **json.loads(request.content)})
+        return httpx.Response(400, json={"error": {"code": 400, "type": "exceed_context_size_error", "message":
+                              "request (8226 tokens) exceeds the available context size (8192 tokens), try increasing it"}})
     SEEN.append(json.loads(request.content))
     text = SCRIPT.pop(0) if SCRIPT else '```json\n{"tool": "finish", "args": {"summary": "skrip habis"}}\n```'
     body = f"data: {json.dumps({'choices': [{'delta': {'content': text}}]})}\n\ndata: [DONE]\n\n"
@@ -33,6 +39,8 @@ def fake(monkeypatch):
     SCRIPT.clear()
     SEEN.clear()
     DELAY["s"] = 0.0
+    CTX_FAIL["n"] = 0
+    AgentService._ctx_tokens.clear()
 
 
 @pytest.fixture()
@@ -72,6 +80,34 @@ def test_extract_call_variants():
     assert obj["tool"] == "list_dir" and code is None
     with pytest.raises(ValueError):
         extract_call("tidak ada json di sini")
+
+
+def test_extract_call_recovers_python_style_content():
+    """Balasan asli Qwen3.5-4B dari log task gagal: isi app.py ditulis di args.content dengan gaya Python
+    (''' dan reason="..."). Dulu isi file dibuang diam-diam → model mengulang 9x sampai langkah habis."""
+    import ast
+    from pathlib import Path
+
+    raw = (Path(__file__).parent / "data" / "agent_broken_write_file.txt").read_text()
+    obj, _ = extract_call(raw)
+    content = obj["args"]["content"]
+    assert obj["tool"] == "write_file" and obj["args"]["path"] == "app.py"
+    assert content.startswith("from flask import Flask") and content.endswith("app.run(debug=True)\n")
+    assert "render_template_string('''" in content  # ''' milik kode Python tetap utuh
+    ast.parse(content)
+    assert obj["args"]["reason"].startswith("Membuat backend Flask")
+
+
+def test_compact_respects_budget_and_keeps_latest():
+    big_code = "x = 1\n" * 2000
+    msgs = [{"role": "system", "content": "S" * 3000}, {"role": "user", "content": "TUGAS"}]
+    for i in range(8):
+        msgs.append({"role": "assistant", "content": f"langkah {i} " + big_code})
+        msgs.append({"role": "user", "content": f"[hasil tool read_file]\n{i} " + big_code})
+    out = AgentService._compact(msgs, budget=12_000)
+    assert sum(len(m["content"]) for m in out) <= 12_000
+    assert out[0] == msgs[0] and out[1] == msgs[1]          # system prompt & tugas utuh
+    assert out[-1]["content"].startswith("[hasil tool read_file]\n7")  # langkah terbaru tetap ada
 
 
 def test_tool_validation():
@@ -255,3 +291,32 @@ def test_agent_live_progress_visible_while_model_works(client, auth, project, mo
     assert live["phase"] in ("loading", "prompt", "writing") and live["elapsed"] >= 0
     t = wait_status(client, auth, tid, {"COMPLETED", "FAILED"})
     assert t["status"] == "COMPLETED" and t["live"] is None
+
+
+def test_agent_recovers_from_context_overflow(client, auth, project, model):
+    """llama-server menolak (konteks 8192 terlampaui) → riwayat dipangkas & dicoba ulang, task tidak FAILED."""
+    SCRIPT.extend([J("list_dir"), J("finish", summary="ok setelah dipangkas")])
+    CTX_FAIL["n"] = 1
+    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "cek konteks"},
+                      headers=auth).json()["id"]
+    t = wait_status(client, auth, tid, {"COMPLETED", "FAILED"})
+    assert t["status"] == "COMPLETED", t
+    ev = client.get(f"/api/v1/agent/tasks/{tid}/events", headers=auth).json()["events"]
+    trims = [e["data"] for e in ev if e["kind"] == "context_trim"]
+    assert trims and trims[0]["n_ctx"] == 8192
+    assert SEEN[0].get("rejected") and not SEEN[1].get("rejected")
+
+
+def test_agent_warns_on_repeated_identical_error(client, auth, project, model):
+    """Model mengulang write_file tanpa isi: hasil tool ke-2 memberi PERINGATAN + contoh format persis."""
+    SCRIPT.extend([J("write_file", path="a.css"), J("write_file", path="a.css"),
+                   J("write_file", path="a.css") + "\n```css\nbody { margin: 0; }\n```", J("finish", summary="ok")])
+    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "css", "auto_apply": True},
+                      headers=auth).json()["id"]
+    t = wait_status(client, auth, tid, {"COMPLETED", "FAILED"})
+    assert t["status"] == "COMPLETED", t
+    obs = [e["data"] for e in client.get(f"/api/v1/agent/tasks/{tid}/events", headers=auth).json()["events"]
+           if e["kind"] == "observation"]
+    assert not obs[0]["ok"] and "Contoh persis" in obs[0]["text"] and "PERINGATAN" not in obs[0]["text"]
+    assert not obs[1]["ok"] and "PERINGATAN" in obs[1]["text"]
+    assert obs[2]["ok"]

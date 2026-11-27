@@ -207,7 +207,15 @@ async def _write_file(ctx: ToolContext, a: dict) -> str:
     if content is None:
         content = ctx.code_block
     if content is None:
-        raise ToolError("Isi file tidak ada: isi args.content atau tulis blok kode tepat setelah JSON")
+        raise ToolError(
+            "Isi file tidak ada. Tulis isi file LENGKAP di blok kode TERPISAH tepat setelah blok json, "
+            "dalam balasan yang SAMA. Contoh persis:\n"
+            "```json\n"
+            f'{{"thought": "menulis {a["path"]}", "tool": "write_file", "args": {{"path": "{a["path"]}"}}}}\n'
+            "```\n"
+            "```\n"
+            "<isi file lengkap di sini>\n"
+            "```")
     row = ctx.svc.ai.propose_edit(ctx.user, ctx.project_id, ctx.root, Edit(a["path"], "full", content=content),
                                   reason=a.get("reason", "")[:300] or "agent", task_id=ctx.task["id"])
     return _after_proposal(ctx, row)
