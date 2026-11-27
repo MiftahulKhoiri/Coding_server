@@ -393,6 +393,7 @@ class AgentModelsIn(BaseModel):
     allow_online: bool | None = None
     escalate_after_failures: int | None = Field(default=None, ge=1, le=10)
     max_loaded_models: int | None = Field(default=None, ge=1, le=4)
+    max_steps: int | None = Field(default=None, ge=3, le=500)  # dibatasi lagi oleh CS_AGENT_MAX_STEPS
     approval_mode: Literal["manual", "otomatis", "penuh"] | None = None
 
 
@@ -449,4 +450,4 @@ class AgentTaskCreate(BaseModel):
     description: str = Field(min_length=1, max_length=20_000)
     title: str | None = Field(default=None, max_length=120)
     auto_apply: bool | None = None  # None = ikuti mode izin agent (Model AI → AI Agent)
-    max_steps: int = Field(default=30, ge=3, le=200)
+    max_steps: int | None = Field(default=None, ge=3, le=500)  # None = pakai pengaturan (Model AI → AI Agent)

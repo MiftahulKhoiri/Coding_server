@@ -91,7 +91,7 @@ class Settings:
 
     # AI Coding Agent
     agent_max_concurrent: int = 1   # model lokal = bottleneck RAM; satu task aktif sekaligus
-    agent_max_steps: int = 60
+    agent_max_steps: int = 100
     agent_model_timeout: int = 1800  # detik per jawaban model (model besar di CPU Pi bisa lambat)
     agent_task_timeout: int = 21600  # detik per sesi berjalan (6 jam; task berjalan di latar belakang)
 

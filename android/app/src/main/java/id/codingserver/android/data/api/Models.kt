@@ -238,6 +238,8 @@ import kotlinx.serialization.json.JsonElement
     val planner: AgentRoleModel? = null, val executor: AgentRoleModel? = null, val reviewer: AgentRoleModel? = null,
     val online: AgentRoleModel? = null, val allow_online: Boolean = false, val escalate_after_failures: Int = 2,
     val max_loaded_models: Int = 2, val default: AgentModelTarget? = null,
+    /** Batas langkah bawaan task baru, dan batas atas yang diizinkan server. */
+    val max_steps: Int = 30, val max_steps_limit: Int = 100,
     /** Izin agent menerapkan editan file: manual | otomatis | penuh (bawaan task baru). */
     val approval_mode: String = "manual",
 )
@@ -392,7 +394,9 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class AgentTaskList(val tasks: List<AgentTask> = emptyList())
 @Serializable data class AgentTaskCreate(
     val project_id: String, val description: String, val title: String? = null,
-    val auto_apply: Boolean = false, val max_steps: Int = 30,
+    val auto_apply: Boolean = false,
+    /** null = pakai "Batas langkah per task" di Model AI → AI Agent. */
+    val max_steps: Int? = null,
 )
 @Serializable data class AgentEvent(val id: Int, val ts: Double = 0.0, val kind: String = "",
                                     val data: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()))

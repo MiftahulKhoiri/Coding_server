@@ -316,7 +316,7 @@ class AgentService:
         return "ya (risiko HIGH tetap butuh persetujuan)"
 
     def create(self, user: dict, project_id: str, description: str, title: str | None = None,
-               auto_apply: bool | None = False, max_steps: int = 30) -> dict:
+               auto_apply: bool | None = False, max_steps: int | None = None) -> dict:
         perms = intersect_for_ai(user["perms"])
         if "read" not in perms:
             raise Forbidden("Agen AI tidak punya hak baca untuk pengguna ini")
@@ -332,6 +332,8 @@ class AgentService:
         if self.svc.ai.state["status"] == "loading":
             raise AppError(f"Model masih dimuat: {self.svc.ai.state['message']}", code="ai_loading", status_code=503)
         self._target("executor")  # gagal cepat (503) bila belum ada model sama sekali
+        if max_steps is None:  # bawaan dari pengaturan Model AI → AI Agent
+            max_steps = int(self.svc.ai.agent_models().get("max_steps") or 30)
         tid = uuid.uuid4().hex[:12]
         now = _now()
         self.db.execute(

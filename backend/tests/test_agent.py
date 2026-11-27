@@ -353,3 +353,27 @@ def test_write_file_without_content_is_requested_without_using_a_step(client, au
     assert not any(e["kind"] == "observation" and not e["data"]["ok"] for e in ev)
     # 4 balasan model, tetapi hanya write_file & finish yang dihitung (lanjutan isi & update_plan gratis)
     assert t["steps_used"] == 2, t["steps_used"]
+
+
+def test_default_max_steps_from_settings(client, auth, project, model):
+    """'Batas langkah per task' di Model AI → AI Agent menjadi bawaan task baru (dibatasi CS_AGENT_MAX_STEPS)."""
+    url = "/api/v1/ai/agent-models"
+    try:
+        r = client.put(url, json={"max_steps": 45}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json()["max_steps"] == 45 and r.json()["max_steps_limit"] >= 45
+        assert client.put(url, json={"max_steps": 9999}, headers=auth).status_code == 422
+        assert client.put(url, json={"max_steps": 500}, headers=auth).json()["max_steps"] == \
+            client.app.state.services.settings.agent_max_steps
+        client.put(url, json={"max_steps": 45}, headers=auth)
+        SCRIPT.extend([J("finish", summary="ok")])
+        t = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "x"}, headers=auth).json()
+        assert t["max_steps"] == 45
+        wait_status(client, auth, t["id"], {"COMPLETED", "FAILED"})
+        SCRIPT.extend([J("finish", summary="ok")])
+        t2 = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "y", "max_steps": 12},
+                         headers=auth).json()
+        assert t2["max_steps"] == 12  # nilai eksplisit di permintaan tetap dihormati
+        wait_status(client, auth, t2["id"], {"COMPLETED", "FAILED"})
+    finally:
+        client.put(url, json={"max_steps": 30}, headers=auth)

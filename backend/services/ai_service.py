@@ -55,6 +55,7 @@ DEFAULT_AGENT_MODELS = {
     "allow_online": False,  # 100% lokal secara default
     "escalate_after_failures": 2,  # verifikasi gagal berturut-turut sebelum eskalasi
     "max_loaded_models": 2,        # model lokal yang boleh termuat bersamaan (RAM Pi)
+    "max_steps": 30,               # batas langkah bawaan task baru (bisa diubah di Model AI → AI Agent)
     # Izin agent menerapkan perubahan file (bawaan task baru):
     #   manual   = semua editan menunggu persetujuan di Approval Center
     #   otomatis = risiko rendah/sedang langsung diterapkan; risiko TINGGI menunggu
@@ -62,6 +63,7 @@ DEFAULT_AGENT_MODELS = {
     "approval_mode": "manual",
 }
 APPROVAL_MODES = ("manual", "otomatis", "penuh")
+MIN_TASK_STEPS = 10
 
 
 class AIService:
@@ -185,6 +187,7 @@ class AIService:
     def public_agent_models(self) -> dict:
         conf = self.agent_models()
         out = {k: conf[k] for k in DEFAULT_AGENT_MODELS if k not in AGENT_ROLES}
+        out["max_steps_limit"] = self.s.agent_max_steps  # batas atas server (CS_AGENT_MAX_STEPS)
         for r in AGENT_ROLES:
             t = conf.get(r)
             if t:
@@ -214,6 +217,8 @@ class AIService:
                 cur[k] = max(1, min(int(v), 10))
             elif k == "max_loaded_models" and v is not None:
                 cur[k] = max(1, min(int(v), 4))
+            elif k == "max_steps" and v is not None:
+                cur[k] = max(MIN_TASK_STEPS, min(int(v), self.s.agent_max_steps))
             elif k == "approval_mode" and v is not None:
                 if v not in APPROVAL_MODES:
                     raise AppError("Mode izin agent tidak dikenal", code="bad_approval_mode")

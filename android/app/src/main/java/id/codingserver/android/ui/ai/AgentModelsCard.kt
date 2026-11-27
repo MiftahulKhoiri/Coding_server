@@ -186,6 +186,15 @@ fun AgentModelsSection(vm: AppViewModel, hub: AiModelHubState, isAdmin: Boolean,
                             "model yang lebih kuat (Perencana). Kecil = cepat minta bantuan, besar = Pelaksana dicoba lebih lama.") {
                     save(JsonObject(mapOf("escalate_after_failures" to JsonPrimitive(it))))
                 }
+                HorizontalDivider()
+                Stepper("Batas langkah per task", "langkah (task baru)", a.max_steps,
+                        10..a.max_steps_limit.coerceAtLeast(10), isAdmin && !saving, step = 5,
+                        info = "Jumlah maksimum langkah (balasan model yang menjalankan tool) untuk setiap task baru. " +
+                            "Task yang sedang berjalan tidak berubah. Model lokal di Pi butuh ±1–3 menit per langkah, " +
+                            "jadi 30 langkah ≈ 30–90 menit. Menyusun isi file dan memperbarui rencana tidak dihitung. " +
+                            "Bila habis, tekan \"Ulangi\" di task untuk menambah 10 langkah.") {
+                    save(JsonObject(mapOf("max_steps" to JsonPrimitive(it))))
+                }
             }
 
             // ---- RAM ----
@@ -298,7 +307,7 @@ private fun RoleRow(r: RoleInfo, t: AgentRoleModel?, isAdmin: Boolean, onEdit: (
 
 @Composable
 private fun Stepper(label: String, unit: String, value: Int, range: IntRange, enabled: Boolean, info: String,
-                    onChange: (Int) -> Unit) {
+                    step: Int = 1, onChange: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -307,9 +316,11 @@ private fun Stepper(label: String, unit: String, value: Int, range: IntRange, en
             }
             Text("$value $unit", style = MaterialTheme.typography.labelSmall)
         }
-        TextButton(enabled = enabled && value > range.first, onClick = { onChange(value - 1) }) { Text("−") }
+        TextButton(enabled = enabled && value > range.first,
+                   onClick = { onChange((value - step).coerceAtLeast(range.first)) }) { Text("−") }
         Text("$value", style = MaterialTheme.typography.titleMedium)
-        TextButton(enabled = enabled && value < range.last, onClick = { onChange(value + 1) }) { Text("+") }
+        TextButton(enabled = enabled && value < range.last,
+                   onClick = { onChange((value + step).coerceAtMost(range.last)) }) { Text("+") }
     }
 }
 
