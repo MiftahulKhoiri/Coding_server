@@ -239,3 +239,19 @@ def test_agent_manual_mode_default_waits(client, auth, project, model):
     r = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "x"}, headers=auth)
     assert r.status_code == 201 and r.json()["auto_apply"] is False
     wait_status(client, auth, r.json()["id"], {"COMPLETED", "FAILED"})
+
+
+def test_agent_live_progress_visible_while_model_works(client, auth, project, model):
+    """Selama model bekerja, GET task menyertakan 'live' (tahap, peran, model); hilang setelah selesai."""
+    DELAY["s"] = 1.0
+    SCRIPT.extend([J("finish", summary="ok")])
+    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "x"}, headers=auth).json()["id"]
+    live = None
+    end = time.time() + 10
+    while time.time() < end and live is None:
+        live = client.get(f"/api/v1/agent/tasks/{tid}", headers=auth).json().get("live")
+        time.sleep(0.1)
+    assert live and live["model"] == "coder" and live["role"] in ("planner", "executor")
+    assert live["phase"] in ("loading", "prompt", "writing") and live["elapsed"] >= 0
+    t = wait_status(client, auth, tid, {"COMPLETED", "FAILED"})
+    assert t["status"] == "COMPLETED" and t["live"] is None

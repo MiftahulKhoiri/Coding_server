@@ -63,6 +63,8 @@ import id.codingserver.android.data.api.AgentTask
 import id.codingserver.android.data.api.AgentTaskCreate
 import id.codingserver.android.data.api.ApiClient
 import id.codingserver.android.data.api.apiCall
+import androidx.compose.foundation.layout.Box
+import id.codingserver.android.ui.ai.LiveModelPanel
 import id.codingserver.android.ui.AppViewModel
 import id.codingserver.android.ui.ai.EditCard
 import id.codingserver.android.ui.common.ConfirmDialog
@@ -285,7 +287,7 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
             refresh()
             val st = task?.status ?: break
             if (st in TERMINAL || st == "PAUSED") break
-            delay(if (st == "WAITING_APPROVAL") 4000 else 2000)
+            delay(if (st == "WAITING_APPROVAL") 4000 else if (task?.live != null) 1500 else 2000)
         }
     }
 
@@ -322,6 +324,15 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
         }?.takeIf { it.isNotBlank() }
         val escalated = events.lastOrNull { it.kind == "escalation" || it.kind == "escalation_end" }?.kind == "escalation"
         AgentStatusHero(t, lastKind, lastThought, lastStage, worker, escalated)
+        // Proses model secara langsung (seperti di Laboratorium): tahap, kecepatan, dan teks yang sedang ditulis.
+        t.live?.takeIf { t.status in ACTIVE }?.let { l ->
+            Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                Box(Modifier.padding(10.dp)) {
+                    LiveModelPanel(l, header = listOf("🔴 Langsung", roleName(l.role.orEmpty()), l.model.orEmpty())
+                        .filter { it.isNotBlank() }.joinToString(" · "), textMaxHeight = 140)
+                }
+            }
+        }
         Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (t.status in ACTIVE) {

@@ -185,6 +185,8 @@ class AgentService:
         self._sem = asyncio.Semaphore(max(1, settings.agent_max_concurrent))
         self._tasks: dict[str, asyncio.Task] = {}
         self._pause: set[str] = set()
+        # Proses model yang sedang berjalan per task (di memori, tidak disimpan): tahap, token, teks terakhir.
+        self._live: dict[str, dict] = {}
 
     def recover(self) -> None:
         """Pemulihan saat server mulai (lifespan): task yang sedang berjalan saat server mati menjadi PAUSED,
@@ -231,6 +233,9 @@ class AgentService:
         out["duration"] = round(end - row["started_at"], 1) if row.get("started_at") and end else None
         pend = self.db.one("SELECT COUNT(*) AS n FROM ai_proposals WHERE task_id=? AND status='pending'", (row["id"],))
         out["pending_proposals"] = pend["n"] if pend else 0
+        live = self._live.get(row["id"])
+        out["live"] = (dict(live, elapsed=round(time.time() - live["started"], 1))
+                       if live and row.get("status") not in TERMINAL else None)
         if detail:
             out["plan"] = json.loads(row.get("plan") or "[]")
             out["report"] = json.loads(row["report"]) if row.get("report") else None
@@ -478,6 +483,20 @@ class AgentService:
                          role: str = "executor") -> tuple[str, str, dict]:
         ai = self.svc.ai
         cid, model = target
+        live = {"phase": "loading", "role": role, "model": model, "started": time.time(), "tokens": 0,
+                "reasoning_tokens": 0, "first_token_s": None, "tps": None, "text": "",
+                "approx_prompt_tokens": sum(len(str(m.get("content") or "")) for m in messages) // 4}
+        self._live[task_id] = live
+        try:
+            return await self._ask_model_live(task_id, messages, target, role, live)
+        finally:
+            if self._live.get(task_id) is live:
+                self._live.pop(task_id, None)
+
+    async def _ask_model_live(self, task_id: str, messages: list[dict], target: tuple[str, str], role: str,
+                              live: dict) -> tuple[str, str, dict]:
+        ai = self.svc.ai
+        cid, model = target
         row, prov = await ai.acquire(cid, model, on_status=lambda m: self._update(task_id, current_op=m,
                                                                                  last_activity=_now()))
         conf = ai.settings()
@@ -492,12 +511,27 @@ class AgentService:
         else:  # profil dimatikan: perilaku lama
             temp, max_tok, extra = min(float(conf.get("temperature") or 0.2), 0.4), max(int(conf.get("max_tokens") or 2048), 2048), None
 
+        live.update(phase="prompt", started=time.time())
+
         async def collect() -> None:
             async for kind, text in prov.stream_chat(model, messages, temp, max_tok, extra):
+                now = time.time()
+                if live["first_token_s"] is None:
+                    live["first_token_s"] = round(now - live["started"], 1)
                 if kind == "delta":
                     parts.append(text)
+                    if live["phase"] != "writing":  # pisahkan jawaban dari isi pikiran
+                        live["text"] = ""
+                    live["phase"] = "writing"
+                    live["tokens"] += max(1, len(text) // 4)
                 else:
                     thinking["tokens"] += max(1, len(text) // 4)
+                    live["phase"] = "thinking"
+                    live["reasoning_tokens"] = thinking["tokens"]
+                live["text"] = (live["text"] + text)[-1500:]
+                gen = now - live["started"] - (live["first_token_s"] or 0)
+                if gen > 0.5:
+                    live["tps"] = round((live["tokens"] + live["reasoning_tokens"]) / gen, 2)
                 ai.touch(cid, model)
 
         ai.hold(cid, model)  # cegah model dibongkar selama dipakai

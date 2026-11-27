@@ -295,6 +295,8 @@ import kotlinx.serialization.json.JsonElement
     val phase: String = "", val case: String? = null, val elapsed: Double = 0.0, val tokens: Int = 0,
     val reasoning_tokens: Int = 0, val first_token_s: Double? = null, val tps: Double? = null, val text: String = "",
     val approx_prompt_tokens: Int? = null,
+    /** Hanya untuk AI Agent: peran & model yang sedang bekerja. */
+    val role: String? = null, val model: String? = null,
 )
 @Serializable data class BenchLogEntry(val ts: Double = 0.0, val kind: String = "", val text: String = "")
 @Serializable data class BenchCase(val id: String, val title: String = "", val category: String = "", val description: String = "")
@@ -365,6 +367,8 @@ import kotlinx.serialization.json.JsonElement
     val created_at: Double = 0.0, val started_at: Double? = null, val updated_at: Double = 0.0,
     val finished_at: Double? = null, val duration: Double? = null, val auto_apply: Boolean = false,
     val pending_proposals: Int = 0, val plan: List<AgentPlanStep> = emptyList(), val report: AgentReport? = null,
+    /** Proses model yang sedang berjalan (tahap, token, teks langsung); null bila model tidak sedang bekerja. */
+    val live: BenchLive? = null,
 )
 @Serializable data class AgentTaskList(val tasks: List<AgentTask> = emptyList())
 @Serializable data class AgentTaskCreate(

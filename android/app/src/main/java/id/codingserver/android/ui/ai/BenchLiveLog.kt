@@ -83,36 +83,7 @@ fun BenchLiveLog(c: ApiClient, runId: String) {
     }
     val r = run ?: return
     Column(Modifier.fillMaxWidth().animateContentSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        r.live?.let { l ->
-            val (txt, col) = phaseText(l)
-            val tr = rememberInfiniteTransition(label = "live")
-            val blink by tr.animateFloat(0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "blink")
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.width(10.dp).heightIn(min = 10.dp, max = 10.dp).clip(RoundedCornerShape(50))
-                        .alpha(blink).background(col))
-                Spacer(Modifier.width(8.dp))
-                Text(txt, color = col, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
-                     modifier = Modifier.weight(1f))
-                Text("${l.elapsed.toInt()} dtk", style = MaterialTheme.typography.labelSmall)
-                InfoButton("Tahap proses model",
-                    "📦 Memuat model: file model dibaca ke RAM Pi (1–3 menit).\n" +
-                        "📖 Membaca prompt: model memproses instruksi & riwayat sebelum menjawab — di CPU Pi bagian " +
-                        "paling lama (1–5 menit per kasus), belum ada teks yang keluar.\n" +
-                        "🧠 Berpikir: model penalaran (mis. Qwen3.5) menulis pikirannya dulu.\n" +
-                        "✍️ Menulis jawaban: teks jawaban keluar token demi token.\n" +
-                        "🧪 Memeriksa: format JSON dicek & kode dijalankan di sandbox terhadap tes tersembunyi.")
-            }
-            if (l.text.isNotBlank()) {
-                Text(if (l.phase == "thinking") "Isi pikiran model (langsung):" else "Yang sedang ditulis model (langsung):",
-                     style = MaterialTheme.typography.labelSmall)
-                val scroll = rememberScrollState()
-                LaunchedEffect(l.text) { scroll.scrollTo(scroll.maxValue) }
-                Box(Modifier.fillMaxWidth().heightIn(max = 160.dp).clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF1E1E1E)).padding(8.dp).verticalScroll(scroll)) {
-                    Text(l.text + "▌", style = Mono, color = if (l.phase == "thinking") Color(0xFFCE93D8) else Color(0xFFE0E0E0))
-                }
-            }
-        }
+        r.live?.let { l -> LiveModelPanel(l) }
         if (r.log.isNotEmpty()) {
             HorizontalDivider()
             val lines = if (showAll) r.log else r.log.takeLast(8)
@@ -121,6 +92,48 @@ fun BenchLiveLog(c: ApiClient, runId: String) {
             if (r.log.size > 8) TextButton(onClick = { showAll = !showAll }) {
                 Text(if (showAll) "Tampilkan 8 terakhir" else "Tampilkan semua (${r.log.size})")
             }
+        }
+    }
+}
+
+/**
+ * Proses model secara langsung: tahap (memuat / membaca prompt / berpikir / menulis), kecepatan, dan teks yang
+ * sedang keluar dari model. Dipakai Laboratorium (Uji Model) dan AI Agent.
+ */
+@Composable
+fun LiveModelPanel(l: BenchLive, header: String? = null, textMaxHeight: Int = 160) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        header?.let { Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+        val (txt, col) = phaseText(l)
+        val tr = rememberInfiniteTransition(label = "live")
+        val blink by tr.animateFloat(0.35f, 1f, infiniteRepeatable(tween(700), RepeatMode.Reverse), label = "blink")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(10.dp).heightIn(min = 10.dp, max = 10.dp).clip(RoundedCornerShape(50))
+                    .alpha(blink).background(col))
+            Spacer(Modifier.width(8.dp))
+            Text(txt, color = col, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold,
+                 modifier = Modifier.weight(1f))
+            Text("${l.elapsed.toInt()} dtk", style = MaterialTheme.typography.labelSmall)
+            InfoButton("Tahap proses model",
+                "📦 Memuat model: file model dibaca ke RAM Pi (1–3 menit).\n" +
+                    "📖 Membaca prompt: model memproses instruksi & riwayat sebelum menjawab — di CPU Pi bagian " +
+                    "paling lama (bisa beberapa menit), belum ada teks yang keluar.\n" +
+                    "🧠 Berpikir: model penalaran (mis. Qwen3.5) menulis pikirannya dulu.\n" +
+                    "✍️ Menulis jawaban: teks jawaban keluar token demi token.\n" +
+                    "🧪 Memeriksa: format JSON dicek & kode dijalankan di sandbox terhadap tes tersembunyi.")
+        }
+        if (l.text.isNotBlank()) {
+            Text(if (l.phase == "thinking") "Isi pikiran model (langsung):" else "Yang sedang ditulis model (langsung):",
+                 style = MaterialTheme.typography.labelSmall)
+            val scroll = rememberScrollState()
+            LaunchedEffect(l.text) { scroll.scrollTo(scroll.maxValue) }
+            Box(Modifier.fillMaxWidth().heightIn(max = textMaxHeight.dp).clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF1E1E1E)).padding(8.dp).verticalScroll(scroll)) {
+                Text(l.text + "▌", style = Mono, color = if (l.phase == "thinking") Color(0xFFCE93D8) else Color(0xFFE0E0E0))
+            }
+        } else if (l.phase == "prompt") {
+            Text("Model sedang membaca instruksi & konteks — teks muncul di sini begitu model mulai berpikir/menulis.",
+                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
