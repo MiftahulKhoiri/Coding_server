@@ -12,13 +12,16 @@ from backend.services.agent_tools import TOOLS, ToolError
 SCRIPT: list[str] = []
 SEEN: list[dict] = []
 DELAY = {"s": 0.0}
-CTX_FAIL = {"n": 0}  # jumlah permintaan berikutnya yang ditolak "konteks terlampaui" (seperti llama-server)
+CTX_FAIL = {"n": 0}
+SLOW_FROM = {"n": None, "s": 30.0}  # permintaan chat ke-n dst. dibuat lambat (model "berpikir" lama)  # jumlah permintaan berikutnya yang ditolak "konteks terlampaui" (seperti llama-server)
 
 
 async def _handler(request: httpx.Request) -> httpx.Response:
     import asyncio
 
     await asyncio.sleep(DELAY["s"])
+    if request.url.path != "/v1/models" and SLOW_FROM["n"] is not None and len(SEEN) + 1 >= SLOW_FROM["n"]:
+        await asyncio.sleep(SLOW_FROM["s"])
     if request.url.path == "/v1/models":
         return httpx.Response(200, json={"data": [{"id": "coder"}]})
     if CTX_FAIL["n"] > 0:
@@ -40,6 +43,7 @@ def fake(monkeypatch):
     SEEN.clear()
     DELAY["s"] = 0.0
     CTX_FAIL["n"] = 0
+    SLOW_FROM["n"] = None
     AgentService._ctx_tokens.clear()
 
 
@@ -377,3 +381,43 @@ def test_default_max_steps_from_settings(client, auth, project, model):
         wait_status(client, auth, t2["id"], {"COMPLETED", "FAILED"})
     finally:
         client.put(url, json={"max_steps": 30}, headers=auth)
+
+
+def test_pause_while_model_thinks_is_immediate_and_resume_is_safe(client, auth, project, model):
+    """Jeda saat model masih berpikir langsung berhenti (tidak menunggu jawaban); lanjutkan mengulang langkah
+    itu dari checkpoint tanpa merusak hasil yang sudah ada."""
+    SCRIPT.extend([J("write_file", path="satu.txt") + "\n```\nsatu\n```"])
+    SLOW_FROM["n"] = 2  # langkah ke-2: model "lambat" seperti di Pi
+    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "jeda", "auto_apply": True},
+                      headers=auth).json()["id"]
+    end = time.time() + 20
+    while not (client.app.state.services.projects.project_dir(project) / "satu.txt").exists():
+        assert time.time() < end
+        time.sleep(0.1)
+    time.sleep(0.5)
+    t0 = time.time()
+    r = client.post(f"/api/v1/agent/tasks/{tid}/pause", headers=auth)
+    assert r.status_code == 200, r.text
+    t = wait_status(client, auth, tid, {"PAUSED"}, timeout=10)
+    assert time.time() - t0 < 10  # tidak menunggu 30 detik jawaban model
+    assert t["steps_used"] == 1
+    root = client.app.state.services.projects.project_dir(project)
+    assert (root / "satu.txt").read_text() == "satu\n"  # hasil langkah sebelumnya utuh
+    SLOW_FROM["n"] = None
+    SCRIPT.clear()
+    SCRIPT.extend([J("write_file", path="dua.txt") + "\n```\ndua\n```", J("finish", summary="ok")])
+    assert client.post(f"/api/v1/agent/tasks/{tid}/resume", headers=auth).status_code == 200
+    t = wait_status(client, auth, tid, {"COMPLETED", "FAILED"})
+    assert t["status"] == "COMPLETED", t
+    assert (root / "satu.txt").read_text() == "satu\n" and (root / "dua.txt").read_text() == "dua\n"
+    assert t["steps_used"] == 3
+
+
+def test_resumed_task_uses_latest_system_prompt(client):
+    from backend.services.agent_service import system_prompt
+
+    svc = client.app.state.services.agent
+    row = {"checkpoint": json.dumps({"messages": [{"role": "system", "content": "aturan lama"},
+                                                   {"role": "user", "content": "TUGAS"}]})}
+    msgs = svc._messages(row, {"read", "write", "execute", "build"})
+    assert msgs[0]["content"] == system_prompt({"read", "write", "execute", "build"}) and msgs[1]["content"] == "TUGAS"

@@ -247,6 +247,7 @@ class AgentService:
         self._sem = asyncio.Semaphore(max(1, settings.agent_max_concurrent))
         self._tasks: dict[str, asyncio.Task] = {}
         self._pause: set[str] = set()
+        self._pause_now: set[str] = set()  # jeda segera: panggilan model yang sedang berjalan dihentikan
         # Proses model yang sedang berjalan per task (di memori, tidak disimpan): tahap, token, teks terakhir.
         self._live: dict[str, dict] = {}
 
@@ -392,7 +393,15 @@ class AgentService:
         if row["status"] not in ACTIVE:
             raise Conflict(f"Task berstatus {row['status']}, tidak bisa dijeda")
         self._pause.add(task_id)
-        self._update(task_id, current_op="Akan dijeda setelah langkah ini selesai")
+        t = self._tasks.get(task_id)
+        if task_id in self._live and t and not t.done():
+            # Sedang menunggu model (bisa >10 menit di Pi): hentikan sekarang. Aman — checkpoint sudah tersimpan
+            # sesudah langkah terakhir yang selesai; langkah yang belum dijawab model diulang saat dilanjutkan.
+            self._pause_now.add(task_id)
+            t.cancel()
+            self._update(task_id, current_op="Menjeda… (menghentikan model)")
+        else:  # sedang menjalankan tool (tulis file, build/test): tunggu selesai supaya tidak setengah jalan
+            self._update(task_id, current_op="Akan dijeda setelah langkah ini selesai")
         return self.get(user, task_id)
 
     def resume(self, user: dict, task_id: str) -> dict:
@@ -455,7 +464,11 @@ class AgentService:
     def _messages(self, row: dict, ai_perms: set[str]) -> list[dict]:
         if row.get("checkpoint"):
             try:
-                return json.loads(row["checkpoint"])["messages"]
+                msgs = json.loads(row["checkpoint"])["messages"]
+                if msgs and msgs[0].get("role") == "system":
+                    # Aturan & daftar tool terbaru juga berlaku untuk task yang dilanjutkan dari checkpoint.
+                    msgs[0] = {"role": "system", "content": system_prompt(ai_perms)}
+                return msgs
             except (ValueError, KeyError):
                 pass
         proj = self.svc.projects.get(row["project_id"], self._owner(row))
@@ -657,6 +670,7 @@ class AgentService:
                 self._ctx_tokens[model] = min(self._ctx_tokens.get(model, known), known)
                 budget = min(int(sent * 0.7), self._budget(model, int(max_tok or 2048)))
                 messages = self._compact(messages, budget)
+                live["approx_prompt_tokens"] = sum(len(str(x.get("content") or "")) for x in messages) // 4
                 self._event(task_id, "context_trim", {"model": model, "n_ctx": self._ctx_tokens[model],
                                                       "chars_before": sent,
                                                       "chars_after": sum(len(x["content"]) for x in messages)})
@@ -710,6 +724,12 @@ class AgentService:
             except asyncio.TimeoutError:
                 self._fail(task_id, f"Melebihi batas waktu task ({self.s.agent_task_timeout} detik)")
             except asyncio.CancelledError:
+                if task_id in self._pause_now:  # jeda segera (bukan batal)
+                    self._pause_now.discard(task_id)
+                    self._pause.discard(task_id)
+                    self._live.pop(task_id, None)
+                    self._set_stage(task_id, "PAUSED", "Dijeda pengguna — langkah yang belum selesai diulang saat dilanjutkan")
+                    return
                 row = self.db.one("SELECT status FROM agent_tasks WHERE id=?", (task_id,))
                 if row and row["status"] not in TERMINAL:
                     self._update(task_id, status="CANCELLED", current_op="Dibatalkan", finished_at=_now())
