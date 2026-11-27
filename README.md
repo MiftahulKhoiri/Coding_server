@@ -20,6 +20,11 @@ Raspberry Pi 5 — FastAPI (Python 3)
 - **Multi-bahasa (11 engine)**: Python 3, JavaScript (Node.js), PHP, Go, C (GCC), C++ (G++), Java (JDK), C# (.NET 8), SQL (SQLite), HTML/CSS (pratinjau), Bash. Status setiap engine diperiksa nyata (`AVAILABLE` / `NOT_INSTALLED` / `ERROR`).
 - **Execution manager**: antrean job, batas job bersamaan, tolak/tunda saat RAM hampir habis, timeout, batas RAM (watchdog RSS + RLIMIT_AS), batas CPU & ukuran file, batas output, pembatalan, stdin interaktif, streaming output via WebSocket, riwayat eksekusi. Status: `QUEUED → STARTING → RUNNING → COMPLETED/FAILED/TIMEOUT/CANCELLED`.
 - **Sandbox nyata** (bubblewrap): sistem read-only, `$HOME` diganti tmpfs (kunci SSH/token tidak terlihat), hanya folder proyek yang bisa ditulis, jaringan diputus (bisa diaktifkan), PID/IPC terpisah.
+- **Instal dependensi** (`POST /execution/install`, tombol ⬇ di Explorer, tool agen `install_deps`): pip → `.venv`
+  proyek (otomatis dipakai saat Jalankan & uji), `npm install`, `go mod download`, `composer install`. Hanya langkah
+  instal yang mendapat internet (`CS_INSTALL_NETWORK`, bawaan aktif); program biasa tetap tanpa jaringan.
+- **Profil & pengguna**: nama tampilan, email, bio, ganti sandi sendiri; admin mengelola akun (peran, reset sandi,
+  nonaktif, hapus — proyeknya pindah ke admin utama).
 - **Terminal interaktif** (PTY + WebSocket), banyak sesi, di dalam sandbox, idle timeout.
 - **File manager** aman: CRUD, rename/copy/move, cari nama & isi, favorit, file terakhir, tulis atomik, deteksi konflik (SHA-256), riwayat versi + undo/restore, proteksi path traversal & symlink.
 - **Editor CodeMirror 6** di WebView: syntax highlighting 18+ bahasa, nomor baris, auto indent, bracket matching, find/replace, banyak tab, undo/redo, code folding, word wrap, ukuran font, tema gelap/terang, autocomplete, diagnostics dari output compiler, simbol dokumen.
@@ -46,7 +51,11 @@ cd ~/Coding_server
 ```
 Installer memeriksa OS/ARM64/Python/dependensi, membuat venv, memasang paket, memasang runtime opsional,
 menguji setiap engine, membuat konfigurasi, memasang **systemd service** (`coding-server`), lalu health check.
-Password admin awal ditampilkan dan tersimpan di `workspace/metadata/initial_admin_password.txt` (hapus setelah dicatat).
+Password admin awal ditampilkan dan tersimpan di `workspace/metadata/initial_admin_password.txt`.
+Akun `admin` adalah **admin utama (root)**: akun pemulihan yang tidak bisa dihapus, dinonaktifkan, atau diubah
+perannya, dan sandinya hanya diatur dari server — lihat/ganti dengan `scripts/admin_password.sh`
+(`--set` / `--random`), atau isi `CS_ADMIN_PASSWORD`. Untuk pemakaian harian, buat profil sendiri di
+APK → Pengaturan → Pengguna; bila sandinya lupa, login sebagai admin utama lalu reset.
 
 Mode autostart yang dipilih otomatis:
 1. `sudo` tanpa password tersedia → systemd **system** service (`scripts/install_systemd.sh`).

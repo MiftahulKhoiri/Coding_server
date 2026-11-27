@@ -300,6 +300,41 @@ async def _run_tests(ctx: ToolContext, a: dict) -> str:
     return f"Perintah: {' '.join(t.argv)}\n" + _job_summary(job)
 
 
+async def _install_deps(ctx: ToolContext, a: dict) -> str:
+    """Pasang dependensi proyek. Perintah disusun server (deps_install); hanya langkah ini yang
+    mendapat jaringan, tetap di dalam sandbox dengan folder proyek sebagai satu-satunya tempat tulis."""
+    from backend.services import deps_install
+
+    if _pending(ctx):
+        raise NeedsApproval()
+    svc = ctx.svc
+    cache = svc.settings.cache_dir / "lang"
+    try:
+        plans = deps_install.plan(ctx.root, cache, a.get("kind"), a.get("packages"))
+    except AppError as e:
+        raise ToolError(e.message)
+    if not svc.settings.install_network:
+        note = "PERINGATAN: CS_INSTALL_NETWORK=false, instal tanpa internet kemungkinan gagal.\n"
+    else:
+        note = ""
+    reports = []
+    for pl in plans:
+        job = await svc.execution.submit_commands(
+            user=ctx.user, project_id=ctx.project_id, project_dir=ctx.root, commands=pl.commands,
+            action="install", label=f"install:{pl.kind}", timeout=svc.settings.install_timeout,
+            network=svc.settings.install_network)
+        ctx.task["_last_job"] = job.id
+        await svc.execution.wait(job, timeout=svc.settings.install_timeout * max(1, len(pl.commands)) + 60)
+        ctx.task.setdefault("_runs", []).append({"kind": "install", "target": pl.kind, "status": job.status,
+                                                 "exit_code": job.exit_code, "process_id": job.id})
+        head = f"[{pl.label}] " + " && ".join(" ".join(c[0][-6:]) for c in pl.commands)
+        tail = ""
+        if job.status == "COMPLETED" and pl.kind == "python":
+            tail = "\nPaket terpasang di .venv proyek; run_file & run_tests otomatis memakai .venv ini."
+        reports.append(head + "\n" + _job_summary(job) + tail)
+    return clip(note + "\n\n".join(reports))
+
+
 # ---------------- git (baca saja) ----------------
 async def _git_status(ctx: ToolContext, _: dict) -> str:
     if not (ctx.root / ".git").is_dir():
@@ -346,6 +381,13 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          {"path": Arg("string", True)}, timeout=900, handler=_build_file),
     Tool("run_file", "Jalankan satu file program di sandbox dan lihat output.", "execute", "TESTING",
          {"path": Arg("string", True), "args": Arg("array"), "stdin": Arg("string")}, timeout=900, handler=_run_file),
+    Tool("install_deps", "Pasang dependensi proyek (butuh internet; program biasa TIDAK punya internet). "
+         "Tanpa args: dari requirements.txt/pyproject.toml (pip → .venv proyek), package.json (npm), go.mod, "
+         "composer.json. packages=[\"flask\", \"requests>=2\"] untuk paket tambahan; kind=python|node|go|php "
+         "bila proyek campuran.", "execute", "BUILDING",
+         {"packages": Arg("array", description="nama paket tambahan (opsional)"),
+          "kind": Arg("string", description="python|node|go|php (opsional)")},
+         timeout=3600, handler=_install_deps),
     Tool("list_tests", "Daftar perintah uji yang terdeteksi.", "read", "INSPECTING", handler=_list_tests),
     Tool("run_tests", "Jalankan perintah uji terdeteksi (id dari list_tests; default yang pertama).", "execute",
          "TESTING", {"id": Arg("string")}, timeout=900, handler=_run_tests),

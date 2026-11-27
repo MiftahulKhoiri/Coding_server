@@ -13,6 +13,16 @@ SCHEMA_VERSION = 3
 
 # Kolom tambahan (migrasi ringan, idempoten): tabel -> [(kolom, definisi)]
 MIGRATIONS: dict[str, list[tuple[str, str]]] = {
+    "users": [
+        ("display_name", "TEXT NOT NULL DEFAULT ''"),  # nama tampilan profil
+        ("email", "TEXT NOT NULL DEFAULT ''"),
+        ("bio", "TEXT NOT NULL DEFAULT ''"),
+        # 1 = akun admin utama (root): tidak bisa dihapus/dinonaktifkan/diubah perannya, dan
+        # sandinya hanya bisa diatur dari server (CS_ADMIN_PASSWORD) → akun pemulihan bila lupa sandi.
+        ("is_root", "INTEGER NOT NULL DEFAULT 0"),
+        ("updated_at", "REAL NOT NULL DEFAULT 0"),
+        ("last_login_at", "REAL"),
+    ],
     "ai_proposals": [
         ("conversation_id", "INTEGER"), ("message_id", "INTEGER"),
         ("base_sha256", "TEXT"), ("new_sha256", "TEXT"), ("old_content", "TEXT"),

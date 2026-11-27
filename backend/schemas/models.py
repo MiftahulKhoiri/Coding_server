@@ -42,6 +42,12 @@ class UserOut(BaseModel):
     is_active: bool
     permissions: list[str]
     created_at: float
+    display_name: str = ""
+    email: str = ""
+    bio: str = ""
+    is_root: bool = False  # admin utama: tidak bisa dihapus/diubah, sandi diatur dari server
+    updated_at: float = 0.0
+    last_login_at: float | None = None
 
 
 class TokenResponse(BaseModel):
@@ -54,15 +60,32 @@ class TokenResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    username: str
-    password: str = Field(min_length=8)
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=256)
     role: Literal["admin", "developer", "runner", "viewer", "ai"] = "developer"
+    display_name: str = Field(default="", max_length=80)
+    email: str = Field(default="", max_length=120)
 
 
 class UserUpdate(BaseModel):
     role: Literal["admin", "developer", "runner", "viewer", "ai"] | None = None
     is_active: bool | None = None
-    password: str | None = Field(default=None, min_length=8)
+    password: str | None = Field(default=None, min_length=8, max_length=256)
+    display_name: str | None = Field(default=None, max_length=80)
+    email: str | None = Field(default=None, max_length=120)
+
+
+class ProfileUpdate(BaseModel):
+    display_name: str | None = Field(default=None, max_length=80)
+    email: str | None = Field(default=None, max_length=120)
+    bio: str | None = Field(default=None, max_length=500)
+
+
+class UserDeleted(BaseModel):
+    ok: bool = True
+    message: str = ""
+    username: str
+    projects_moved: int = 0
 
 
 class PasswordChange(BaseModel):
@@ -162,6 +185,12 @@ class RunRequest(BaseModel):
     stdin: str | None = Field(default=None, max_length=1_000_000)
     interactive: bool = False
     timeout: int | None = Field(default=None, ge=1, le=3600)
+
+
+class InstallRequest(BaseModel):
+    project_id: str
+    kind: Literal["python", "node", "go", "php"] | None = None
+    packages: list[str] = Field(default_factory=list, max_length=20)
 
 
 class JobOut(BaseModel):

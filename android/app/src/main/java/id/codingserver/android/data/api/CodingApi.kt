@@ -16,6 +16,12 @@ interface CodingApi {
     @POST("api/v1/auth/login") suspend fun login(@Body body: LoginRequest): TokenResponse
     @POST("api/v1/auth/logout") suspend fun logout(@Body body: LogoutRequest): OkResponse
     @GET("api/v1/auth/me") suspend fun me(): UserOut
+    @PATCH("api/v1/auth/me") suspend fun updateMe(@Body body: ProfileUpdate): UserOut
+    @POST("api/v1/auth/password") suspend fun changePassword(@Body body: PasswordChange): OkResponse
+    @GET("api/v1/auth/users") suspend fun users(): List<UserOut>
+    @POST("api/v1/auth/users") suspend fun createUser(@Body body: UserCreate): UserOut
+    @PATCH("api/v1/auth/users/{id}") suspend fun updateUser(@Path("id") id: Int, @Body body: UserUpdate): UserOut
+    @DELETE("api/v1/auth/users/{id}") suspend fun deleteUser(@Path("id") id: Int): UserDeleted
 
     // system
     @GET("api/v1/system/health") suspend fun health(): Health
@@ -55,6 +61,8 @@ interface CodingApi {
     // execution
     @POST("api/v1/execution/run") suspend fun run(@Body body: RunRequest): Job
     @POST("api/v1/execution/build") suspend fun build(@Body body: RunRequest): Job
+    @GET("api/v1/execution/install") suspend fun installPlan(@Query("project_id") projectId: String): InstallPlan
+    @POST("api/v1/execution/install") suspend fun install(@Body body: InstallRequest): Job
     @GET("api/v1/execution") suspend fun executions(@Query("project_id") projectId: String? = null, @Query("limit") limit: Int = 50): JobList
     @GET("api/v1/execution/{pid}") suspend fun job(@Path("pid") pid: String): Job
     @POST("api/v1/execution/{pid}/stop") suspend fun stop(@Path("pid") pid: String): Job

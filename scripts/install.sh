@@ -64,6 +64,6 @@ fi
 # 9. Jalankan & health check
 if user_systemd_installed || systemd_installed; then "$BASE/scripts/start.sh"; else "$BASE/scripts/restart.sh"; fi
 if [ -f workspace/metadata/initial_admin_password.txt ]; then
-  echo; c_info "Login awal (simpan lalu hapus file ini):"; cat workspace/metadata/initial_admin_password.txt
+  echo; c_info "Login admin utama (file ini sumber sandi admin utama, jangan dihapus; ganti: scripts/admin_password.sh --set):"; cat workspace/metadata/initial_admin_password.txt
 fi
 c_info "Untuk menghapus instalasi nanti: ./scripts/uninstall.sh --help"

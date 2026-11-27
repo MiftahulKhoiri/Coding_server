@@ -8,6 +8,7 @@ import id.codingserver.android.CodingServerApp
 import id.codingserver.android.data.api.ApiClient
 import id.codingserver.android.data.api.ApiException
 import id.codingserver.android.data.api.FileEntry
+import id.codingserver.android.data.api.InstallRequest
 import id.codingserver.android.data.api.Job
 import id.codingserver.android.data.api.JobEvent
 import id.codingserver.android.data.api.JobStream
@@ -287,6 +288,16 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val req = RunRequest(project_id = pid, path = entry.path, args = args, stdin = stdin, interactive = interactive)
         return apiCall { if (build) c.api.build(req) else c.api.run(req) }.onSuccess { attach(it) }
     }
+
+    /** Instal dependensi proyek (pip → .venv, npm, go, composer) di server; output tampil di layar Output. */
+    suspend fun installDeps(projectId: String? = null, packages: List<String> = emptyList()): Result<Job> {
+        val c = _client.value ?: return Result.failure(ApiException("no_server", "Tidak terhubung"))
+        val pid = projectId ?: _project.value?.id ?: return Result.failure(ApiException("no_project", "Buka proyek dulu"))
+        return apiCall { c.api.install(InstallRequest(project_id = pid, packages = packages)) }.onSuccess { attach(it) }
+    }
+
+    /** Perbarui data akun yang sedang login (setelah ubah profil). */
+    fun setUser(u: UserOut) { _user.value = u }
 
     fun attach(job: Job) {
         val c = _client.value ?: return

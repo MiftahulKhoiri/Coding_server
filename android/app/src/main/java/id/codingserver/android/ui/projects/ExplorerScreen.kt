@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
@@ -72,13 +73,15 @@ private fun join(parent: String, name: String) = if (parent.isEmpty()) name else
 /** Project Explorer: pohon folder, buka/buat/ganti nama/hapus/salin/pindah/cari/refresh. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (FileEntry) -> Unit) {
+fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (FileEntry) -> Unit,
+                   onInstall: (List<String>) -> Unit = {}) {
     val client by vm.client.collectAsState()
     val project by vm.project.collectAsState()
     val children = remember { mutableStateMapOf<String, List<FileEntry>>() }
     val expanded = remember { mutableStateListOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var dialog by remember { mutableStateOf<Dlg?>(null) }
+    var installDlg by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var searchContent by remember { mutableStateOf(false) }
@@ -120,8 +123,10 @@ fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (Fi
             IconButton(onClick = { dialog = Dlg.NewFile("") }) { Icon(Icons.AutoMirrored.Filled.NoteAdd, "File baru") }
             IconButton(onClick = { dialog = Dlg.NewFolder("") }) { Icon(Icons.Default.CreateNewFolder, "Folder baru") }
             IconButton(onClick = { searching = !searching; results = null }) { Icon(Icons.Default.Search, "Cari") }
+            IconButton(onClick = { installDlg = true }) { Icon(Icons.Default.Download, "Instal dependensi") }
             IconButton(onClick = { refreshAll() }) { Icon(Icons.Default.Refresh, "Refresh") }
         }
+        if (installDlg) InstallDepsDialog(c, p.id, onInstall = onInstall, onDismiss = { installDlg = false })
         if (searching) {
             Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(query, { query = it }, singleLine = true, label = { Text(if (searchContent) "Cari isi file" else "Cari nama (*.py)") },

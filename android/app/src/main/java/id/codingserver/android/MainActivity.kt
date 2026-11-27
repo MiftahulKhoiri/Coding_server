@@ -370,6 +370,12 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
                     vm.execute(e, build = false).onSuccess { nav.navigate("output") { launchSingleTop = true } }
                         .onFailure { vm.toast(it.message ?: "Gagal") }
                 }
+            }, onInstall = { pkgs ->
+                vm.toast("Menginstal dependensi…")
+                scope.launch {
+                    vm.installDeps(packages = pkgs).onSuccess { nav.navigate("output") { launchSingleTop = true } }
+                        .onFailure { vm.toast(it.message ?: "Gagal") }
+                }
             })
         }
         composable("editor") { EditorScreen(vm, editor, onMenu) { nav.navigate("output") { launchSingleTop = true } } }

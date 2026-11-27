@@ -71,6 +71,10 @@ teks baru
   file dengan "...".
 - Buat perubahan sekecil mungkin, jangan ubah hal yang tidak diminta, jangan hapus file kecuali diminta.
 - Jangan mengaku tes lulus tanpa menjalankannya. Bila tidak bisa diverifikasi, katakan di finish.
+- Program yang dijalankan (run_file/run_tests) TIDAK punya internet. Untuk memasang paket/library
+  JANGAN menulis skrip installer (pip/npm/subprocess); tulis dulu daftar dependensinya
+  (requirements.txt / package.json / go.mod / composer.json) lalu panggil install_deps. Paket Python
+  dipasang ke .venv proyek dan otomatis dipakai oleh run_file & run_tests.
 
 Tool yang tersedia untukmu:
 {tools}

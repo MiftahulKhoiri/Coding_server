@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 from backend.core.exceptions import AppError, Forbidden
 from backend.dependencies import Services, current_user, project_dir, require, services, ws_user
-from backend.schemas.models import JobOut, RunRequest, StdinRequest
+from backend.schemas.models import InstallRequest, JobOut, RunRequest, StdinRequest
 
 router = APIRouter(prefix="/execution", tags=["execution"])
 ws_router = APIRouter(tags=["websocket"])
@@ -36,6 +36,42 @@ async def build(body: RunRequest, user: dict = Depends(require("build")), svc: S
     job = await svc.execution.submit(user=user, project_id=body.project_id, project_dir=root, file_rel=body.path,
                                      action="build", language=body.language)
     svc.db.audit("build", user=user, target=f"{body.project_id}:{body.path}", detail={"process_id": job.id})
+    return job.public()
+
+
+@router.get("/install", summary="Rencana instal dependensi yang terdeteksi di proyek (tanpa menjalankan)")
+def install_plan(project_id: str, user: dict = Depends(require("read")), svc: Services = Depends(services)):
+    from backend.services import deps_install
+
+    root = project_dir(svc, project_id, user)
+    kinds = deps_install.detect_kinds(root)
+    plans = []
+    for k in kinds:
+        try:
+            plans.append(deps_install.plan(root, svc.settings.cache_dir / "lang", k)[0].public())
+        except AppError as e:
+            plans.append({"kind": k, "error": e.message})
+    venv = deps_install.project_python(root)
+    return {"kinds": kinds, "plans": plans, "venv": str(venv.relative_to(root)) if venv else None,
+            "network": svc.settings.install_network}
+
+
+@router.post("/install", response_model=JobOut, status_code=202,
+             summary="Instal dependensi proyek (pip → .venv, npm, go, composer) di sandbox dengan internet")
+async def install(body: InstallRequest, user: dict = Depends(require("execute")), svc: Services = Depends(services)):
+    from backend.services import deps_install
+
+    if "write" not in user["perms"]:
+        raise Forbidden("Instal dependensi butuh izin write (mengubah folder proyek)")
+    root = project_dir(svc, body.project_id, user)
+    plans = deps_install.plan(root, svc.settings.cache_dir / "lang", body.kind, body.packages)
+    commands = [c for pl in plans for c in pl.commands]
+    job = await svc.execution.submit_commands(
+        user=user, project_id=body.project_id, project_dir=root, commands=commands, action="install",
+        label="install:" + "+".join(pl.kind for pl in plans), timeout=svc.settings.install_timeout,
+        network=svc.settings.install_network)
+    svc.db.audit("install_deps", user=user, target=body.project_id,
+                 detail={"process_id": job.id, "kinds": [pl.kind for pl in plans], "packages": body.packages})
     return job.public()
 
 

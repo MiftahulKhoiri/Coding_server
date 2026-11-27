@@ -14,7 +14,24 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class UserOut(
     val id: Int, val username: String, val role: String, val is_active: Boolean = true,
     val permissions: List<String> = emptyList(), val created_at: Double = 0.0,
+    val display_name: String = "", val email: String = "", val bio: String = "",
+    /** Admin utama: tidak bisa dihapus/diubah; sandinya hanya diatur dari server (akun pemulihan). */
+    val is_root: Boolean = false, val updated_at: Double = 0.0, val last_login_at: Double? = null,
+) {
+    val shownName: String get() = display_name.ifBlank { username }
+}
+@Serializable data class ProfileUpdate(val display_name: String? = null, val email: String? = null, val bio: String? = null)
+@Serializable data class PasswordChange(val old_password: String, val new_password: String)
+@Serializable data class UserCreate(
+    val username: String, val password: String, val role: String = "developer",
+    val display_name: String = "", val email: String = "",
 )
+@Serializable data class UserUpdate(
+    val role: String? = null, val is_active: Boolean? = null, val password: String? = null,
+    val display_name: String? = null, val email: String? = null,
+)
+@Serializable data class UserDeleted(val ok: Boolean = true, val message: String = "", val username: String = "",
+                                     val projects_moved: Int = 0)
 @Serializable data class TokenResponse(
     val access_token: String, val refresh_token: String, val token_type: String = "bearer",
     val expires_at: Long, val refresh_expires_at: Long, val user: UserOut,
@@ -378,3 +395,11 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class AgentEvent(val id: Int, val ts: Double = 0.0, val kind: String = "",
                                     val data: kotlinx.serialization.json.JsonObject = kotlinx.serialization.json.JsonObject(emptyMap()))
 @Serializable data class AgentEvents(val events: List<AgentEvent> = emptyList())
+
+// ---------- instal dependensi ----------
+@Serializable data class InstallRequest(val project_id: String, val kind: String? = null, val packages: List<String> = emptyList())
+@Serializable data class InstallPlanItem(val kind: String = "", val label: String = "", val manifest: String = "",
+                                         val note: String = "", val commands: List<String> = emptyList(),
+                                         val error: String? = null)
+@Serializable data class InstallPlan(val kinds: List<String> = emptyList(), val plans: List<InstallPlanItem> = emptyList(),
+                                     val venv: String? = null, val network: Boolean = true)

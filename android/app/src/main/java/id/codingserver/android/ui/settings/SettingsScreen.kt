@@ -73,17 +73,7 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp)) {
-                Text("Akun", style = MaterialTheme.typography.titleMedium)
-                Text("${user?.username ?: "-"} (${user?.role ?: "-"}) di ${client?.server?.name ?: "-"}")
-                Text("Izin: ${user?.permissions?.joinToString() ?: "-"}", style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onServers) { Text("Kelola server") }
-                    OutlinedButton(onClick = { vm.logout() }) { Text("Logout") }
-                }
-            }
-        }
+        AccountSection(vm, onServers)
         ThemeSettingsCard(vm)
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp)) {

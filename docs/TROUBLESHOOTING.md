@@ -3,7 +3,9 @@
 | Gejala | Penyebab / solusi |
 |---|---|
 | APK: "Server tidak bisa dihubungi (offline?)" | Cek `./scripts/status.sh` di Pi; IP benar (`hostname -I`); HP & Pi di jaringan sama; port 8800 tidak diblokir firewall |
-| Lupa password admin | `cat workspace/metadata/initial_admin_password.txt` (bila belum dihapus). Atau reset: `.venv/bin/python -c "from backend.config import build_settings;from backend.database.db import Database;from backend.services.auth_service import AuthService as A;s=build_settings();A(s,Database(s.metadata_dir/'coding_server.db')).update_user(1,password='PASSWORD-BARU')"` lalu restart |
+| Lupa sandi admin utama | `./scripts/admin_password.sh` (tampilkan) atau `./scripts/admin_password.sh --set` (ganti). Bila `CS_ADMIN_PASSWORD` diisi di `coding_server.env`, ubah di sana lalu `./scripts/restart.sh` |
+| Lupa sandi akun lain | Login sebagai admin utama → Pengaturan → Pengguna → ⋮ → Reset sandi |
+| `pip install` gagal di program/agen ("name resolution", "externally-managed-environment") | Program sandbox memang tanpa internet. Pakai tombol ⬇ Instal dependensi di Explorer / tool agen `install_deps` (pip → `.venv` proyek). Pastikan `CS_INSTALL_NETWORK=true` |
 | Engine `NOT_INSTALLED` | Pasang paket (`sudo apt install …` atau `scripts/install_runtimes.sh`), lalu Monitor → "Periksa ulang" |
 | Job ditolak `low_memory` / `queue_full` | RAM bebas di bawah `CS_MIN_FREE_MEMORY_MB` atau antrean penuh; tunggu / turunkan beban / ubah konfigurasi |
 | Program berhenti `TIMEOUT` | Naikkan `timeout` di request (≤ 10× `CS_RUN_TIMEOUT`) atau ubah `CS_RUN_TIMEOUT` |

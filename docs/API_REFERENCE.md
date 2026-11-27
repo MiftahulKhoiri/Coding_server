@@ -12,9 +12,10 @@ Error: `{"error":{"code","message","details"}}`.
 | POST | /auth/login | publik (rate limit) | → access_token, refresh_token, user |
 | POST | /auth/refresh | publik (rate limit) | refresh token sekali pakai (rotasi) |
 | POST | /auth/logout | login | cabut access (+refresh) token |
-| GET | /auth/me | login | user & izin |
-| POST | /auth/password | login | ganti password |
-| GET/POST/PATCH | /auth/users[/{id}] | admin | kelola user & peran |
+| GET | /auth/me | login | user, izin & profil (`display_name`, `email`, `bio`, `is_root`, `last_login_at`) |
+| PATCH | /auth/me | login | ubah profil sendiri (`display_name`, `email`, `bio`) |
+| POST | /auth/password | login | ganti password sendiri (admin utama: 403 `root_protected`, ganti di server) |
+| GET/POST/PATCH/DELETE | /auth/users[/{id}] | admin | kelola user & peran; admin utama dilindungi (403 `root_protected`); hanya admin utama yang boleh mengelola akun berperan admin; DELETE memindahkan proyek ke admin utama |
 | GET | /system/health | publik | status backend, sandbox, db |
 | GET | /system/info · /system/resources · /system/engines[?refresh=true] | login | data aktual Pi |
 | GET | /system/processes · /system/audit | admin | proses teratas, audit log |
@@ -32,6 +33,8 @@ Error: `{"error":{"code","message","details"}}`.
 | GET | /files/history[/{id}] · POST /files/restore | read / write | riwayat versi & undo |
 | GET/POST/DELETE | /files/favorites · GET /files/recent | login | |
 | POST | /execution/run · /execution/build | execute / build | → 202 Job (`process_id`) |
+| GET | /execution/install?project_id= | read | rencana instal dependensi yang terdeteksi + `.venv` proyek |
+| POST | /execution/install | execute + write | `{project_id, kind?, packages?}` → 202 Job; pip → `.venv`, npm, go, composer; internet hanya untuk langkah ini (`CS_INSTALL_NETWORK`) |
 | GET | /execution[?project_id] · /execution/{process_id} | login | riwayat / detail |
 | POST | /execution/{process_id}/stop · /stdin | execute | batalkan / kirim input |
 | GET/DELETE | /execution/artifacts/{project_id} | read / build | artefak build / bersihkan |

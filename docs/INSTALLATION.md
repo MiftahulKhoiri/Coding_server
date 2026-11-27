@@ -32,8 +32,11 @@ Penting: `CS_PORT` (8800), `CS_MAX_CONCURRENT_JOBS`, `CS_MEMORY_LIMIT_MB`, `CS_S
 `CS_HTTP_ALLOW_PRIVATE`, `CS_BACKUP_RETENTION`, `CS_AI_BASE_URL`.
 
 ## 5. Login pertama
-Password admin acak: `cat workspace/metadata/initial_admin_password.txt` → login di APK → ganti password
-(`POST /api/v1/auth/password`) → hapus file tersebut.
+Sandi admin utama: `./scripts/admin_password.sh` (membaca `CS_ADMIN_PASSWORD` atau
+`workspace/metadata/initial_admin_password.txt`) → login di APK. **Jangan hapus file itu** kecuali memakai
+`CS_ADMIN_PASSWORD`: sandi admin utama selalu disinkronkan dari sana setiap server start dan tidak bisa diubah
+lewat aplikasi (akun pemulihan). Ganti sandinya dengan `./scripts/admin_password.sh --set`.
+Lalu buat profil harian di APK → Pengaturan → Pengguna → ➕.
 
 ## 6. Update server
 ```bash

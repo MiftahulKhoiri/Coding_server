@@ -53,7 +53,10 @@ class Settings:
     access_token_minutes: int = 720
     refresh_token_days: int = 30
     admin_username: str = "admin"
-    admin_password: str = ""  # hanya dipakai saat database user masih kosong
+    # Sandi akun admin utama (root). Bila diisi, sandi root DISINKRONKAN ke nilai ini setiap server
+    # start, jadi akun admin selalu bisa dipakai untuk pemulihan. Bila kosong: dipakai file
+    # metadata/initial_admin_password.txt (dibuat saat pertama kali), lalu sandi root tidak disentuh.
+    admin_password: str = ""
 
     # Eksekusi & sumber daya
     max_concurrent_jobs: int = 2
@@ -66,6 +69,10 @@ class Settings:
     max_file_size_bytes: int = 10_000_000
     sandbox: str = "auto"  # auto | bwrap | none
     sandbox_network: bool = False  # akses jaringan untuk program yang dijalankan
+    # Akses jaringan KHUSUS langkah instal dependensi (pip/npm/go/composer) yang perintahnya disusun
+    # server. Program pengguna tetap tanpa jaringan (sandbox_network) meski ini aktif.
+    install_network: bool = True
+    install_timeout: int = 900
     terminal_network: bool = False
     terminal_idle_timeout: int = 1800
     max_terminal_sessions: int = 6
@@ -164,11 +171,12 @@ def build_settings(env: dict[str, str] | None = None) -> Settings:
         "max_terminal_sessions", "http_timeout", "backup_retention", "rate_limit_login_per_minute",
         "rate_limit_api_per_minute",
         "agent_max_concurrent", "agent_max_steps", "agent_model_timeout", "agent_task_timeout",
+        "install_timeout",
     ):
         val = g(name)
         if val:
             setattr(s, name, int(val))
-    for name in ("sandbox_network", "terminal_network", "http_allow_private", "model_profiles_git"):
+    for name in ("sandbox_network", "install_network", "terminal_network", "http_allow_private", "model_profiles_git"):
         setattr(s, name, _bool(g(name), getattr(s, name)))
     for name in ("sandbox", "admin_username", "admin_password", "ai_base_url", "ai_model", "ai_api_key", "cors_origins"):
         val = g(name)

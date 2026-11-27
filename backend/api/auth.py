@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, Request
 
 from backend.dependencies import Services, client_ip, current_user, require, services
-from backend.schemas.models import (LoginRequest, LogoutRequest, OkResponse, PasswordChange, RefreshRequest,
-                                    TokenResponse, UserCreate, UserOut, UserUpdate)
+from backend.schemas.models import (LoginRequest, LogoutRequest, OkResponse, PasswordChange, ProfileUpdate,
+                                    RefreshRequest, TokenResponse, UserCreate, UserDeleted, UserOut, UserUpdate)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -42,9 +42,16 @@ def logout(body: LogoutRequest | None = None, user: dict = Depends(current_user)
     return {"ok": True, "message": "Logout berhasil"}
 
 
-@router.get("/me", response_model=UserOut)
+@router.get("/me", response_model=UserOut, summary="Profil pengguna yang sedang login")
 def me(user: dict = Depends(current_user)):
     return user
+
+
+@router.patch("/me", response_model=UserOut, summary="Ubah profil sendiri (nama tampilan, email, bio)")
+def update_me(body: ProfileUpdate, user: dict = Depends(current_user), svc: Services = Depends(services)):
+    u = svc.auth.update_profile(user, body.display_name, body.email, body.bio)
+    svc.db.audit("profile_update", user=user)
+    return u
 
 
 @router.post("/password", response_model=OkResponse)
@@ -61,13 +68,26 @@ def list_users(_: dict = Depends(require("admin")), svc: Services = Depends(serv
 
 @router.post("/users", response_model=UserOut, status_code=201)
 def create_user(body: UserCreate, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
-    u = svc.auth.create_user(body.username, body.password, body.role)
-    svc.db.audit("user_create", user=user, target=body.username)
+    u = svc.auth.create_user(body.username, body.password, body.role, actor=user,
+                             display_name=body.display_name, email=body.email)
+    svc.db.audit("user_create", user=user, target=body.username, detail={"role": body.role})
     return u
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
 def update_user(user_id: int, body: UserUpdate, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
-    u = svc.auth.update_user(user_id, body.role, body.is_active, body.password)
-    svc.db.audit("user_update", user=user, target=str(user_id))
+    u = svc.auth.update_user(user_id, body.role, body.is_active, body.password, actor=user,
+                             display_name=body.display_name, email=body.email)
+    changed = [k for k, v in body.model_dump().items() if v is not None]
+    svc.db.audit("user_update", user=user, target=u["username"], detail={"fields": changed})
     return u
+
+
+@router.delete("/users/{user_id}", response_model=UserDeleted,
+               summary="Hapus akun (bukan admin utama); proyeknya dipindahkan ke admin utama")
+def delete_user(user_id: int, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    res = svc.auth.delete_user(user, user_id)
+    svc.db.audit("user_delete", user=user, target=res["username"], detail=res)
+    moved = res["projects_moved"]
+    return {"ok": True, "username": res["username"], "projects_moved": moved,
+            "message": f"Akun {res['username']} dihapus" + (f"; {moved} proyek dipindahkan ke admin utama" if moved else "")}

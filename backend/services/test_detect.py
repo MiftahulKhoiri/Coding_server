@@ -51,15 +51,22 @@ def _has_python_tests(root: Path) -> bool:
 
 
 def detect(root: Path, cache_dir: Path) -> list[DetectedTest]:
+    from backend.services.deps_install import project_python, venv_has_module
+
     out: list[DetectedTest] = []
-    py = find_executable("python3", "python")
-    if py and _has_python_tests(root):
-        if _python_has_pytest(py):
+    sys_py = find_executable("python3", "python")
+    venv = project_python(root)
+    if sys_py and _has_python_tests(root):
+        # .venv proyek (hasil install_deps) diutamakan; pytest di venv dicek lewat filesystem saja.
+        py = str(venv) if venv else sys_py
+        has_pytest = venv_has_module(venv, "pytest") if venv else _python_has_pytest(sys_py)
+        where = ".venv proyek" if venv else "Python sistem"
+        if has_pytest:
             out.append(DetectedTest("pytest", "pytest", [py, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
-                                   env={"PYTHONDONTWRITEBYTECODE": "1"}))
+                                   env={"PYTHONDONTWRITEBYTECODE": "1"}, note=where if venv else ""))
         out.append(DetectedTest("unittest", "unittest", [py, "-m", "unittest", "discover", "-v"],
                                env={"PYTHONDONTWRITEBYTECODE": "1"},
-                               note="" if out else "pytest tidak terpasang di Python sistem"))
+                               note="" if out else f"pytest tidak terpasang di {where} (pasang dengan install_deps)"))
     go = find_executable("go")
     if go and (root / "go.mod").is_file():
         out.append(DetectedTest("go", "go test", [go, "test", "./..."],

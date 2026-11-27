@@ -251,20 +251,33 @@ class ExecutionService:
         Memakai antrean, sandbox (fail-closed), batas sumber daya, riwayat & streaming yang sama
         dengan run/build biasa. Jangan pernah meneruskan argv mentah dari pengguna/model ke sini.
         """
+        t = min(timeout or self.s.build_timeout, self.s.build_timeout)
+        return await self.submit_commands(user=user, project_id=project_id, project_dir=project_dir,
+                                          commands=[(list(argv), dict(env or {}))], action=action, label=label,
+                                          timeout=t, network=self.s.sandbox_network)
+
+    async def submit_commands(self, *, user: dict, project_id: str, project_dir: Path,
+                              commands: list[tuple[list[str], dict[str, str]]], action: str, label: str,
+                              timeout: int, network: bool = False) -> Job:
+        """Seperti submit_command, tetapi beberapa perintah berurutan dalam satu job (berhenti di yang
+        gagal). ``network`` hanya untuk perintah buatan server yang memang butuh internet (instal
+        dependensi); program pengguna tetap memakai ``sandbox_network``."""
         from backend.engines.base_engine import Step
 
+        if not commands:
+            raise AppError("Tidak ada perintah untuk dijalankan", code="no_command")
         require_sandbox(self.s)
         self.queue.check_admission()
         root = project_dir.resolve()
         build_dir = self.s.cache_dir / "builds" / project_id / action
         build_dir.mkdir(parents=True, exist_ok=True)
-        t = min(timeout or self.s.build_timeout, self.s.build_timeout)
         ctx = EngineContext(project_dir=root, file=root, build_dir=build_dir, cache_dir=self.s.cache_dir / "lang",
-                            args=[], run_timeout=t, build_timeout=t, memory_mb=self.s.memory_limit_mb,
-                            network=self.s.sandbox_network)
-        steps = [Step(phase="run", argv=list(argv), timeout=t, cwd=root, env=dict(env or {}))]
+                            args=[], run_timeout=timeout, build_timeout=timeout, memory_mb=self.s.memory_limit_mb,
+                            network=network)
+        steps = [Step(phase="run", argv=list(argv), timeout=timeout, cwd=root, env=dict(env or {}), network=network)
+                 for argv, env in commands]
         job = Job(id=uuid.uuid4().hex[:16], project_id=project_id, user_id=user["id"], action=action,
-                  language=label, file="", command=[list(argv)])
+                  language=label, file="", command=[list(a) for a, _ in commands])
         self.jobs[job.id] = job
         self._save(job)
         await self._emit(job, {"type": "status", "status": "QUEUED", "time": time.time()})
