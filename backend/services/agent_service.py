@@ -37,6 +37,7 @@ _CTX_ERR = re.compile(r"exceeds? the (?:available )?context|context size|context
 _CTX_SIZE = re.compile(r"context (?:size|length)\D{0,20}(\d{3,7})", re.I)
 KEEP_RECENT = 6           # hasil tool terakhir yang tidak dipangkas
 MAX_PARSE_FAILS = 3
+FREE_PLAN_UPDATES = 8      # update_plan yang tidak dihitung sebagai langkah
 ESCALATE_AFTER_PARSE = 2  # balasan salah format berturut-turut sebelum eskalasi ke model yang lebih kuat
 ESC_STEPS = 3             # langkah yang dikerjakan model eskalasi sebelum kembali ke peran normal
 MAX_REVIEWS = 2           # peninjauan sebelum finish (mencegah loop tinjau tanpa akhir)
@@ -78,6 +79,9 @@ teks baru
   JANGAN menulis skrip installer (pip/npm/subprocess); tulis dulu daftar dependensinya
   (requirements.txt / package.json / go.mod / composer.json) lalu panggil install_deps. Paket Python
   dipasang ke .venv proyek dan otomatis dipakai oleh run_file & run_tests.
+- Setiap selesai mengubah file kode (.py, .js, .c, …), jalankan build_file untuk file itu dan perbaiki
+  error yang muncul SEBELUM lanjut. Untuk menambah kode ke file yang sudah ada, baca dulu isinya:
+  jangan menambahkan fungsi/route yang sudah ada (duplikat).
 
 Tool yang tersedia untukmu:
 {tools}
@@ -670,6 +674,33 @@ class AgentService:
                  "temperature": temp}
         return text, model, stats
 
+    async def _ask_file_content(self, task_id: str, messages: list[dict], target: tuple[str, str], role: str,
+                                path: str) -> str | None:
+        """Lanjutan write_file: minta HANYA isi file. Tidak dihitung sebagai langkah task."""
+        ask = (f"[lanjutan] JSON-mu memanggil write_file untuk {path} tetapi isinya belum ada. "
+               f"Balas SEKARANG hanya dengan isi LENGKAP file {path} di dalam satu blok kode ```, tanpa JSON "
+               f"dan tanpa penjelasan.")
+        messages.append({"role": "user", "content": ask})
+        self._update(task_id, current_op=f"Meminta isi {path} dari model", last_activity=_now())
+        try:
+            text, model, stats = await self._ask_model(task_id, self._compact(messages), target, role)
+        except (AppError, asyncio.TimeoutError):
+            messages.pop()
+            return None
+        messages.append({"role": "assistant", "content": text})
+        content = None
+        for m in re.finditer(r"```([^\n`]*)\n(.*?)```", text, re.S):
+            body = m.group(2)
+            if body.lstrip().startswith("{") and '"tool"' in body:  # model malah mengirim tool call lagi
+                continue
+            content = body
+            break
+        if content is None and "```" not in text and '"tool"' not in text and text.strip():
+            content = text.strip("\n") + "\n"  # tanpa pagar kode: pakai teks apa adanya
+        self._event(task_id, "continuation", {"path": path, "model": model, "ok": bool(content),
+                                              "chars": len(content or ""), **{k: stats[k] for k in ("seconds", "tokens")}})
+        return content if content and content.strip() else None
+
     async def _run(self, task_id: str, user: dict) -> None:
         async with self._sem:
             try:
@@ -711,7 +742,7 @@ class AgentService:
                 # status peran/eskalasi/peninjauan (ikut checkpoint agar bertahan saat dijeda/restart)
                 "_esc_role": ast.get("esc_role"), "_esc_left": int(ast.get("esc_left") or 0),
                 "_reviews": int(ast.get("reviews") or 0), "_review_pending": bool(ast.get("review_pending")),
-                "_fail_runs": int(ast.get("fail_runs") or 0)}
+                "_fail_runs": int(ast.get("fail_runs") or 0), "_free_plans": int(ast.get("free_plans") or 0)}
         messages = self._messages(row, ai_perms)
         steps_used = row["steps_used"]
         parse_fails = 0
@@ -726,7 +757,8 @@ class AgentService:
         def extra(pc: dict | None = None) -> dict:
             return {"runs": task["_runs"], "pending_call": pc, "agent_state": {
                 "esc_role": task["_esc_role"], "esc_left": task["_esc_left"], "reviews": task["_reviews"],
-                "review_pending": task["_review_pending"], "fail_runs": task["_fail_runs"]}}
+                "review_pending": task["_review_pending"], "fail_runs": task["_fail_runs"],
+                "free_plans": task["_free_plans"]}}
 
         while True:
             if task_id in self._pause:
@@ -786,6 +818,14 @@ class AgentService:
                         task["_esc_role"] = None
                 pending_call = {"tool": call["tool"], "args": call.get("args") or {}, "code": code,
                                 "thought": str(call.get("thought", ""))[:2000]}
+                # write_file tanpa isi (model sering berhenti setelah JSON): minta isinya langsung, TANPA
+                # menghabiskan langkah. Dulu ini memakan 1 langkah + 1 error untuk hampir setiap file.
+                pargs = pending_call["args"]
+                if (call["tool"] == "write_file" and code is None and isinstance(pargs, dict)
+                        and pargs.get("content") is None and isinstance(pargs.get("path"), str)):
+                    filled = await self._ask_file_content(task_id, messages, target, role, pargs["path"])
+                    if filled is not None:
+                        pending_call["code"] = filled
                 self._event(task_id, "thought", {"text": pending_call["thought"], "role": role, "model": model, **stats})
                 if role == "reviewer":
                     task["_review_pending"] = False
@@ -846,6 +886,12 @@ class AgentService:
             if name == "update_plan" and ok:
                 self._update(task_id, plan=json.dumps(task["_plan"], ensure_ascii=False))
                 self._event(task_id, "plan", {"steps": task["_plan"]})
+                # Memperbarui rencana hanya pencatatan: tidak menghabiskan jatah langkah (maks FREE_PLAN_UPDATES
+                # kali per task supaya tidak bisa jadi loop tanpa akhir).
+                if task["_free_plans"] < FREE_PLAN_UPDATES and steps_used > 0:
+                    task["_free_plans"] += 1
+                    steps_used -= 1
+                    self._update(task_id, steps_used=steps_used)
             self._update(task_id, progress=self._progress(task, steps_used, row["max_steps"]))
             messages.append({"role": "user", "content": f"[hasil tool {name}]\n{obs}"})
             self._save_checkpoint(task_id, messages, extra())

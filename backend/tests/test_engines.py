@@ -140,3 +140,17 @@ def test_web_preview(client, auth):
     css = client.get(url.replace("index.html", "style.css"))
     assert css.status_code == 200 and "text/css" in css.headers["content-type"]
     assert client.get(url.replace("index.html", "../../etc/passwd")).status_code in (401, 403, 404)
+
+
+def test_python_build_detects_duplicate_definitions(client, auth, project):
+    """Route Flask ganda (kasus nyata dari AI Agent) lolos py_compile tapi gagal saat dijalankan."""
+    src = ("def login():\n    return 1\n\n\ndef register():\n    return 2\n\n\ndef login():\n    return 3\n")
+    client.put("/api/v1/files/write", json={"project_id": project, "path": "dup.py", "content": src}, headers=auth)
+    r = client.post("/api/v1/execution/build", json={"project_id": project, "path": "dup.py"}, headers=auth)
+    job = wait_job(client, auth, r.json()["process_id"])
+    assert job["status"] == "FAILED", job
+    assert "dup.py:9:" in job["stderr"] and "'login' didefinisikan ulang (pertama di baris 1)" in job["stderr"]
+    ok = "class A:\n    @property\n    def x(self):\n        return 1\n\n    @x.setter\n    def x(self, v):\n        pass\n"
+    client.put("/api/v1/files/write", json={"project_id": project, "path": "ok.py", "content": ok}, headers=auth)
+    r = client.post("/api/v1/execution/build", json={"project_id": project, "path": "ok.py"}, headers=auth)
+    assert wait_job(client, auth, r.json()["process_id"])["status"] == "COMPLETED"

@@ -308,15 +308,48 @@ def test_agent_recovers_from_context_overflow(client, auth, project, model):
 
 
 def test_agent_warns_on_repeated_identical_error(client, auth, project, model):
-    """Model mengulang write_file tanpa isi: hasil tool ke-2 memberi PERINGATAN + contoh format persis."""
-    SCRIPT.extend([J("write_file", path="a.css"), J("write_file", path="a.css"),
-                   J("write_file", path="a.css") + "\n```css\nbody { margin: 0; }\n```", J("finish", summary="ok")])
-    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "css", "auto_apply": True},
+    """Model mengulang panggilan yang sama-sama salah: hasil tool ke-2 memberi PERINGATAN."""
+    SCRIPT.extend([J("update_plan"), J("update_plan"),
+                   J("update_plan", steps=[{"id": "1", "description": "x", "status": "done"}]), J("finish", summary="ok")])
+    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "rencana"},
                       headers=auth).json()["id"]
     t = wait_status(client, auth, tid, {"COMPLETED", "FAILED"})
     assert t["status"] == "COMPLETED", t
     obs = [e["data"] for e in client.get(f"/api/v1/agent/tasks/{tid}/events", headers=auth).json()["events"]
            if e["kind"] == "observation"]
-    assert not obs[0]["ok"] and "Contoh persis" in obs[0]["text"] and "PERINGATAN" not in obs[0]["text"]
+    assert not obs[0]["ok"] and "PERINGATAN" not in obs[0]["text"]
     assert not obs[1]["ok"] and "PERINGATAN" in obs[1]["text"]
     assert obs[2]["ok"]
+
+
+def test_write_file_continuation_rejects_tool_call_as_content(client, auth, project, model):
+    """Bila model menjawab permintaan isi dengan tool call lagi, JSON itu TIDAK dijadikan isi file."""
+    SCRIPT.extend([J("write_file", path="b.css"), J("write_file", path="b.css"),
+                   J("write_file", path="b.css") + "\n```css\nbody { margin: 0; }\n```", J("finish", summary="ok")])
+    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "css", "auto_apply": True},
+                      headers=auth).json()["id"]
+    t = wait_status(client, auth, tid, {"COMPLETED", "FAILED"})
+    assert t["status"] == "COMPLETED", t
+    root = client.app.state.services.projects.project_dir(project)
+    assert (root / "b.css").read_text() == "body { margin: 0; }\n"
+    obs = [e["data"] for e in client.get(f"/api/v1/agent/tasks/{tid}/events", headers=auth).json()["events"]
+           if e["kind"] == "observation"]
+    assert not obs[0]["ok"] and "Contoh persis" in obs[0]["text"]
+
+
+def test_write_file_without_content_is_requested_without_using_a_step(client, auth, project, model):
+    """Model mengirim JSON write_file tanpa isi → server langsung meminta isinya (tidak menghabiskan langkah)."""
+    SCRIPT.extend([J("write_file", path="halo.py"), "```python\nprint('halo')\n```",
+                   J("update_plan", steps=[{"id": "1", "description": "tulis halo", "status": "done"}]),
+                   J("finish", summary="ok")])
+    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "halo", "auto_apply": True},
+                      headers=auth).json()["id"]
+    t = wait_status(client, auth, tid, {"COMPLETED", "FAILED"})
+    assert t["status"] == "COMPLETED", t
+    root = client.app.state.services.projects.project_dir(project)
+    assert (root / "halo.py").read_text() == "print('halo')\n"
+    ev = client.get(f"/api/v1/agent/tasks/{tid}/events", headers=auth).json()["events"]
+    assert any(e["kind"] == "continuation" and e["data"]["ok"] for e in ev)
+    assert not any(e["kind"] == "observation" and not e["data"]["ok"] for e in ev)
+    # 4 balasan model, tetapi hanya write_file & finish yang dihitung (lanjutan isi & update_plan gratis)
+    assert t["steps_used"] == 2, t["steps_used"]
