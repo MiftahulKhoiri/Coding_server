@@ -3,12 +3,17 @@ package id.codingserver.android.ui.dashboard
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,22 +23,30 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import id.codingserver.android.data.api.ApiClient
 import id.codingserver.android.data.api.Dashboard
 import id.codingserver.android.data.api.Project
+import id.codingserver.android.data.api.UserOut
 import id.codingserver.android.data.api.apiCall
 import id.codingserver.android.ui.AppViewModel
 import id.codingserver.android.ui.common.ErrorCard
 import id.codingserver.android.ui.common.Loading
+import id.codingserver.android.ui.common.UserAvatar
+import id.codingserver.android.ui.common.formatTime
+import id.codingserver.android.ui.settings.RootBadge
 import id.codingserver.android.ui.common.UsageBar
 import id.codingserver.android.ui.common.formatBytes
 import id.codingserver.android.ui.common.formatDuration
 import kotlinx.coroutines.delay
 
 @Composable
-fun DashboardScreen(vm: AppViewModel, onOpenProject: (Project) -> Unit) {
+fun DashboardScreen(vm: AppViewModel, onProfile: () -> Unit = {}, onOpenProject: (Project) -> Unit) {
     val client by vm.client.collectAsState()
+    val user by vm.user.collectAsState()
     val online by vm.online.collectAsState()
     var data by remember { mutableStateOf<Dashboard?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -47,6 +60,7 @@ fun DashboardScreen(vm: AppViewModel, onOpenProject: (Project) -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ActiveProfileCard(client, user, onProfile)
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(12.dp)) {
                 Text("Koneksi server", style = MaterialTheme.typography.titleMedium)
@@ -95,6 +109,32 @@ fun DashboardScreen(vm: AppViewModel, onOpenProject: (Project) -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** Profil yang sedang aktif (login) di server ini. Ketuk untuk membuka Pengaturan → Akun & profil. */
+@Composable
+private fun ActiveProfileCard(client: ApiClient?, user: UserOut?, onProfile: () -> Unit) {
+    Card(
+        Modifier.fillMaxWidth().clickable(onClick = onProfile),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            UserAvatar(client, user, 60.dp)
+            Column(Modifier.weight(1f)) {
+                Text("Halo, ${user?.shownName ?: "…"} 👋", style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("@${user?.username ?: "-"} · ${user?.role?.replaceFirstChar { it.uppercase() } ?: "-"}",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                if (user?.is_root == true) RootBadge()
+                user?.last_login_at?.let {
+                    Text("Login sejak ${formatTime(it)}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer)
+                }
+            }
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Buka profil", tint = MaterialTheme.colorScheme.onPrimaryContainer)
         }
     }
 }

@@ -17,6 +17,8 @@ import kotlinx.serialization.json.JsonElement
     val display_name: String = "", val email: String = "", val bio: String = "",
     /** Admin utama: tidak bisa dihapus/diubah; sandinya hanya diatur dari server (akun pemulihan). */
     val is_root: Boolean = false, val updated_at: Double = 0.0, val last_login_at: Double? = null,
+    /** Tidak null = punya foto profil (GET auth/users/{id}/avatar); nilainya berubah tiap foto diganti. */
+    val avatar_version: Double? = null,
 ) {
     val shownName: String get() = display_name.ifBlank { username }
 }

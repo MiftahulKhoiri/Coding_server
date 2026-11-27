@@ -48,6 +48,7 @@ class UserOut(BaseModel):
     is_root: bool = False  # admin utama: tidak bisa dihapus/diubah, sandi diatur dari server
     updated_at: float = 0.0
     last_login_at: float | None = None
+    avatar_version: float | None = None  # ada foto profil bila tidak null → GET /auth/users/{id}/avatar
 
 
 class TokenResponse(BaseModel):

@@ -120,6 +120,7 @@ class AuthService:
             "display_name": row.get("display_name") or "", "email": row.get("email") or "",
             "bio": row.get("bio") or "", "is_root": bool(row.get("is_root")),
             "updated_at": row.get("updated_at") or 0.0, "last_login_at": row.get("last_login_at"),
+            "avatar_version": row.get("avatar_version"),
         }
 
     def _get(self, user_id: int) -> dict:
@@ -248,7 +249,55 @@ class AuthService:
             for table in ("favorites", "recent_files", "git_credentials"):
                 c.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
             c.execute("DELETE FROM users WHERE id=?", (user_id,))
+        self._avatar_path(user_id).unlink(missing_ok=True)
         return {"username": row["username"], "projects_moved": moved}
+
+    # ---------------- foto profil ----------------
+    AVATAR_MAX = 2 * 1024 * 1024
+    _AVATAR_TYPES = {b"\xff\xd8\xff": "image/jpeg", b"\x89PNG\r\n\x1a\n": "image/png"}
+
+    def _avatar_path(self, user_id: int):
+        d = self.s.metadata_dir / "avatars"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / f"{int(user_id)}.img"
+
+    @classmethod
+    def avatar_type(cls, data: bytes) -> str | None:
+        for magic, ctype in cls._AVATAR_TYPES.items():
+            if data.startswith(magic):
+                return ctype
+        if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return "image/webp"
+        return None
+
+    def set_avatar(self, user: dict, data: bytes) -> dict:
+        """Simpan foto profil (JPEG/PNG/WebP, maks 2 MB). Klien disarankan memotong persegi ±512 px dulu."""
+        if not data:
+            raise AppError("File foto kosong", code="bad_avatar")
+        if len(data) > self.AVATAR_MAX:
+            raise AppError("Foto maksimal 2 MB", code="bad_avatar", status_code=413)
+        if self.avatar_type(data) is None:
+            raise AppError("Format foto harus JPEG, PNG, atau WebP", code="bad_avatar")
+        path = self._avatar_path(user["id"])
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+        self.db.execute("UPDATE users SET avatar_version=?, updated_at=? WHERE id=?",
+                        (time.time(), time.time(), user["id"]))
+        return self.public(self._get(user["id"]))
+
+    def delete_avatar(self, user: dict) -> dict:
+        self._avatar_path(user["id"]).unlink(missing_ok=True)
+        self.db.execute("UPDATE users SET avatar_version=NULL, updated_at=? WHERE id=?", (time.time(), user["id"]))
+        return self.public(self._get(user["id"]))
+
+    def avatar(self, user_id: int) -> tuple[bytes, str]:
+        row = self._get(user_id)
+        path = self._avatar_path(user_id)
+        if not row.get("avatar_version") or not path.is_file():
+            raise NotFound("Pengguna ini belum punya foto profil")
+        data = path.read_bytes()
+        return data, self.avatar_type(data) or "application/octet-stream"
 
     # ---------------- profil sendiri ----------------
     def update_profile(self, user: dict, display_name: str | None = None, email: str | None = None,

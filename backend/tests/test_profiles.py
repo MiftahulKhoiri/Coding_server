@@ -108,3 +108,25 @@ def test_root_password_resynced_from_server(client):
     row = svc.auth.root()
     assert verify_password("admin-pass-123", row["password_hash"])
     assert row["role"] == "admin" and row["is_active"] == 1
+
+
+def test_avatar_upload_get_delete(client, auth):
+    import io
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    r = client.put("/api/v1/auth/me/avatar", files={"file": ("a.png", io.BytesIO(png), "image/png")}, headers=auth)
+    assert r.status_code == 200, r.text
+    me = r.json()
+    assert me["avatar_version"]
+    g = client.get(f"/api/v1/auth/users/{me['id']}/avatar", headers=auth)
+    assert g.status_code == 200 and g.headers["content-type"] == "image/png" and g.content == png
+    bad = client.put("/api/v1/auth/me/avatar", files={"file": ("x.png", io.BytesIO(b"<svg>"), "image/png")}, headers=auth)
+    assert bad.status_code == 400 and bad.json()["error"]["code"] == "bad_avatar"
+    big = client.put("/api/v1/auth/me/avatar",
+                     files={"file": ("b.jpg", io.BytesIO(b"\xff\xd8\xff" + b"0" * (2 * 1024 * 1024)), "image/jpeg")},
+                     headers=auth)
+    assert big.status_code == 413
+    assert client.get(f"/api/v1/auth/users/{me['id']}/avatar").status_code == 401
+    d = client.delete("/api/v1/auth/me/avatar", headers=auth)
+    assert d.status_code == 200 and d.json()["avatar_version"] is None
+    assert client.get(f"/api/v1/auth/users/{me['id']}/avatar", headers=auth).status_code == 404

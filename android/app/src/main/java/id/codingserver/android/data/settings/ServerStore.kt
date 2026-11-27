@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import id.codingserver.android.ui.theme.AccentPalette
+import id.codingserver.android.ui.theme.BackgroundTone
 import id.codingserver.android.ui.theme.AppTheme
 import id.codingserver.android.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.Flow
@@ -68,6 +69,7 @@ class ServerStore(private val context: Context) {
     private val kThemeMode = stringPreferencesKey("app_theme_mode")
     private val kThemeAccent = stringPreferencesKey("app_theme_accent")
     private val kThemeAmoled = booleanPreferencesKey("app_theme_amoled")
+    private val kThemeBg = stringPreferencesKey("app_theme_background")
     private val kTermFont = intPreferencesKey("term_font")
     private val kTermTheme = stringPreferencesKey("term_theme")
     private val kTermCursor = stringPreferencesKey("term_cursor")
@@ -103,7 +105,8 @@ class ServerStore(private val context: Context) {
     }
 
     val appTheme: Flow<AppTheme> = context.dataStore.data.map {
-        AppTheme(ThemeMode.fromKey(it[kThemeMode]), AccentPalette.fromKey(it[kThemeAccent]), it[kThemeAmoled] ?: false)
+        AppTheme(ThemeMode.fromKey(it[kThemeMode]), AccentPalette.fromKey(it[kThemeAccent]), it[kThemeAmoled] ?: false,
+                 BackgroundTone.fromKey(it[kThemeBg]))
     }
 
     suspend fun setAppTheme(t: AppTheme) {
@@ -111,6 +114,7 @@ class ServerStore(private val context: Context) {
             it[kThemeMode] = t.mode.key
             it[kThemeAccent] = t.accent.key
             it[kThemeAmoled] = t.amoled
+            it[kThemeBg] = t.background.key
         }
     }
 

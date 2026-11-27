@@ -1,6 +1,8 @@
 package id.codingserver.android.ui.settings
 
-import androidx.compose.foundation.background
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -42,7 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -57,8 +59,13 @@ import id.codingserver.android.data.api.apiCall
 import id.codingserver.android.ui.AppViewModel
 import id.codingserver.android.ui.common.ConfirmDialog
 import id.codingserver.android.ui.common.TitleWithInfo
+import id.codingserver.android.ui.common.UserAvatar
+import id.codingserver.android.ui.common.prepareAvatar
 import id.codingserver.android.ui.common.formatTime
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 
 private val ROLE_LABEL = mapOf(
     "admin" to "Admin", "developer" to "Developer", "runner" to "Runner", "viewer" to "Viewer", "ai" to "AI",
@@ -88,16 +95,7 @@ fun AccountSection(vm: AppViewModel, onServers: () -> Unit) {
 }
 
 @Composable
-private fun Avatar(name: String, root: Boolean) {
-    val bg = if (root) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer
-    Box(Modifier.size(48.dp).background(bg, CircleShape), contentAlignment = Alignment.Center) {
-        Text(name.trim().take(1).uppercase().ifBlank { "?" }, style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun RootBadge() {
+fun RootBadge() {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.Default.Lock, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.tertiary)
         Text(" Admin utama", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.tertiary)
@@ -114,7 +112,7 @@ private fun ProfileCard(vm: AppViewModel, u: UserOut?, c: ApiClient?, onServers:
             TitleWithInfo("Akun & profil", if (u?.is_root == true) ROOT_NOTE
                 else "Ubah nama tampilan, email, bio, dan sandi akunmu. Bila lupa sandi, minta admin utama mereset.")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Avatar(u?.shownName ?: "?", u?.is_root == true)
+                UserAvatar(c, u, 56.dp)
                 Column(Modifier.weight(1f)) {
                     Text(u?.shownName ?: "-", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text("@${u?.username ?: "-"} · ${ROLE_LABEL[u?.role] ?: u?.role ?: "-"} · ${c?.server?.name ?: "-"}",
@@ -151,11 +149,44 @@ private fun ProfileDialog(vm: AppViewModel, u: UserOut, c: ApiClient, onDismiss:
     var bio by remember { mutableStateOf(u.bio) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var current by remember { mutableStateOf(u) }
+    val ctx = LocalContext.current
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        busy = true
+        scope.launch {
+            runCatching { prepareAvatar(ctx, uri) }.onSuccess { bytes ->
+                val part = MultipartBody.Part.createFormData("file", "avatar.jpg",
+                    bytes.toRequestBody("image/jpeg".toMediaType()))
+                apiCall { c.api.uploadAvatar(part) }
+                    .onSuccess { current = it; vm.setUser(it); vm.toast("Foto profil diperbarui") }
+                    .onFailure { error = it.message }
+            }.onFailure { error = "Gambar tidak bisa dibaca: ${it.message}" }
+            busy = false
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Ubah profil") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    UserAvatar(c, current, 72.dp)
+                    Column {
+                        OutlinedButton(enabled = !busy, onClick = {
+                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }) { Text(if (current.avatar_version == null) "Pilih foto" else "Ganti foto") }
+                        if (current.avatar_version != null) TextButton(enabled = !busy, onClick = {
+                            busy = true
+                            scope.launch {
+                                apiCall { c.api.deleteAvatar() }.onSuccess { current = it; vm.setUser(it) }
+                                    .onFailure { error = it.message }
+                                busy = false
+                            }
+                        }) { Text("Hapus foto", color = MaterialTheme.colorScheme.error) }
+                    }
+                }
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text("Username @${u.username} tidak bisa diubah.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(name, { name = it.take(80) }, label = { Text("Nama tampilan") }, singleLine = true)
                 OutlinedTextField(email, { email = it.take(120) }, label = { Text("Email (opsional)") }, singleLine = true,
@@ -269,7 +300,7 @@ private fun UserRow(vm: AppViewModel, me: UserOut, u: UserOut, c: ApiClient, onC
     }
 
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Avatar(u.shownName, u.is_root)
+        UserAvatar(c, u, 44.dp)
         Column(Modifier.weight(1f).padding(start = 10.dp)) {
             Text(u.shownName + if (self) " (kamu)" else "", style = MaterialTheme.typography.bodyLarge, maxLines = 1,
                 overflow = TextOverflow.Ellipsis)

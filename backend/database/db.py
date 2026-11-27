@@ -22,6 +22,7 @@ MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("is_root", "INTEGER NOT NULL DEFAULT 0"),
         ("updated_at", "REAL NOT NULL DEFAULT 0"),
         ("last_login_at", "REAL"),
+        ("avatar_version", "REAL"),  # waktu foto profil diunggah (NULL = tanpa foto); dipakai klien untuk cache
     ],
     "ai_proposals": [
         ("conversation_id", "INTEGER"), ("message_id", "INTEGER"),

@@ -56,19 +56,73 @@ enum class AccentPalette(
     }
 }
 
+/**
+ * Warna latar & permukaan (kartu, menu, dialog) aplikasi — terpisah dari warna aksen.
+ * [TINTED] diturunkan dari warna aksen yang dipilih; [NEUTRAL] = abu-abu/putih bawaan.
+ */
+enum class BackgroundTone(
+    val key: String, val label: String,
+    val darkBg: Color, val darkSurface: Color, val lightBg: Color, val lightSurface: Color,
+) {
+    NEUTRAL("neutral", "Netral", Color(0xFF121212), Color(0xFF1B1B1F), Color(0xFFFFFBFE), Color(0xFFFFFBFE)),
+    TINTED("tinted", "Ikut aksen", Color(0xFF121212), Color(0xFF1B1B1F), Color(0xFFFFFFFF), Color(0xFFFFFFFF)),
+    NAVY("navy", "Biru malam", Color(0xFF0B1622), Color(0xFF13233A), Color(0xFFEAF2FB), Color(0xFFF5F9FE)),
+    FOREST("forest", "Hijau hutan", Color(0xFF0C1A12), Color(0xFF15291D), Color(0xFFEAF4EC), Color(0xFFF5FAF6)),
+    PLUM("plum", "Ungu anggur", Color(0xFF1A1020), Color(0xFF281A31), Color(0xFFF3ECF7), Color(0xFFFAF6FC)),
+    SEPIA("sepia", "Sepia", Color(0xFF1C1813), Color(0xFF29231B), Color(0xFFF4ECDD), Color(0xFFFBF6EC)),
+    SLATE("slate", "Abu batu", Color(0xFF15181C), Color(0xFF21262C), Color(0xFFE9EDF0), Color(0xFFF4F6F8));
+
+    companion object { fun fromKey(k: String?) = entries.firstOrNull { it.key == k } ?: NEUTRAL }
+}
+
 /** Preferensi tampilan aplikasi (disimpan di DataStore). */
 data class AppTheme(
     val mode: ThemeMode = ThemeMode.DARK,
     val accent: AccentPalette = AccentPalette.BLUE,
     /** Latar hitam pekat di mode gelap — hemat baterai di layar AMOLED. */
     val amoled: Boolean = false,
+    val background: BackgroundTone = BackgroundTone.NEUTRAL,
 )
+
+private fun mix(a: Color, b: Color, t: Float) = Color(
+    red = a.red + (b.red - a.red) * t, green = a.green + (b.green - a.green) * t,
+    blue = a.blue + (b.blue - a.blue) * t, alpha = 1f,
+)
+
+/**
+ * Terapkan warna latar ke skema: background, surface, dan seluruh tingkat surfaceContainer
+ * (dipakai Card, menu, dialog, navigation drawer) supaya seluruh tampilan ikut berubah.
+ */
+fun applyBackground(s: ColorScheme, tone: BackgroundTone, dark: Boolean, amoled: Boolean, accent: Color): ColorScheme {
+    if (tone == BackgroundTone.NEUTRAL && !(dark && amoled)) return s
+    var bg = if (dark) tone.darkBg else tone.lightBg
+    var surface = if (dark) tone.darkSurface else tone.lightSurface
+    if (tone == BackgroundTone.TINTED) {
+        bg = mix(bg, accent, if (dark) 0.07f else 0.06f)
+        surface = mix(surface, accent, if (dark) 0.11f else 0.04f)
+    }
+    if (dark && amoled) { bg = Color.Black; surface = mix(Color.Black, surface, 0.45f) }
+    // Tingkat container: makin "tinggi" makin terang (gelap) / makin gelap (terang).
+    val step = if (dark) Color.White else mix(bg, accent, 0.5f)
+    fun lvl(t: Float) = mix(surface, step, t)
+    return s.copy(
+        background = bg, surface = surface, surfaceDim = if (dark) bg else lvl(0.10f), surfaceBright = lvl(0.08f),
+        surfaceContainerLowest = bg, surfaceContainerLow = lvl(0.02f), surfaceContainer = lvl(0.04f),
+        surfaceContainerHigh = lvl(0.07f), surfaceContainerHighest = lvl(0.10f),
+        surfaceVariant = lvl(if (dark) 0.12f else 0.14f),
+    )
+}
 
 private fun onColor(c: Color): Color = if (c.luminanceApprox() > 0.5f) Color(0xFF111111) else Color.White
 private fun Color.luminanceApprox() = 0.2126f * red + 0.7152f * green + 0.0722f * blue
 
 /** Bangun ColorScheme statis untuk palet (dipakai juga oleh unit test). */
-fun colorSchemeFor(accent: AccentPalette, dark: Boolean, amoled: Boolean): ColorScheme =
+fun colorSchemeFor(accent: AccentPalette, dark: Boolean, amoled: Boolean,
+                   background: BackgroundTone = BackgroundTone.NEUTRAL): ColorScheme =
+    applyBackground(baseScheme(accent, dark, amoled), background, dark, amoled,
+                    if (dark) accent.darkPrimary else accent.lightPrimary)
+
+private fun baseScheme(accent: AccentPalette, dark: Boolean, amoled: Boolean): ColorScheme =
     if (dark) {
         val bg = if (amoled) Color.Black else Color(0xFF121212)
         val surface = if (amoled) Color(0xFF0A0A0A) else Color(0xFF1B1B1F)
@@ -98,9 +152,10 @@ fun CodingServerTheme(theme: AppTheme = AppTheme(), content: @Composable () -> U
     val dark = isAppDark(theme)
     val scheme = if (theme.accent == AccentPalette.DYNAMIC && AccentPalette.dynamicSupported) {
         val ctx = LocalContext.current
-        if (dark) dynamicDarkColorScheme(ctx).let {
+        val base = if (dark) dynamicDarkColorScheme(ctx).let {
             if (theme.amoled) it.copy(background = Color.Black, surface = Color(0xFF0A0A0A)) else it
         } else dynamicLightColorScheme(ctx)
-    } else colorSchemeFor(theme.accent, dark, theme.amoled)
+        applyBackground(base, theme.background, dark, theme.amoled && theme.background != BackgroundTone.NEUTRAL, base.primary)
+    } else colorSchemeFor(theme.accent, dark, theme.amoled, theme.background)
     MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
 }

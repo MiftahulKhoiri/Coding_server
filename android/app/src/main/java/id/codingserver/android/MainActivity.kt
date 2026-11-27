@@ -70,6 +70,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
@@ -198,6 +199,8 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
     val auth by vm.auth.collectAsState()
     val online by vm.online.collectAsState()
     val project by vm.project.collectAsState()
+    val drawerUser by vm.user.collectAsState()
+    val drawerClient by vm.client.collectAsState()
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
@@ -248,6 +251,17 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
             ModalDrawerSheet {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text("CODING_SERVER", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(16.dp))
+                    if (loggedIn) Row(
+                        Modifier.fillMaxWidth().clickable { go("settings") }.padding(horizontal = 16.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        id.codingserver.android.ui.common.UserAvatar(drawerClient, drawerUser, 40.dp)
+                        Column(Modifier.padding(start = 12.dp)) {
+                            Text(drawerUser?.shownName ?: "-", style = MaterialTheme.typography.titleSmall)
+                            Text("@${drawerUser?.username ?: "-"} · ${drawerUser?.role ?: "-"}",
+                                style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
                     Text("Proyek: ${project?.name ?: "-"}", modifier = Modifier.padding(horizontal = 16.dp),
                          style = MaterialTheme.typography.bodySmall)
                     // Info versi APK juga ada di Pengaturan > Pembaruan aplikasi.
@@ -359,7 +373,9 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
         }
         composable("login") { LoginScreen(vm, onLoggedIn = {}, onChangeServer = { vm.disconnect() }) }
         composable("dashboard") {
-            DashboardScreen(vm) { p -> vm.openProject(p); nav.navigate("explorer") { launchSingleTop = true } }
+            DashboardScreen(vm, onProfile = { nav.navigate("settings") { launchSingleTop = true } }) { p ->
+                vm.openProject(p); nav.navigate("explorer") { launchSingleTop = true }
+            }
         }
         composable("projects") { ProjectsScreen(vm) { nav.navigate("explorer") { launchSingleTop = true } } }
         composable("explorer") {

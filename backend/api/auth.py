@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 
 from backend.dependencies import Services, client_ip, current_user, require, services
 from backend.schemas.models import (LoginRequest, LogoutRequest, OkResponse, PasswordChange, ProfileUpdate,
@@ -52,6 +52,27 @@ def update_me(body: ProfileUpdate, user: dict = Depends(current_user), svc: Serv
     u = svc.auth.update_profile(user, body.display_name, body.email, body.bio)
     svc.db.audit("profile_update", user=user)
     return u
+
+
+@router.put("/me/avatar", response_model=UserOut, summary="Unggah foto profil (multipart 'file': JPEG/PNG/WebP, maks 2 MB)")
+async def upload_avatar(file: UploadFile = File(...), user: dict = Depends(current_user), svc: Services = Depends(services)):
+    data = await file.read(svc.auth.AVATAR_MAX + 1)
+    u = svc.auth.set_avatar(user, data)
+    svc.db.audit("avatar_update", user=user, detail={"bytes": len(data)})
+    return u
+
+
+@router.delete("/me/avatar", response_model=UserOut, summary="Hapus foto profil")
+def delete_avatar(user: dict = Depends(current_user), svc: Services = Depends(services)):
+    return svc.auth.delete_avatar(user)
+
+
+@router.get("/users/{user_id}/avatar", summary="Foto profil pengguna (butuh login)",
+            responses={200: {"content": {"image/jpeg": {}, "image/png": {}, "image/webp": {}}}})
+def get_avatar(user_id: int, _: dict = Depends(current_user), svc: Services = Depends(services)):
+    data, ctype = svc.auth.avatar(user_id)
+    return Response(content=data, media_type=ctype, headers={"Cache-Control": "private, max-age=86400",
+                                                             "X-Content-Type-Options": "nosniff"})
 
 
 @router.post("/password", response_model=OkResponse)

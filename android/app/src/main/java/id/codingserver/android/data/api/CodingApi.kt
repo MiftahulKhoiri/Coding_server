@@ -1,12 +1,15 @@
 package id.codingserver.android.data.api
 
+import okhttp3.MultipartBody
 import okhttp3.ResponseBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.PUT
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -22,6 +25,9 @@ interface CodingApi {
     @POST("api/v1/auth/users") suspend fun createUser(@Body body: UserCreate): UserOut
     @PATCH("api/v1/auth/users/{id}") suspend fun updateUser(@Path("id") id: Int, @Body body: UserUpdate): UserOut
     @DELETE("api/v1/auth/users/{id}") suspend fun deleteUser(@Path("id") id: Int): UserDeleted
+    @Multipart @PUT("api/v1/auth/me/avatar") suspend fun uploadAvatar(@Part file: MultipartBody.Part): UserOut
+    @DELETE("api/v1/auth/me/avatar") suspend fun deleteAvatar(): UserOut
+    @GET("api/v1/auth/users/{id}/avatar") suspend fun avatar(@Path("id") id: Int): ResponseBody
 
     // system
     @GET("api/v1/system/health") suspend fun health(): Health
