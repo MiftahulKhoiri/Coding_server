@@ -87,9 +87,11 @@ fun UserAvatar(client: ApiClient?, user: UserOut?, size: Dp = 48.dp, modifier: M
  */
 suspend fun prepareAvatar(context: Context, uri: Uri, target: Int = 512): ByteArray = withContext(Dispatchers.IO) {
     val cr = context.contentResolver
+    // inJustDecodeBounds: decodeStream SELALU mengembalikan null; ukuran dibaca dari bounds.outWidth/outHeight.
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        ?: error("Tidak bisa membuka gambar")
+    val stream = cr.openInputStream(uri) ?: error("Tidak bisa membuka gambar")
+    stream.use { BitmapFactory.decodeStream(it, null, bounds) }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) error("Format gambar tidak didukung")
     var sample = 1
     while (minOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= target) sample *= 2
     val decoded = cr.openInputStream(uri)?.use {
