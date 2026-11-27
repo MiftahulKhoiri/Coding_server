@@ -14,6 +14,7 @@ import id.codingserver.android.data.api.AIPreset
 import id.codingserver.android.data.api.AIStatus
 import id.codingserver.android.data.api.AgentModels
 import id.codingserver.android.data.api.ApiClient
+import id.codingserver.android.data.api.UnloadAllResult
 import id.codingserver.android.data.api.apiCall
 import kotlinx.coroutines.delay
 
@@ -126,6 +127,18 @@ class AiModelHubState(val c: ApiClient) {
             .onSuccess { checks[cn.id] = ConnectionCheck(true, "Terhubung · ${it.models.size} model tersedia") }
             .onFailure { checks[cn.id] = ConnectionCheck(false, it.message ?: "Tidak bisa terhubung") }
         checking.remove(cn.id)
+    }
+
+    var unloadingAll by mutableStateOf(false)
+
+    /** Lepas semua model lokal dari RAM (endpoint /ai/unload-all); model yang sedang dipakai dilewati server. */
+    suspend fun unloadAll(): Result<UnloadAllResult> {
+        unloadingAll = true
+        val r = apiCall { c.api.aiUnloadAll() }
+        apiCall { c.api.aiStatus() }.onSuccess { status = it }
+        unloadingAll = false
+        refreshLoaded()
+        return r
     }
 
     /** Hitung model lokal yang sedang di RAM dari status model tiap koneksi lokal (data asli llama-server). */

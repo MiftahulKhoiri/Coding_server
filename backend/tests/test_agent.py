@@ -212,3 +212,30 @@ def test_agent_permissions_and_restart_recovery(client, auth, project):
     row = svc.db.one("SELECT status, current_op FROM agent_tasks WHERE id='zombie'")
     assert row["status"] == "PAUSED" and "checkpoint" in row["current_op"]
     svc.db.execute("DELETE FROM agent_tasks WHERE id='zombie'")
+
+
+def test_agent_full_approval_mode_applies_high_risk(client, auth, project, model):
+    """Mode izin 'penuh' + task tanpa auto_apply eksplisit: editan risiko TINGGI langsung diterapkan,
+    task tidak berhenti di WAITING_APPROVAL."""
+    assert client.put("/api/v1/ai/agent-models", json={"approval_mode": "penuh"}, headers=auth).status_code == 200
+    try:
+        SCRIPT.extend([
+            J("write_file", path="deploy.sh", content="echo hai\n"),   # HIGH
+            J("finish", summary="ok"),
+        ])
+        r = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "buat skrip"}, headers=auth)
+        assert r.status_code == 201, r.text
+        assert r.json()["auto_apply"] is True  # bawaan mengikuti mode izin
+        t = wait_status(client, auth, r.json()["id"], {"COMPLETED", "FAILED", "WAITING_APPROVAL"})
+        assert t["status"] == "COMPLETED", t
+        root = client.app.state.services.projects.project_dir(project)
+        assert (root / "deploy.sh").read_text() == "echo hai\n"
+        assert t["report"]["verified"]["files_pending"] == []
+    finally:
+        client.put("/api/v1/ai/agent-models", json={"approval_mode": "manual"}, headers=auth)
+
+
+def test_agent_manual_mode_default_waits(client, auth, project, model):
+    r = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "x"}, headers=auth)
+    assert r.status_code == 201 and r.json()["auto_apply"] is False
+    wait_status(client, auth, r.json()["id"], {"COMPLETED", "FAILED"})

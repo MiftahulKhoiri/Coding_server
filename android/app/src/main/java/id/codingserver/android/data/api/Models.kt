@@ -219,6 +219,12 @@ import kotlinx.serialization.json.JsonElement
     val planner: AgentRoleModel? = null, val executor: AgentRoleModel? = null, val reviewer: AgentRoleModel? = null,
     val online: AgentRoleModel? = null, val allow_online: Boolean = false, val escalate_after_failures: Int = 2,
     val max_loaded_models: Int = 2, val default: AgentModelTarget? = null,
+    /** Izin agent menerapkan editan file: manual | otomatis | penuh (bawaan task baru). */
+    val approval_mode: String = "manual",
+)
+/** Hasil "Lepas semua model": model yang dibongkar, dilewati (sedang dipakai), dan error per koneksi. */
+@Serializable data class UnloadAllResult(
+    val unloaded: List<String> = emptyList(), val skipped: List<String> = emptyList(), val errors: List<String> = emptyList(),
 )
 @Serializable data class BenchSummary(
     val score: Double = 0.0, val passed: Int = 0, val total: Int = 0, val format_ok: Int = 0,

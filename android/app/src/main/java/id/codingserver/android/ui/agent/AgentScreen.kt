@@ -183,7 +183,10 @@ private fun TaskList(vm: AppViewModel, c: ApiClient, projectId: String, projectN
         }
     }
 
-    if (showNew) NewTaskDialog(onDismiss = { showNew = false }) { desc, auto ->
+    // Bawaan "Terapkan otomatis" mengikuti Izin agent di Model AI → AI Agent.
+    var approvalMode by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(showNew) { if (showNew) apiCall { c.api.agentModels() }.onSuccess { approvalMode = it.approval_mode } }
+    if (showNew) NewTaskDialog(approvalMode, onDismiss = { showNew = false }) { desc, auto ->
         showNew = false
         scope.launch {
             apiCall { c.api.agentCreate(AgentTaskCreate(projectId, desc, auto_apply = auto)) }
@@ -223,9 +226,9 @@ private fun TaskRow(t: AgentTask, onClick: () -> Unit) {
 }
 
 @Composable
-private fun NewTaskDialog(onDismiss: () -> Unit, onCreate: (String, Boolean) -> Unit) {
+private fun NewTaskDialog(approvalMode: String?, onDismiss: () -> Unit, onCreate: (String, Boolean) -> Unit) {
     var desc by remember { mutableStateOf("") }
-    var auto by remember { mutableStateOf(false) }
+    var auto by remember(approvalMode) { mutableStateOf(approvalMode != null && approvalMode != "manual") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Task agen baru") },
@@ -237,9 +240,14 @@ private fun NewTaskDialog(onDismiss: () -> Unit, onCreate: (String, Boolean) -> 
                     Checkbox(auto, { auto = it })
                     Text("Terapkan otomatis", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                     InfoButton("Terapkan otomatis", "Perubahan file berisiko rendah/sedang langsung diterapkan tanpa menunggu " +
-                        "persetujuanmu (tetap tercatat & bisa dibatalkan). Perubahan berisiko TINGGI (mis. hapus file) tetap " +
-                        "minta persetujuan.")
+                        "persetujuanmu (tetap tercatat & bisa dibatalkan). Perubahan berisiko TINGGI tetap minta persetujuan, " +
+                        "kecuali Izin agent diatur \"Penuh\".\n\nTanpa ini, agent berhenti sebelum menjalankan/menguji kode " +
+                        "sampai kamu menyetujui perubahannya di Approval Center.\n\nBawaannya diatur di Model AI → AI Agent → Izin agent.")
                 }
+                if (auto && approvalMode == "penuh") Text("Mode penuh: agent jalan terus tanpa berhenti, termasuk perubahan berisiko tinggi.",
+                                                          style = MaterialTheme.typography.labelSmall)
+                if (!auto) Text("Agent akan berhenti menunggu persetujuanmu sebelum menjalankan kode.",
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
             }
         },
         confirmButton = { TextButton(onClick = { onCreate(desc.trim(), auto) }, enabled = desc.isNotBlank()) { Text("Mulai") } },

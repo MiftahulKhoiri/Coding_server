@@ -69,6 +69,13 @@ async def unload(user: dict = Depends(require("admin")), svc: Services = Depends
     return await svc.ai.status(user)
 
 
+@router.post("/unload-all", summary="Lepas semua model lokal dari RAM (kecuali yang sedang dipakai agent/Uji Model)")
+async def unload_all(user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    out = await svc.ai.unload_all()
+    svc.db.audit("ai_unload_all", user=user, detail=out)
+    return out
+
+
 @router.put("/settings")
 async def update_settings(body: AISettingsIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
     svc.ai.save_settings(body.model_dump(exclude_none=True))

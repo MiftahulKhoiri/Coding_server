@@ -190,9 +190,11 @@ def _after_proposal(ctx: ToolContext, row: dict) -> str:
     if row["status"] == "failed":
         raise ToolError(f"Editan tidak bisa dibuat: {row['error']}")
     msg = f"Proposal #{row['id']} untuk {row['path']} (+{row['additions']}/-{row['deletions']}, risiko {row['risk']})"
-    if ctx.task.get("auto_apply") and row["risk"] != "HIGH":
+    full = svc.ai.agent_models().get("approval_mode") == "penuh"
+    if ctx.task.get("auto_apply") and (row["risk"] != "HIGH" or (full and row["action"] == "write")):
         try:
-            svc.ai.decide(ctx.user, ctx.project_id, ctx.root, row["id"], True)
+            # Mode izin "penuh": risiko TINGGI juga diterapkan (tetap tercatat & bisa dibatalkan di Approval Center).
+            svc.ai.decide(ctx.user, ctx.project_id, ctx.root, row["id"], True, confirm_high_risk=full)
             return msg + " DITERAPKAN otomatis (bisa dibatalkan di Approval Center)."
         except AppError as e:
             svc.db.execute("UPDATE ai_proposals SET status='failed', error=? WHERE id=?", (e.message, row["id"]))

@@ -392,3 +392,41 @@ def test_profile_git_sync_commits_only_profile_file(client, tmp_path):
     assert "chore(model-profiles): uji sinkron" in files and "model_profiles/Qwen3.5-9B-Q4_K_M.json" in files
     assert "kode.py" not in files  # perubahan lain tidak ikut
     assert "a = 2" in (repo / "kode.py").read_text()  # dan tetap ada di working tree
+
+
+async def _router_only(request: httpx.Request) -> httpx.Response:
+    if request.url.host != "router.test" and request.url.path == "/v1/models":
+        return httpx.Response(200, json={"data": []})  # koneksi lokal lain (bawaan) tidak memuat apa pun
+    return await _router(request)
+
+
+def test_unload_all_skips_models_in_use(client, auth, monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(ai_providers, "http_client",
+                        lambda timeout=30.0: httpx.AsyncClient(transport=httpx.MockTransport(_router_only), timeout=timeout))
+    monkeypatch.setattr(asyncio, "sleep", _fast_sleep)
+    ROUTER.clear(); ROUTER.update({"a": "loaded", "b": "loaded", "c": "unloaded"}); ROUTER_LOG.clear()
+    cid = client.post("/api/v1/ai/connections", json={"name": "router", "kind": "llama_router", "location": "local",
+                                                      "base_url": "http://router.test"}, headers=auth).json()["id"]
+    ai = client.app.state.services.ai
+    ai.hold(cid, "b")  # mis. sedang dipakai task agent
+    try:
+        r = client.post("/api/v1/ai/unload-all", headers=auth)
+        assert r.status_code == 200, r.text
+        out = r.json()
+        assert out["unloaded"] == ["a"] and out["skipped"] == ["b"] and out["errors"] == []
+        assert ROUTER == {"a": "unloaded", "b": "loaded", "c": "unloaded"}
+    finally:
+        ai.release(cid, "b")
+        ai._agent_loaded.clear()
+        client.delete(f"/api/v1/ai/connections/{cid}", headers=auth)
+
+
+def test_approval_mode_setting(client, auth):
+    assert client.get("/api/v1/ai/agent-models", headers=auth).json()["approval_mode"] == "manual"
+    assert client.put("/api/v1/ai/agent-models", json={"approval_mode": "bebas"}, headers=auth).status_code == 422
+    try:
+        assert roles(client, auth, approval_mode="penuh")["approval_mode"] == "penuh"
+    finally:
+        roles(client, auth, approval_mode="manual")

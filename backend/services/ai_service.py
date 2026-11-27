@@ -55,7 +55,13 @@ DEFAULT_AGENT_MODELS = {
     "allow_online": False,  # 100% lokal secara default
     "escalate_after_failures": 2,  # verifikasi gagal berturut-turut sebelum eskalasi
     "max_loaded_models": 2,        # model lokal yang boleh termuat bersamaan (RAM Pi)
+    # Izin agent menerapkan perubahan file (bawaan task baru):
+    #   manual   = semua editan menunggu persetujuan di Approval Center
+    #   otomatis = risiko rendah/sedang langsung diterapkan; risiko TINGGI menunggu
+    #   penuh    = semua editan (termasuk risiko TINGGI) langsung diterapkan; tetap tercatat & bisa dibatalkan
+    "approval_mode": "manual",
 }
+APPROVAL_MODES = ("manual", "otomatis", "penuh")
 
 
 class AIService:
@@ -208,6 +214,10 @@ class AIService:
                 cur[k] = max(1, min(int(v), 10))
             elif k == "max_loaded_models" and v is not None:
                 cur[k] = max(1, min(int(v), 4))
+            elif k == "approval_mode" and v is not None:
+                if v not in APPROVAL_MODES:
+                    raise AppError("Mode izin agent tidak dikenal", code="bad_approval_mode")
+                cur[k] = v
         self.save_settings({"agent_models": cur})
         return self.public_agent_models()
 
@@ -431,6 +441,45 @@ class AIService:
                     log.warning("Gagal membongkar %s: %s", model, e)
             self.state.update(status="idle", model=None, loaded_by_us=False, message="Model dibongkar", target=None)
         return dict(self.state)
+
+    async def unload_all(self) -> dict:
+        """Lepas semua model lokal dari RAM: model chat, model agent/Uji Model, dan model lain yang masih termuat
+        di llama-server. Model yang sedang dipakai agent / Uji Model dilewati (tidak dihentikan paksa)."""
+        unloaded: list[str] = []
+        skipped: list[str] = []
+        errors: list[str] = []
+        async with self._lock:
+            st = self.state
+            active = (st["connection_id"], st["model"]) if st["model"] else None
+            rows = self.db.all("SELECT id FROM ai_connections WHERE location='local'")
+            for r in rows:
+                try:
+                    _, prov = self.provider(r["id"])
+                    if not prov.supports_load:
+                        continue
+                    models = await prov.list_models()
+                except Exception as e:
+                    errors.append(str(e)[:200])
+                    continue
+                for m in models:
+                    if m.get("status") not in ("loaded", "loading"):
+                        continue
+                    key = (r["id"], m["id"])
+                    if self.in_use(key):
+                        skipped.append(m["id"])
+                        continue
+                    try:
+                        await prov.unload(m["id"])
+                        unloaded.append(m["id"])
+                    except Exception as e:
+                        errors.append(f"{m['id']}: {str(e)[:200]}")
+                        continue
+                    self._agent_loaded.pop(key, None)
+                    if key == active:
+                        st.update(status="idle", model=None, loaded_by_us=False, target=None,
+                                  message="Dibongkar lewat tombol Lepas semua model")
+        log.info("Lepas semua model: %d dibongkar, %d dilewati (dipakai)", len(unloaded), len(skipped))
+        return {"unloaded": unloaded, "skipped": skipped, "errors": errors}
 
     async def idle_loop(self) -> None:
         while True:

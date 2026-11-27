@@ -166,6 +166,7 @@ fun AiModelOverview(vm: AppViewModel, hub: AiModelHubState, isAdmin: Boolean, on
                     loaded.forEach { Text("• ${it.model} (${it.connection.name})", style = MaterialTheme.typography.bodySmall) }
                 }
             }
+            if (isAdmin && !loaded.isNullOrEmpty()) UnloadAllButton(vm, hub)
         }
 
         // ---- AI Agent ----
@@ -179,6 +180,9 @@ fun AiModelOverview(vm: AppViewModel, hub: AiModelHubState, isAdmin: Boolean, on
                 Text("🧠 Perencana: ${role(a.planner, "model aktif")}", style = MaterialTheme.typography.bodySmall)
                 Text("⚙️ Pelaksana: ${role(a.executor, "model aktif")}", style = MaterialTheme.typography.bodySmall)
                 Text("🔍 Peninjau: ${role(a.reviewer, "tidak dipakai")}", style = MaterialTheme.typography.bodySmall)
+                Text("🔐 Izin ubah file: " + when (a.approval_mode) {
+                    "penuh" -> "penuh (jalan terus)"; "otomatis" -> "otomatis (risiko tinggi menunggu)"
+                    else -> "manual (menunggu persetujuan)" }, style = MaterialTheme.typography.bodySmall)
                 Text(if (a.allow_online) "🌐 Eskalasi online: diizinkan (${a.online?.model ?: "model online belum diatur"})"
                      else "🌐 Eskalasi online: mati (100% lokal)",
                      color = if (a.allow_online) WarnAmber else OkGreen, style = MaterialTheme.typography.bodySmall)

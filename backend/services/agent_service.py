@@ -241,11 +241,21 @@ class AgentService:
         perms = intersect_for_ai(user["perms"])
         return [t.schema() | {"allowed": t.perm in perms} for t in agent_tools.TOOLS.values()]
 
+    def _auto_apply_text(self, row: dict) -> str:
+        if not row["auto_apply"]:
+            return "tidak (semua editan menunggu persetujuan)"
+        if self.svc.ai.agent_models().get("approval_mode") == "penuh":
+            return "ya, penuh (semua editan langsung diterapkan)"
+        return "ya (risiko HIGH tetap butuh persetujuan)"
+
     def create(self, user: dict, project_id: str, description: str, title: str | None = None,
-               auto_apply: bool = False, max_steps: int = 30) -> dict:
+               auto_apply: bool | None = False, max_steps: int = 30) -> dict:
         perms = intersect_for_ai(user["perms"])
         if "read" not in perms:
             raise Forbidden("Agen AI tidak punya hak baca untuk pengguna ini")
+        if auto_apply is None:  # ikuti mode izin agent global
+            auto_apply = (self.svc.ai.agent_models().get("approval_mode") != "manual"
+                          and "write" in user["perms"])
         if auto_apply and "write" not in user["perms"]:
             raise Forbidden("Auto-apply butuh hak tulis")
         description = description.strip()
@@ -381,7 +391,7 @@ class AgentService:
                 pass
         proj = self.svc.projects.get(row["project_id"], self._owner(row))
         user_msg = (f"Proyek: {proj['name']} (bahasa utama: {proj.get('language') or '-'})\n"
-                    f"Auto-apply: {'ya (risiko HIGH tetap butuh persetujuan)' if row['auto_apply'] else 'tidak (semua editan menunggu persetujuan)'}\n"
+                    f"Auto-apply: {self._auto_apply_text(row)}\n"
                     f"Batas langkah: {row['max_steps']}\n\nTUGAS:\n{row['description']}")
         return [{"role": "system", "content": system_prompt(ai_perms)},
                 {"role": "user", "content": user_msg}]

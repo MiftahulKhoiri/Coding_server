@@ -1,6 +1,13 @@
 package id.codingserver.android.ui.ai
 
 import androidx.compose.foundation.clickable
+import id.codingserver.android.ui.theme.ErrRed
+import id.codingserver.android.ui.common.ConfirmDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -122,6 +129,31 @@ fun AgentModelsSection(vm: AppViewModel, hub: AiModelHubState, isAdmin: Boolean,
         if (a == null) {
             if (hub.agentError == null) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
         } else {
+            // ---- izin agent ----
+            AiSection("🔐 Izin agent mengubah file", "Menentukan apakah agent boleh langsung menerapkan perubahan " +
+                "file lalu menjalankan/menguji kode, atau harus menunggu persetujuanmu di Approval Center.\n\n" +
+                "Selama ada perubahan yang menunggu persetujuan, agent BERHENTI sebelum menjalankan, build, atau test " +
+                "(status \"Menunggu persetujuan\"). Pilih Otomatis/Penuh bila agent sering kamu tinggal.\n\n" +
+                "Ini bawaan untuk task BARU (masih bisa diubah per task saat membuat task). Semua perubahan tetap " +
+                "tercatat dan bisa dibatalkan di Approval Center. Agent tidak pernah diberi izin menghapus file.") {
+                APPROVAL_OPTIONS.forEach { (key, title, desc) ->
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .selectable(selected = a.approval_mode == key, enabled = isAdmin && !saving, role = Role.RadioButton,
+                                        onClick = { save(JsonObject(mapOf("approval_mode" to JsonPrimitive(key))), "Izin agent: $title") })
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = a.approval_mode == key, onClick = null, enabled = isAdmin && !saving)
+                        Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                            Text(title, style = MaterialTheme.typography.bodyMedium,
+                                 fontWeight = if (a.approval_mode == key) FontWeight.Bold else null)
+                            Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+                if (a.approval_mode == "penuh") Text("⚠ Perubahan berisiko tinggi (skrip shell, akses jaringan, konfigurasi, " +
+                    "dll.) juga langsung diterapkan tanpa kamu baca dulu.", color = WarnAmber, style = MaterialTheme.typography.labelSmall)
+            }
+
             // ---- peran ----
             AiSection("Peran model") {
                 listOf(PLANNER, EXECUTOR, REVIEWER).forEachIndexed { i, r ->
@@ -184,6 +216,7 @@ fun AgentModelsSection(vm: AppViewModel, hub: AiModelHubState, isAdmin: Boolean,
                     TextButton(enabled = !hub.loadedChecking, onClick = { scope.launch { hub.refreshLoaded() } }) { Text("Periksa") }
                 }
                 loaded?.forEach { Text("• ${it.model} (${it.connection.name})", style = MaterialTheme.typography.bodySmall) }
+                if (isAdmin) UnloadAllButton(vm, hub)
             }
 
             // ---- rekomendasi & task ----
@@ -206,6 +239,38 @@ fun AgentModelsSection(vm: AppViewModel, hub: AiModelHubState, isAdmin: Boolean,
             onDismiss = { picking = null },
         ) { cid, model -> picking = null; save(roleJson(r.key, cid, model), "Peran ${r.title} disimpan") }
     }
+}
+
+private val APPROVAL_OPTIONS = listOf(
+    Triple("manual", "Manual", "Semua perubahan file menunggu persetujuanmu. Agent berhenti sampai kamu setujui."),
+    Triple("otomatis", "Otomatis (disarankan)", "Perubahan risiko rendah/sedang langsung diterapkan. Risiko TINGGI tetap menunggu."),
+    Triple("penuh", "Penuh — tanpa berhenti", "Semua perubahan langsung diterapkan, termasuk risiko TINGGI. Agent jalan terus sampai selesai."),
+)
+
+/** Tombol "Lepas semua model dari RAM" + konfirmasi; dipakai di Ringkasan dan Pengelolaan RAM. */
+@Composable
+fun UnloadAllButton(vm: AppViewModel, hub: AiModelHubState, modifier: Modifier = Modifier) {
+    val scope = rememberCoroutineScope()
+    var confirm by remember { mutableStateOf(false) }
+    OutlinedButton(onClick = { confirm = true }, enabled = !hub.unloadingAll, modifier = modifier.fillMaxWidth(),
+                   colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrRed)) {
+        if (hub.unloadingAll) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+        else Text("⏏ Lepas semua model dari RAM")
+    }
+    if (confirm) ConfirmDialog("Lepas semua model?",
+        "Semua model lokal (chat, agent, Uji Model) dibongkar dari RAM Pi sekarang. Model yang sedang dipakai task " +
+            "agent / Uji Model dilewati agar pekerjaannya tidak rusak. Model dimuat lagi otomatis saat dipakai.",
+        "Lepas semua", onConfirm = {
+            scope.launch {
+                hub.unloadAll().onSuccess { r ->
+                    vm.toast(buildString {
+                        append(if (r.unloaded.isEmpty()) "Tidak ada model yang perlu dilepas" else "${r.unloaded.size} model dilepas dari RAM")
+                        if (r.skipped.isNotEmpty()) append(" · ${r.skipped.size} dilewati (sedang dipakai)")
+                        if (r.errors.isNotEmpty()) append(" · ${r.errors.size} gagal")
+                    })
+                }.onFailure { vm.toast(it.message ?: "Gagal melepas model") }
+            }
+        }, onDismiss = { confirm = false })
 }
 
 @Composable
