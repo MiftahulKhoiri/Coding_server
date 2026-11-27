@@ -411,7 +411,8 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
             }
             2 -> {
                 if (events.isEmpty()) item(key = "nolog") { Text("Belum ada log.", pad, style = MaterialTheme.typography.bodySmall) }
-                items(events, key = { "e${it.id}" }) { ev -> Box(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) { EventRow(ev) } }
+                // Log terbaru di paling atas (tidak perlu menggeser ke bawah untuk melihat langkah terakhir).
+                items(events.asReversed(), key = { "e${it.id}" }) { ev -> Box(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) { EventRow(ev) } }
             }
             else -> item(key = "report") { ReportView(t) }
         }
