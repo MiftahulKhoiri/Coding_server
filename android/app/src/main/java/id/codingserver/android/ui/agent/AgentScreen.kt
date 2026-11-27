@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -257,6 +260,7 @@ private fun NewTaskDialog(approvalMode: String?, onDismiss: () -> Unit, onCreate
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId: String, onBack: () -> Unit) {
     var task by remember(taskId) { mutableStateOf<AgentTask?>(null) }
@@ -305,36 +309,48 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
             .onFailure { vm.toast(it.message ?: "Gagal") }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali") }
-            Text(task?.title ?: "Task", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1,
-                 overflow = TextOverflow.Ellipsis)
+    // Satu daftar yang bisa digulir: kartu status & panel model ikut tergulir ke atas saat membaca
+    // Log/Rencana/Perubahan, sedangkan baris tab tetap menempel di atas (stickyHeader).
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+        item(key = "title") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Kembali") }
+                Text(task?.title ?: "Task", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1,
+                     overflow = TextOverflow.Ellipsis)
+            }
         }
-        error?.let { ErrorCard(it) { tick++ } }
-        val t = task ?: run { LinearProgressIndicator(Modifier.fillMaxWidth().padding(12.dp)); return@Column }
-        // Kartu animasi status: berpikir, merencanakan, mengerjakan, menguji, selesai, gagal, …
-        val lastKind = events.lastOrNull { it.kind != "plan" && it.kind != "report" }?.kind
-        val lastThought = events.lastOrNull { it.kind == "thought" }?.let { str(it, "text") }
-        val lastStage = events.lastOrNull { it.kind == "status" && str(it, "status") !in setOf("FAILED", "PAUSED", "CANCELLED") }
-            ?.let { str(it, "status") }
-        val lastThink = events.lastOrNull { it.kind == "thinking" }
-        val worker = lastThink?.let { e ->
-            listOf(roleName(str(e, "role")), str(e, "model")).filter { it.isNotBlank() }.joinToString(" · ")
-        }?.takeIf { it.isNotBlank() }
-        val escalated = events.lastOrNull { it.kind == "escalation" || it.kind == "escalation_end" }?.kind == "escalation"
-        AgentStatusHero(t, lastKind, lastThought, lastStage, worker, escalated)
+        error?.let { msg -> item(key = "error") { ErrorCard(msg) { tick++ } } }
+        val t = task
+        if (t == null) {
+            item(key = "loading") { LinearProgressIndicator(Modifier.fillMaxWidth().padding(12.dp)) }
+            return@LazyColumn
+        }
+        item(key = "hero") {
+            // Kartu animasi status: berpikir, merencanakan, mengerjakan, menguji, selesai, gagal, …
+            val lastKind = events.lastOrNull { it.kind != "plan" && it.kind != "report" }?.kind
+            val lastThought = events.lastOrNull { it.kind == "thought" }?.let { str(it, "text") }
+            val lastStage = events.lastOrNull { it.kind == "status" && str(it, "status") !in setOf("FAILED", "PAUSED", "CANCELLED") }
+                ?.let { str(it, "status") }
+            val lastThink = events.lastOrNull { it.kind == "thinking" }
+            val worker = lastThink?.let { e ->
+                listOf(roleName(str(e, "role")), str(e, "model")).filter { it.isNotBlank() }.joinToString(" · ")
+            }?.takeIf { it.isNotBlank() }
+            val escalated = events.lastOrNull { it.kind == "escalation" || it.kind == "escalation_end" }?.kind == "escalation"
+            AgentStatusHero(t, lastKind, lastThought, lastStage, worker, escalated)
+        }
         // Proses model secara langsung (seperti di Laboratorium): tahap, kecepatan, dan teks yang sedang ditulis.
         t.live?.takeIf { t.status in ACTIVE }?.let { l ->
-            Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-                Box(Modifier.padding(10.dp)) {
-                    LiveModelPanel(l, header = listOf("🔴 Langsung", roleName(l.role.orEmpty()), l.model.orEmpty())
-                        .filter { it.isNotBlank() }.joinToString(" · "), textMaxHeight = 140)
+            item(key = "live") {
+                Card(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    Box(Modifier.padding(10.dp)) {
+                        LiveModelPanel(l, header = listOf("🔴 Langsung", roleName(l.role.orEmpty()), l.model.orEmpty())
+                            .filter { it.isNotBlank() }.joinToString(" · "), textMaxHeight = 140)
+                    }
                 }
             }
         }
-        Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        item(key = "actions") {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (t.status in ACTIVE) {
                     OutlinedButton(enabled = !busy, onClick = { act { apiCall { c.api.agentPause(taskId) }.onFailure { vm.toast(it.message ?: "") } } }) { Text("Jeda") }
                     OutlinedButton(enabled = !busy, onClick = { confirmCancel = true }) { Text("Batalkan") }
@@ -348,34 +364,41 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
                     TextButton(enabled = !busy, onClick = { confirmDelete = true }) { Text("Hapus") }
             }
         }
-        HorizontalDivider(Modifier.padding(top = 6.dp))
-        val tabs = listOf("Perubahan (${proposals.size})", "Rencana", "Log", "Laporan")
-        TabRow(selectedTabIndex = tab) {
-            tabs.forEachIndexed { i, s -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(s, maxLines = 1) }) }
+        stickyHeader(key = "tabs") {
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+                HorizontalDivider(Modifier.padding(top = 6.dp))
+                val tabs = listOf("Perubahan (${proposals.size})", "Rencana", "Log", "Laporan")
+                TabRow(selectedTabIndex = tab) {
+                    tabs.forEachIndexed { i, s -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(s, maxLines = 1) }) }
+                }
+            }
         }
+        val pad = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         when (tab) {
-            0 -> LazyColumn(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (t.status == "WAITING_APPROVAL") item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+            0 -> {
+                if (t.status == "WAITING_APPROVAL") item(key = "wait") {
+                    Row(pad, verticalAlignment = Alignment.CenterVertically) {
                         Text("⏸ Menunggu keputusanmu", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF1E88E5),
                              modifier = Modifier.weight(1f))
                         InfoButton("Menunggu persetujuan", "Agen menunggu keputusanmu (Terapkan / Tolak) atas perubahan di bawah " +
                             "sebelum menjalankan atau menguji kode. Setelah semua diputuskan, task lanjut otomatis.")
                     }
                 }
-                if (proposals.isEmpty()) item { Text("Belum ada perubahan file.", style = MaterialTheme.typography.bodyMedium) }
-                items(proposals, key = { it.id }) { e ->
-                    EditCard(e, busy = busy, onApply = { decide(e, true) }, onReject = { decide(e, false) }, onRevert = {
-                        act { apiCall { c.api.aiRevert(e.id, AIDecisionIn(pid)) }.onFailure { vm.toast(it.message ?: "Gagal") } }
-                    })
+                if (proposals.isEmpty()) item(key = "noprop") { Text("Belum ada perubahan file.", pad, style = MaterialTheme.typography.bodyMedium) }
+                items(proposals, key = { "p${it.id}" }) { e ->
+                    Box(pad) {
+                        EditCard(e, busy = busy, onApply = { decide(e, true) }, onReject = { decide(e, false) }, onRevert = {
+                            act { apiCall { c.api.aiRevert(e.id, AIDecisionIn(pid)) }.onFailure { vm.toast(it.message ?: "Gagal") } }
+                        })
+                    }
                 }
             }
-            1 -> LazyColumn(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                item { Text(t.description, style = MaterialTheme.typography.bodyMedium) }
-                if (t.plan.isEmpty()) item { Text("Rencana belum dibuat.", style = MaterialTheme.typography.bodySmall) }
+            1 -> {
+                item(key = "desc") { Text(t.description, pad, style = MaterialTheme.typography.bodyMedium) }
+                if (t.plan.isEmpty()) item(key = "noplan") { Text("Rencana belum dibuat.", pad, style = MaterialTheme.typography.bodySmall) }
                 items(t.plan) { s ->
                     val mark = when (s.status) { "done" -> "✓"; "in_progress" -> "▶"; "failed" -> "✗"; "skipped" -> "–"; else -> "○" }
-                    Column {
+                    Column(pad) {
                         Text("$mark ${s.id}. ${s.description}", style = MaterialTheme.typography.bodyMedium)
                         val extra = listOfNotNull(
                             s.files.takeIf { it.isNotEmpty() }?.joinToString(", "),
@@ -386,10 +409,11 @@ private fun TaskDetail(vm: AppViewModel, c: ApiClient, projectId: String, taskId
                     }
                 }
             }
-            2 -> LazyColumn(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                items(events, key = { it.id }) { ev -> EventRow(ev) }
+            2 -> {
+                if (events.isEmpty()) item(key = "nolog") { Text("Belum ada log.", pad, style = MaterialTheme.typography.bodySmall) }
+                items(events, key = { "e${it.id}" }) { ev -> Box(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) { EventRow(ev) } }
             }
-            else -> ReportView(t)
+            else -> item(key = "report") { ReportView(t) }
         }
     }
 
@@ -461,25 +485,23 @@ private fun EventRow(ev: AgentEvent) {
 @Composable
 private fun ReportView(t: AgentTask) {
     val r = t.report
-    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (r == null) { item { Text("Laporan tersedia setelah task selesai.") }; return@LazyColumn }
-        r.incomplete?.let { item { Text("Belum tuntas: $it", color = ErrRed) } }
-        item { Text("Fakta terverifikasi server", style = MaterialTheme.typography.titleSmall) }
-        item {
-            Text("File diubah: ${r.verified.files_changed.joinToString(", ").ifBlank { "-" }}\n" +
-                 "Menunggu persetujuan: ${r.verified.files_pending.joinToString(", ").ifBlank { "-" }}\n" +
-                 "Tes lulus: ${r.verified.tests_passed} · tes gagal: ${r.verified.tests_failed} · langkah: ${r.verified.steps_used}",
-                 style = MaterialTheme.typography.bodySmall)
-        }
-        items(r.verified.runs) { run ->
+    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (r == null) { Text("Laporan tersedia setelah task selesai."); return@Column }
+        r.incomplete?.let { Text("Belum tuntas: $it", color = ErrRed) }
+        Text("Fakta terverifikasi server", style = MaterialTheme.typography.titleSmall)
+        Text("File diubah: ${r.verified.files_changed.joinToString(", ").ifBlank { "-" }}\n" +
+             "Menunggu persetujuan: ${r.verified.files_pending.joinToString(", ").ifBlank { "-" }}\n" +
+             "Tes lulus: ${r.verified.tests_passed} · tes gagal: ${r.verified.tests_failed} · langkah: ${r.verified.steps_used}",
+             style = MaterialTheme.typography.bodySmall)
+        r.verified.runs.forEach { run ->
             val ok = run.status == "COMPLETED" && run.exit_code == 0
             Text("${if (ok) "✓" else "✗"} ${run.kind} ${run.target}: ${run.status} (exit ${run.exit_code ?: "-"})",
                  color = if (ok) OkGreen else ErrRed, style = MaterialTheme.typography.bodySmall)
         }
-        item { HorizontalDivider() }
-        item { Text("Ringkasan dari AI (belum tentu akurat)", style = MaterialTheme.typography.titleSmall) }
-        item { SelectionContainer { Text(r.ai_generated.summary ?: "-", style = MaterialTheme.typography.bodyMedium) } }
-        r.ai_generated.limitations?.takeIf { it.isNotBlank() }?.let { item { Text("Keterbatasan: $it", style = MaterialTheme.typography.bodySmall) } }
-        r.ai_generated.remaining?.takeIf { it.isNotBlank() }?.let { item { Text("Sisa pekerjaan: $it", style = MaterialTheme.typography.bodySmall) } }
+        HorizontalDivider()
+        Text("Ringkasan dari AI (belum tentu akurat)", style = MaterialTheme.typography.titleSmall)
+        SelectionContainer { Text(r.ai_generated.summary ?: "-", style = MaterialTheme.typography.bodyMedium) }
+        r.ai_generated.limitations?.takeIf { it.isNotBlank() }?.let { Text("Keterbatasan: $it", style = MaterialTheme.typography.bodySmall) }
+        r.ai_generated.remaining?.takeIf { it.isNotBlank() }?.let { Text("Sisa pekerjaan: $it", style = MaterialTheme.typography.bodySmall) }
     }
 }
