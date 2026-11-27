@@ -63,6 +63,19 @@ class BackupService:
                     continue
                 yield p
 
+    SECRET_FILES = ("secret.key", "initial_admin_password.txt")
+
+    def _metadata_extras(self):
+        """File metadata selain database: sandi admin utama dan folder avatars/ (foto profil)."""
+        pw = self.s.metadata_dir / "initial_admin_password.txt"
+        if pw.is_file() and not pw.is_symlink():
+            yield pw
+        av = self.s.metadata_dir / "avatars"
+        if av.is_dir() and not av.is_symlink():
+            for f in self._iter_files(av):
+                if f.suffix == ".img":  # lewati sisa .tmp dari unggahan yang terputus
+                    yield f
+
     def create_sync(self, label: str = "manual") -> dict:
         s = self.s
         s.backups_dir.mkdir(parents=True, exist_ok=True)
@@ -87,6 +100,11 @@ class BackupService:
                 if key.is_file():
                     tar.add(key, arcname="workspace/metadata/secret.key")
                     manifest["workspace/metadata/secret.key"] = _sha256_file(key)
+                # Sumber sandi admin utama (akun pemulihan) & foto profil pengguna.
+                for f in self._metadata_extras():
+                    arcname = f"workspace/metadata/{f.relative_to(s.metadata_dir).as_posix()}"
+                    manifest[arcname] = _sha256_file(f)
+                    tar.add(f, arcname=arcname, recursive=False)
                 for root, arc in self._sources():
                     if not root.is_dir():
                         continue
@@ -193,6 +211,12 @@ class BackupService:
                 restored.append(arc)
             for d in (s.projects_dir, s.database_dir, s.history_dir, s.data_dir, s.metadata_dir):
                 d.mkdir(parents=True, exist_ok=True)
+            if "workspace/metadata" in restored:
+                # tar filter="data" bisa melonggarkan izin; file rahasia wajib 0600 lagi.
+                for fn in self.SECRET_FILES:
+                    f = s.metadata_dir / fn
+                    if f.is_file():
+                        os.chmod(f, 0o600)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         log.info("Restore dari %s: %s", name, restored)

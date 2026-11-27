@@ -142,3 +142,35 @@ def test_openapi_contract(client):
                  "/api/v1/terminal/sessions", "/api/v1/database/query", "/api/v1/git/status", "/api/v1/system/health",
                  "/api/v1/http/request", "/api/v1/backup"]:
         assert path in spec["paths"], path
+
+
+def test_backup_includes_avatars_and_root_password(client, auth):
+    """Foto profil & sumber sandi admin utama ikut dibackup (bukan hanya database)."""
+    import io
+    import tarfile
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\x01" * 40
+    r = client.put("/api/v1/auth/me/avatar", files={"file": ("a.png", io.BytesIO(png), "image/png")}, headers=auth)
+    assert r.status_code == 200, r.text
+    uid = r.json()["id"]
+    svc = client.app.state.services
+    pwfile = svc.settings.metadata_dir / "initial_admin_password.txt"
+    created = not pwfile.exists()
+    if created:
+        pwfile.write_text("username: admin\npassword: admin-pass-123\n")
+    (svc.settings.metadata_dir / "avatars" / "99.tmp").write_bytes(b"sisa")
+    try:
+        info = svc.backup.create_sync("avatar")
+        p = svc.backup.path_of(info["name"])
+        with tarfile.open(p, "r:gz") as tar:
+            names = set(tar.getnames())
+            assert f"workspace/metadata/avatars/{uid}.img" in names
+            assert tar.extractfile(f"workspace/metadata/avatars/{uid}.img").read() == png
+        assert "workspace/metadata/initial_admin_password.txt" in names
+        assert "workspace/metadata/avatars/99.tmp" not in names
+        assert svc.backup.verify(info["name"])["valid"]
+    finally:
+        (svc.settings.metadata_dir / "avatars" / "99.tmp").unlink(missing_ok=True)
+        if created:
+            pwfile.unlink(missing_ok=True)
+        client.delete("/api/v1/auth/me/avatar", headers=auth)
