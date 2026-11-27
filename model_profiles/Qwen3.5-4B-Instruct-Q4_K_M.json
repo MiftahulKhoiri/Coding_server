@@ -1,0 +1,123 @@
+{
+  "model": "Qwen3.5-4B-Instruct-Q4_K_M",
+  "family": "qwen3.5",
+  "thinking_supported": true,
+  "source": "kalibrasi",
+  "status": "ok",
+  "active": true,
+  "kegunaan": [
+    "chat_umum",
+    "penjelasan_coding",
+    "perencana",
+    "peninjau",
+    "spesialis_coding",
+    "pelaksana_coding"
+  ],
+  "catatan": "Kalibrasi 27 Nov 2026: kualitas = varian B (Resmi tanpa berpikir, skor 100.0, 54 dtk/kasus); cepat = varian B (Resmi tanpa berpikir, skor 100.0, 54 dtk/kasus).",
+  "prompt_tambahan": "",
+  "preset": {
+    "kualitas": {
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repeat_penalty": null,
+      "thinking": false,
+      "max_tokens": 2048
+    },
+    "cepat": {
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "repeat_penalty": null,
+      "thinking": false,
+      "max_tokens": 2048
+    }
+  },
+  "kalibrasi": {
+    "tanggal": 1795758912.7739935,
+    "run_id": "ea5d433b86ba",
+    "pilihan": {
+      "kualitas": "B",
+      "cepat": "B"
+    },
+    "varian": [
+      {
+        "key": "A",
+        "label": "Resmi + berpikir",
+        "params": {
+          "temperature": 0.6,
+          "top_p": 0.95,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 0.0,
+          "repeat_penalty": null,
+          "thinking": true,
+          "max_tokens": 4096
+        },
+        "score": 73.3,
+        "avg_seconds": 96.3,
+        "format_ok": 6,
+        "total": 6,
+        "passed": 4,
+        "avg_tps": 3.02,
+        "thinking_tokens": 625
+      },
+      {
+        "key": "B",
+        "label": "Resmi tanpa berpikir",
+        "params": {
+          "temperature": 0.7,
+          "top_p": 0.8,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 1.5,
+          "repeat_penalty": null,
+          "thinking": false,
+          "max_tokens": 2048
+        },
+        "score": 100.0,
+        "avg_seconds": 54.9,
+        "format_ok": 6,
+        "total": 6,
+        "passed": 6,
+        "avg_tps": 3.01,
+        "thinking_tokens": 0
+      },
+      {
+        "key": "C",
+        "label": "Suhu rendah tanpa berpikir",
+        "params": {
+          "temperature": 0.2,
+          "top_p": 0.8,
+          "top_k": 20,
+          "min_p": 0.0,
+          "presence_penalty": 1.5,
+          "repeat_penalty": null,
+          "thinking": false,
+          "max_tokens": 2048
+        },
+        "score": 84.2,
+        "avg_seconds": 55.2,
+        "format_ok": 6,
+        "total": 6,
+        "passed": 5,
+        "avg_tps": 3.01,
+        "thinking_tokens": 0
+      }
+    ],
+    "saran": []
+  },
+  "updated_at": 1795758912.7740622,
+  "kegunaan_label": [
+    "Chat umum",
+    "Penjelasan kode / tanya-jawab teknis",
+    "Perencana (memahami tugas & menyusun rencana)",
+    "Peninjau hasil kerja agent",
+    "Spesialis coding (tugas kode sulit)",
+    "Pelaksana coding (edit file, build, test)"
+  ]
+}
