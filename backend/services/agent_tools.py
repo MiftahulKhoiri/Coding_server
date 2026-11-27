@@ -202,6 +202,43 @@ def _after_proposal(ctx: ToolContext, row: dict) -> str:
     return msg + " dibuat dan MENUNGGU persetujuan pengguna; file belum berubah sampai disetujui."
 
 
+# ---------------- cek otomatis (tidak bergantung pada kepatuhan model) ----------------
+AUTO_CHECK_EXT = {".py", ".js", ".mjs", ".cjs", ".php"}  # cek statis cepat (sintaks + definisi ganda Python)
+MAX_FINISH_BLOCKS = 2
+
+
+async def _check_file(ctx: ToolContext, rel: str) -> tuple[bool, str] | None:
+    """Jalankan build_file (cek sintaks) untuk satu file kode; None bila tipe file tidak dicek."""
+    if Path(rel).suffix.lower() not in AUTO_CHECK_EXT or not (ctx.root / rel).is_file():
+        return None
+    svc = ctx.svc
+    try:
+        job = await svc.execution.submit(user=ctx.user, project_id=ctx.project_id, project_dir=ctx.root,
+                                         file_rel=rel, action="build")
+        await svc.execution.wait(job, timeout=svc.settings.build_timeout + 30)
+    except (AppError, asyncio.TimeoutError) as e:  # antrean penuh / engine tidak ada: jangan gagalkan langkah
+        return None if isinstance(e, asyncio.TimeoutError) else (True, f"(cek dilewati: {e.message})")
+    ok = job.status == "COMPLETED" and job.exit_code == 0
+    ctx.task.setdefault("_runs", []).append({"kind": "build", "target": rel, "status": job.status,
+                                             "exit_code": job.exit_code, "process_id": job.id, "auto": True})
+    detail = (job.stderr or job.stdout or job.error or "").strip()
+    detail = detail.replace(str(ctx.root) + "/", "")
+    return ok, (detail[-1500:] if detail else ("OK" if ok else job.status))
+
+
+async def _auto_check_note(ctx: ToolContext, msg: str, rel: str) -> str:
+    if "DITERAPKAN" not in msg:
+        return msg
+    res = await _check_file(ctx, rel)
+    if res is None:
+        return msg
+    ok, detail = res
+    if ok:
+        return msg + f"\nCek otomatis {rel}: OK (sintaks benar, tanpa definisi ganda)."
+    return (msg + f"\nCek otomatis {rel}: GAGAL — perbaiki dulu sebelum lanjut:\n{detail}\n"
+            "Tip: untuk file yang rusak/berantakan, tulis ulang SELURUH file dengan write_file (lebih aman dari edit_file).")
+
+
 async def _write_file(ctx: ToolContext, a: dict) -> str:
     content = a.get("content")
     if content is None:
@@ -218,7 +255,7 @@ async def _write_file(ctx: ToolContext, a: dict) -> str:
             "```")
     row = ctx.svc.ai.propose_edit(ctx.user, ctx.project_id, ctx.root, Edit(a["path"], "full", content=content),
                                   reason=a.get("reason", "")[:300] or "agent", task_id=ctx.task["id"])
-    return _after_proposal(ctx, row)
+    return await _auto_check_note(ctx, _after_proposal(ctx, row), row["path"])
 
 
 async def _edit_file(ctx: ToolContext, a: dict) -> str:
@@ -235,7 +272,7 @@ async def _edit_file(ctx: ToolContext, a: dict) -> str:
         raise ToolError("Butuh args.search & args.replace, atau blok SEARCH/REPLACE setelah JSON")
     row = ctx.svc.ai.propose_edit(ctx.user, ctx.project_id, ctx.root, Edit(a["path"], "replace", blocks=blocks),
                                   reason=a.get("reason", "")[:300] or "agent", task_id=ctx.task["id"])
-    return _after_proposal(ctx, row)
+    return await _auto_check_note(ctx, _after_proposal(ctx, row), row["path"])
 
 
 async def _delete_file(ctx: ToolContext, a: dict) -> str:
@@ -360,6 +397,20 @@ async def _git_diff(ctx: ToolContext, a: dict) -> str:
 
 
 async def _finish(ctx: ToolContext, a: dict) -> str:
+    # Gerbang selesai: semua file kode yang diubah task ini harus lolos cek otomatis. Model kecil sering
+    # menyatakan "sudah lengkap" tanpa memverifikasi (kasus nyata: app.py dengan 5 route ganda).
+    if ctx.task.get("_finish_blocks", 0) < MAX_FINISH_BLOCKS:
+        changed = sorted({p["path"] for p in ctx.svc.ai.proposals(ctx.project_id, "approved", None, ctx.task["id"])
+                          if p.get("action") == "write"})
+        failures = []
+        for rel in changed:
+            res = await _check_file(ctx, rel)
+            if res is not None and not res[0]:
+                failures.append(f"- {rel}:\n{res[1]}")
+        if failures:
+            ctx.task["_finish_blocks"] = ctx.task.get("_finish_blocks", 0) + 1
+            raise ToolError("Belum bisa selesai: file berikut gagal cek otomatis. Perbaiki dulu (tulis ulang file "
+                            "utuh dengan write_file bila perlu), lalu panggil finish lagi.\n" + "\n".join(failures))
     ctx.task["_finish"] = {k: a.get(k) for k in ("summary", "limitations", "remaining")}
     return "Selesai."
 

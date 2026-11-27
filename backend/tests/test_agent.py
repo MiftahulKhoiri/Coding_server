@@ -421,3 +421,27 @@ def test_resumed_task_uses_latest_system_prompt(client):
                                                    {"role": "user", "content": "TUGAS"}]})}
     msgs = svc._messages(row, {"read", "write", "execute", "build"})
     assert msgs[0]["content"] == system_prompt({"read", "write", "execute", "build"}) and msgs[1]["content"] == "TUGAS"
+
+
+def test_auto_check_after_edit_and_finish_gate(client, auth, project, model):
+    """Server memeriksa sendiri file kode yang diterapkan; finish ditolak selama masih ada error (kasus nyata:
+    model menyatakan app.py 'sudah lengkap' padahal ada route ganda)."""
+    dup = "def login():\n    return 1\n\n\ndef login():\n    return 2\n"
+    good = "def login():\n    return 1\n"
+    SCRIPT.extend([
+        J("write_file", path="app.py") + f"\n```python\n{dup}```",
+        J("finish", summary="sudah lengkap"),                      # ditolak gerbang
+        J("write_file", path="app.py") + f"\n```python\n{good}```",
+        J("finish", summary="diperbaiki"),
+    ])
+    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "app", "auto_apply": True},
+                      headers=auth).json()["id"]
+    t = wait_status(client, auth, tid, {"COMPLETED", "FAILED"}, timeout=120)
+    assert t["status"] == "COMPLETED", t
+    obs = [e["data"] for e in client.get(f"/api/v1/agent/tasks/{tid}/events", headers=auth).json()["events"]
+           if e["kind"] == "observation"]
+    assert "Cek otomatis app.py: GAGAL" in obs[0]["text"] and "'login' didefinisikan ulang" in obs[0]["text"]
+    assert not obs[1]["ok"] and "Belum bisa selesai" in obs[1]["text"]
+    assert "Cek otomatis app.py: OK" in obs[2]["text"]
+    assert obs[3]["ok"] and t["report"]["ai_generated"]["summary"] == "diperbaiki"
+    assert any(r["kind"] == "build" for r in t["report"]["verified"]["runs"])
