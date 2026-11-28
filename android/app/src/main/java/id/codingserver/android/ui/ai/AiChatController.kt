@@ -63,7 +63,15 @@ class AiChatController(private val scope: CoroutineScope, private val client: ()
 
     fun refreshConversations() {
         val c = client() ?: return
-        scope.launch { apiCall { c.api.aiConversations() }.onSuccess { r -> _ui.update { it.copy(conversations = r.conversations) } } }
+        scope.launch {
+            apiCall { c.api.aiConversations() }.onSuccess { r ->
+                _ui.update { it.copy(conversations = r.conversations) }
+                // aplikasi dibuka lagi saat AI masih menjawab: langsung tampilkan percakapan itu
+                val st = _ui.value
+                val running = r.conversations.firstOrNull { it.generating }
+                if (running != null && st.conversationId == null && st.messages.isEmpty() && !st.busy) open(running.id, st.projectId)
+            }
+        }
     }
 
     fun newConversation() {
@@ -71,19 +79,55 @@ class AiChatController(private val scope: CoroutineScope, private val client: ()
         _ui.update { it.copy(conversationId = null, title = "Percakapan baru", messages = emptyList()) }
     }
 
-    fun open(id: Int, projectId: String?) {
+    fun open(id: Int, projectId: String?, force: Boolean = false) {
         val c = client() ?: return
-        if (_ui.value.busy) return
+        if (_ui.value.busy && !force) return
         scope.launch {
             apiCall { c.api.aiConversation(id) }.onSuccess { d ->
                 val edits = if (projectId != null)
                     apiCall { c.api.aiProposals(projectId, d.id) }.getOrNull()?.proposals.orEmpty().groupBy { it.message_id }
                 else emptyMap()
                 _ui.update {
-                    it.copy(conversationId = d.id, title = d.title, projectId = projectId,
+                    it.copy(conversationId = d.id, title = d.title, projectId = projectId ?: it.projectId,
                             messages = d.messages.map { m -> m.toUi().copy(edits = edits[m.id].orEmpty().sortedBy { e -> e.id }) })
                 }
+                // Jawaban masih dibuat di server (mis. aplikasi sempat ditutup): sambung lagi & lanjutkan tampilannya.
+                if (d.generating) attach(d.id)
             }
+        }
+    }
+
+    /** Sambung ke jawaban yang sedang dibuat server; semua event diputar ulang dari awal. */
+    private fun attach(id: Int, attempt: Int = 0) {
+        val c = client() ?: return
+        _ui.update { st ->
+            val last = st.messages.lastOrNull()
+            val msgs = if (last != null && last.role == "assistant" && last.streaming) st.messages.dropLast(1) else st.messages
+            st.copy(busy = true, messages = msgs + ChatMessage("assistant", "", streaming = true))
+        }
+        val s = AiStream(c)
+        stream = s
+        job = scope.launch {
+            c.ensureFreshToken()
+            var lostConnection = false
+            s.attach(id).collect { ev ->
+                if (ev is AiEvent.Error && ev.code == "network") lostConnection = true
+                else if (ev is AiEvent.Idle) { finishStreaming(); open(id, _ui.value.projectId, force = true) }
+                else onEvent(ev)
+            }
+            if (lostConnection) reconnectOrFail(id, attempt) else { finishStreaming(); refreshConversations() }
+        }
+    }
+
+    /** Koneksi putus saat menunggu jawaban (layar mati, sinyal hilang): jawaban tetap dibuat di server, sambung lagi. */
+    private suspend fun reconnectOrFail(id: Int, attempt: Int) {
+        if (attempt < 6) {
+            kotlinx.coroutines.delay(2_000L * (attempt + 1))
+            attach(id, attempt + 1)
+        } else {
+            updateLast { it.copy(content = it.content + "\n\n⚠ Koneksi ke server terputus. Jawaban tetap dibuat di server — " +
+                                 "buka percakapan ini lagi nanti.", streaming = false, error = true) }
+            _ui.update { it.copy(busy = false) }
         }
     }
 
@@ -112,11 +156,16 @@ class AiChatController(private val scope: CoroutineScope, private val client: ()
         stream = s
         job = scope.launch {
             c.ensureFreshToken()
+            var lostConnection = false
             s.send(AiRequest(content, _ui.value.conversationId, projectId, editorText = editorText, editorName = editorName,
                              autoApply = _ui.value.autoApply && projectId != null))
-                .collect { ev -> onEvent(ev) }
-            finishStreaming()
-            refreshConversations()
+                .collect { ev ->
+                    // putus setelah server menerima pertanyaan: jawaban tetap dibuat -> sambung lagi, jangan tampilkan galat
+                    if (ev is AiEvent.Error && ev.code == "network" && _ui.value.conversationId != null) lostConnection = true
+                    else onEvent(ev)
+                }
+            val cid = _ui.value.conversationId
+            if (lostConnection && cid != null) reconnectOrFail(cid, 0) else { finishStreaming(); refreshConversations() }
         }
     }
 
@@ -141,6 +190,7 @@ class AiChatController(private val scope: CoroutineScope, private val client: ()
             }
             is AiEvent.Done -> { updateLast { it.copy(id = ev.messageId) }; finishStreaming() }
             is AiEvent.Stopped -> updateLast { it.copy(content = it.content + "\n\n[dihentikan]", streaming = false) }
+            is AiEvent.Idle -> finishStreaming()
             is AiEvent.Error -> updateLast { it.copy(content = it.content + (if (it.content.isEmpty()) "" else "\n\n") + "⚠ ${ev.message}",
                                                      streaming = false, error = true) }
         }

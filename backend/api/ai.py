@@ -77,6 +77,7 @@ async def unload_all(force: bool = False, user: dict = Depends(require("ai_manag
     if force:
         paused = await svc.agent.pause_all("Dijeda paksa: semua model dilepas dari RAM. Tekan Lanjutkan untuk meneruskan.")
         cancelled = await svc.bench.cancel_all()
+        await svc.ai.jobs.cancel_all()
     out = await svc.ai.unload_all(force=force)
     out["paused_tasks"], out["cancelled_bench"] = paused, cancelled
     svc.db.audit("ai_unload_all", user=user, detail=out)
@@ -250,47 +251,64 @@ async def ws_chat(ws: WebSocket, token: str | None = None):
         await ws.close(code=4403)
         return
 
-    task: asyncio.Task | None = None
+    follower: asyncio.Task | None = None
+    job = None
 
-    async def run(msg: dict) -> None:
+    async def forward(j) -> None:
+        """Teruskan event job ke koneksi ini. Putusnya koneksi TIDAK menghentikan job."""
         try:
-            root, pid = None, None
-            if msg.get("project_id"):
-                pid = str(msg["project_id"])
-                root = project_dir(svc, pid, user)
-            auto_apply = bool(msg.get("auto_apply")) and "write" in user["perms"]
-            async for ev in svc.ai.chat_stream(
-                user, msg.get("conversation_id"), str(msg.get("content", "")), project_dir=root,
-                files=msg.get("files") or None, editor_text=msg.get("editor_text"), editor_name=msg.get("editor_name"),
-                project_id=pid, auto_apply=auto_apply,
-            ):
+            async for ev in j.follow():
                 await ws.send_json(ev)
-        except asyncio.CancelledError:
-            await ws.send_json({"type": "stopped"})
-            raise
-        except AppError as e:
-            await ws.send_json({"type": "error", "code": e.code, "message": e.message})
-        except Exception as e:  # jangan biarkan WS tertutup tanpa pesan
-            await ws.send_json({"type": "error", "code": "internal", "message": str(e)})
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+
+    def start(msg: dict):
+        root, pid = None, None
+        if msg.get("project_id"):
+            pid = str(msg["project_id"])
+            root = project_dir(svc, pid, user)
+        auto_apply = bool(msg.get("auto_apply")) and "write" in user["perms"]
+        conv = msg.get("conversation_id")
+        return svc.ai.jobs.start(user, conv, lambda: svc.ai.chat_stream(
+            user, conv, str(msg.get("content", "")), project_dir=root, files=msg.get("files") or None,
+            editor_text=msg.get("editor_text"), editor_name=msg.get("editor_name"), project_id=pid, auto_apply=auto_apply))
 
     try:
         while True:
             msg = await ws.receive_json()
             t = msg.get("type")
-            if t == "send":
-                if task and not task.done():
+            if t in ("send", "attach"):
+                if follower and not follower.done():
                     await ws.send_json({"type": "error", "code": "busy", "message": "Jawaban sebelumnya belum selesai"})
                     continue
-                task = asyncio.create_task(run(msg))
-            elif t == "stop" and task and not task.done():
-                task.cancel()
+                try:
+                    if t == "send":
+                        job = start(msg)
+                    else:
+                        job = svc.ai.jobs.for_conversation(int(msg.get("conversation_id") or 0), user["id"])
+                        if job is None or job.done:
+                            # tidak ada jawaban berjalan: aplikasi cukup memuat ulang percakapan dari database
+                            await ws.send_json({"type": "idle"})
+                            continue
+                except AppError as e:
+                    await ws.send_json({"type": "error", "code": e.code, "message": e.message, **(e.details or {})})
+                    continue
+                follower = asyncio.create_task(forward(job))
+            elif t == "stop":
+                target = job
+                if target is None and msg.get("conversation_id"):
+                    target = svc.ai.jobs.for_conversation(int(msg["conversation_id"]), user["id"])
+                if target is None:
+                    target = svc.ai.jobs.running_for_user(user["id"])
+                if target:
+                    svc.ai.jobs.stop(target)
             elif t == "ping":
                 await ws.send_json({"type": "pong"})
     except (WebSocketDisconnect, RuntimeError, ValueError):
         pass
     finally:
-        if task and not task.done():
-            task.cancel()
+        if follower and not follower.done():
+            follower.cancel()  # hanya berhenti mengirim; job tetap jalan & hasilnya tersimpan
 
 
 # ---------- proposal perubahan file oleh AI ----------

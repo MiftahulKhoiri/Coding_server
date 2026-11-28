@@ -46,6 +46,8 @@ data class EditorPrefs(
     val keyBar: Boolean = true,
     /** Simpan otomatis ±2 detik setelah berhenti mengetik. */
     val autoSave: Boolean = true,
+    /** Ketuk kode = keyboard muncul. Mati: keyboard hanya lewat tombol ⌨ (membaca kode tanpa gangguan). */
+    val tapKeyboard: Boolean = true,
 )
 
 /** Pengaturan tampilan terminal (disesuaikan manual seperti terminal pada umumnya). */
@@ -75,6 +77,7 @@ class ServerStore(private val context: Context) {
     private val kLsp = booleanPreferencesKey("editor_lsp")
     private val kKeyBar = booleanPreferencesKey("editor_key_bar")
     private val kAutoSave = booleanPreferencesKey("editor_auto_save")
+    private val kTapKb = booleanPreferencesKey("editor_tap_keyboard")
     private val kOpenTabs = androidx.datastore.preferences.core.stringPreferencesKey("editor_open_tabs")
     private val kLastProject = stringPreferencesKey("last_project")
     private val kThemeMode = stringPreferencesKey("app_theme_mode")
@@ -113,7 +116,7 @@ class ServerStore(private val context: Context) {
     val lastProject: Flow<String?> = context.dataStore.data.map { it[kLastProject] }
     val editorPrefs: Flow<EditorPrefs> = context.dataStore.data.map {
         EditorPrefs(it[kDark] ?: true, it[kFont] ?: 14, it[kWrap] ?: false, it[kTab] ?: 4, it[kTextColor] ?: "", it[kBackgroundColor] ?: "", it[kLsp] ?: true,
-                    it[kKeyBar] ?: true, it[kAutoSave] ?: true)
+                    it[kKeyBar] ?: true, it[kAutoSave] ?: true, it[kTapKb] ?: true)
     }
 
     val appTheme: Flow<AppTheme> = context.dataStore.data.map {
@@ -171,6 +174,7 @@ class ServerStore(private val context: Context) {
             it[kLsp] = p.lsp
             it[kKeyBar] = p.keyBar
             it[kAutoSave] = p.autoSave
+            it[kTapKb] = p.tapKeyboard
         }
     }
 

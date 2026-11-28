@@ -212,7 +212,7 @@ fun AiChatScreen(vm: AppViewModel, editor: EditorController, onOpenModels: () ->
                 itemsIndexed(ui.conversations) { _, c ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f).clickable { chat.open(c.id, project?.id); showHistory = false }.padding(vertical = 6.dp)) {
-                            Text(c.title, maxLines = 1)
+                            Text((if (c.generating) "⏳ " else "") + c.title, maxLines = 1)
                             Text("${c.messages} pesan · ${c.model ?: "-"} · ${formatTime(c.updated_at)}", style = MaterialTheme.typography.labelSmall)
                         }
                         IconButton(onClick = { chat.delete(c.id) { vm.toast(it) } }) { Icon(Icons.Default.Delete, "Hapus") }

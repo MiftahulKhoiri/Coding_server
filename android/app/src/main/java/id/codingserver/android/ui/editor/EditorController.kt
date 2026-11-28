@@ -120,13 +120,18 @@ class EditorController(context: Context) {
     val webView: WebView = WebView(context).apply {
         isFocusable = true
         isFocusableInTouchMode = true
-        // Pastikan WebView mendapat fokus saat disentuh supaya keyboard muncul & ketikan masuk ke editor.
+        // Ketuk (bukan geser) = fokus ke editor; keyboard hanya dimunculkan bila "Ketuk = keyboard" aktif.
+        // Menggeser untuk membaca kode tidak pernah memunculkan keyboard.
+        val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+        var downX = 0f; var downY = 0f; var moved = false
         setOnTouchListener { v, ev ->
-            if (ev.action == android.view.MotionEvent.ACTION_UP) {
-                v.requestFocus()
-                post {
-                    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
-                    imm.showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            when (ev.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> { downX = ev.x; downY = ev.y; moved = false }
+                android.view.MotionEvent.ACTION_MOVE ->
+                    if (kotlin.math.abs(ev.x - downX) > slop || kotlin.math.abs(ev.y - downY) > slop) moved = true
+                android.view.MotionEvent.ACTION_UP -> if (!moved) {
+                    v.requestFocus()
+                    if (tapKeyboard) post { imm.showSoftInput(v, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) }
                 }
             }
             false
@@ -164,6 +169,27 @@ class EditorController(context: Context) {
     }
 
     fun detach() { (webView.parent as? ViewGroup)?.removeView(webView) }
+
+    /** false: ketuk kode hanya memindah kursor; keyboard lewat tombol ⌨ (enak untuk membaca kode). */
+    @Volatile var tapKeyboard: Boolean = true
+        private set
+    private val imm get() = webView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+
+    suspend fun setTapKeyboard(on: Boolean) { tapKeyboard = on; eval("CS.setTapKeyboard($on)") }
+
+    /** Tombol ⌨: tampilkan keyboard (juga saat "ketuk = keyboard" mati). */
+    suspend fun showKeyboard() {
+        eval("CS.setKeyboardOpen(true)")
+        main.post {
+            webView.requestFocus()
+            main.postDelayed({ imm.showSoftInput(webView, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) }, 80)
+        }
+    }
+
+    suspend fun hideKeyboard() {
+        main.post { imm.hideSoftInputFromWindow(webView.windowToken, 0) }
+        eval("CS.setKeyboardOpen(false)")
+    }
 
     suspend fun eval(js: String): String? {
         ready.await()

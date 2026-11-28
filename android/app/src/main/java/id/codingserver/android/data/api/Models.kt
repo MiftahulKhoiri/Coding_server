@@ -369,13 +369,16 @@ import kotlinx.serialization.json.JsonElement
 )
 @Serializable data class AIConversationSummary(
     val id: Int, val title: String = "", val model: String? = null, val updated_at: Double = 0.0, val messages: Int = 0,
+    /** Jawaban AI masih dibuat di server (aplikasi bisa menyambung lagi). */
+    val generating: Boolean = false,
 )
 @Serializable data class AIConversations(val conversations: List<AIConversationSummary> = emptyList())
 @Serializable data class AIMessage(
     val id: Int = 0, val role: String, val content: String, val reasoning: String = "", val model: String = "",
     val created_at: Double = 0.0,
 )
-@Serializable data class AIConversationDetail(val id: Int, val title: String = "", val messages: List<AIMessage> = emptyList())
+@Serializable data class AIConversationDetail(val id: Int, val title: String = "", val messages: List<AIMessage> = emptyList(),
+                                              val generating: Boolean = false)
 @Serializable data class AIConversationIn(val title: String = "Percakapan baru")
 @Serializable data class AIChat(val messages: List<Map<String, String>>, val project_id: String? = null, val files: List<String> = emptyList())
 /** Usulan perubahan file dari AI (tanpa isi penuh; cukup diff). status: pending|approved|rejected|reverted|failed */

@@ -87,10 +87,26 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
                         Text("Language server", modifier = Modifier.weight(1f, fill = false))
-                        InfoButton("Language server (C/C++ & Python)", "Autocomplete pintar, error saat mengetik, info simbol, " +
-                            "dan lompat ke definisi lintas file. Dijalankan di server (clangd / pyright).")
+                        InfoButton("Language server", "Autocomplete pintar, error saat mengetik, info simbol, ke definisi, " +
+                            "referensi & ganti nama lintas file. Dijalankan di server untuk C/C++, Python, JS/TS, Go, PHP, " +
+                            "HTML, CSS, JSON, dan Bash.")
                     }
                     Switch(prefs.lsp, { vm.setEditorPrefs(prefs.copy(lsp = it)) })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Ketuk kode = keyboard muncul", modifier = Modifier.weight(1f, fill = false))
+                        InfoButton("Ketuk kode = keyboard muncul", "Aktif: mengetuk kode langsung memunculkan keyboard.\n" +
+                            "Mati: ketukan hanya memindah kursor, enak untuk membaca kode. Keyboard dibuka/ditutup " +
+                            "dengan tombol ⌨ di editor. Menggeser layar tidak pernah memunculkan keyboard.")
+                    }
+                    Switch(prefs.tapKeyboard, { vm.setEditorPrefs(prefs.copy(tapKeyboard = it)) })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Baris tombol ekstra", Modifier.weight(1f)); Switch(prefs.keyBar, { vm.setEditorPrefs(prefs.copy(keyBar = it)) })
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Simpan otomatis", Modifier.weight(1f)); Switch(prefs.autoSave, { vm.setEditorPrefs(prefs.copy(autoSave = it)) })
                 }
                 Text("Ukuran font: ${prefs.fontSize}")
                 Slider(prefs.fontSize.toFloat(), { vm.setEditorPrefs(prefs.copy(fontSize = it.toInt())) }, valueRange = 9f..28f)

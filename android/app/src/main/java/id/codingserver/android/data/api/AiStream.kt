@@ -27,6 +27,8 @@ sealed interface AiEvent {
     data class Edits(val messageId: Int, val items: List<AIProposalItem>) : AiEvent
     data class Error(val code: String, val message: String) : AiEvent
     data object Stopped : AiEvent
+    /** attach: tidak ada jawaban yang sedang dibuat -> muat ulang percakapan dari server. */
+    data object Idle : AiEvent
 }
 
 data class AiRequest(
@@ -40,23 +42,31 @@ data class AiRequest(
     val autoApply: Boolean = false,
 )
 
-/** Chat AI streaming lewat WebSocket /ws/ai/chat (satu koneksi per pertanyaan). */
+/**
+ * Chat AI streaming lewat WebSocket /ws/ai/chat (satu koneksi per pertanyaan). Jawaban dibuat di server dan TIDAK
+ * berhenti bila koneksi putus / aplikasi ditutup; [attach] menyambung lagi (semua event diputar ulang dari awal).
+ */
 class AiStream(private val client: ApiClient) {
     private var socket: WebSocket? = null
+    private var conversationId: Int? = null
 
-    fun send(req: AiRequest): Flow<AiEvent> = callbackFlow {
+    fun send(req: AiRequest): Flow<AiEvent> = connect(buildJsonObject {
+        put("type", "send")
+        put("content", req.content)
+        req.conversationId?.let { put("conversation_id", it) }
+        req.projectId?.let { put("project_id", it) }
+        if (req.files.isNotEmpty()) put("files", kotlinx.serialization.json.JsonArray(req.files.map { JsonPrimitive(it) }))
+        req.editorText?.let { put("editor_text", it) }
+        req.editorName?.let { put("editor_name", it) }
+        if (req.autoApply) put("auto_apply", true)
+    }.also { conversationId = req.conversationId })
+
+    fun attach(conversationId: Int): Flow<AiEvent> =
+        connect(buildJsonObject { put("type", "attach"); put("conversation_id", conversationId) }.also { this.conversationId = conversationId })
+
+    private fun connect(payload: JsonObject): Flow<AiEvent> = callbackFlow {
         val ws = client.http.newWebSocket(Request.Builder().url(client.wsUrl("ws/ai/chat")).build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                val payload = buildJsonObject {
-                    put("type", "send")
-                    put("content", req.content)
-                    req.conversationId?.let { put("conversation_id", it) }
-                    req.projectId?.let { put("project_id", it) }
-                    if (req.files.isNotEmpty()) put("files", kotlinx.serialization.json.JsonArray(req.files.map { JsonPrimitive(it) }))
-                    req.editorText?.let { put("editor_text", it) }
-                    req.editorName?.let { put("editor_name", it) }
-                    if (req.autoApply) put("auto_apply", true)
-                }
                 webSocket.send(payload.toString())
             }
 
@@ -65,6 +75,8 @@ class AiStream(private val client: ApiClient) {
                 fun str(k: String) = o[k]?.jsonPrimitive?.contentOrNull ?: ""
                 val ev: AiEvent? = when (str("type")) {
                     "conversation" -> AiEvent.Conversation(o["id"]?.jsonPrimitive?.intOrNull ?: 0)
+                        .also { conversationId = it.id }
+                    "idle" -> AiEvent.Idle
                     "start" -> AiEvent.Start(str("model"), str("connection"))
                     "reasoning" -> AiEvent.Reasoning(str("text"))
                     "delta" -> AiEvent.Delta(str("text"))
@@ -79,7 +91,7 @@ class AiStream(private val client: ApiClient) {
                     else -> null
                 }
                 if (ev != null) trySend(ev)
-                if (ev is AiEvent.Done || ev is AiEvent.Error || ev is AiEvent.Stopped) {
+                if (ev is AiEvent.Done || ev is AiEvent.Error || ev is AiEvent.Stopped || ev is AiEvent.Idle) {
                     webSocket.close(1000, null)
                     close()
                 }
@@ -96,5 +108,12 @@ class AiStream(private val client: ApiClient) {
         awaitClose { ws.close(1000, null) }
     }
 
-    fun stop() { socket?.send("""{"type":"stop"}""") }
+    /** Hentikan jawaban di server (bila koneksi ini sudah putus, kirim lewat koneksi baru). */
+    fun stop() {
+        val msg = buildJsonObject { put("type", "stop"); conversationId?.let { put("conversation_id", it) } }.toString()
+        if (socket?.send(msg) == true) return
+        client.http.newWebSocket(Request.Builder().url(client.wsUrl("ws/ai/chat")).build(), object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) { webSocket.send(msg); webSocket.close(1000, null) }
+        })
+    }
 }

@@ -103,4 +103,16 @@ const CASES = {
     open("", "notes.txt");
     return CS.snippets() === "[]" || CS.snippets();
   },
+  "ketuk = keyboard mati: inputmode none; tombol ⌨ membuka": () => {
+    open("x = 1", "k.py");
+    const mode = () => document.querySelector(".cm-content").getAttribute("inputmode");
+    CS.setTapKeyboard(false);
+    const off = mode();
+    CS.setKeyboardOpen(true);
+    const opened = mode();
+    CS.setKeyboardOpen(false);
+    const closed = mode();
+    CS.setTapKeyboard(true);
+    return (off === "none" && opened === null && closed === "none" && mode() === null) || JSON.stringify([off, opened, closed, mode()]);
+  },
 };

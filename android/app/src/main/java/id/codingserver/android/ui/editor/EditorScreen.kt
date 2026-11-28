@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,6 +31,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.FindInPage
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardHide
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -66,6 +70,7 @@ import id.codingserver.android.ui.common.formatTime
 import kotlinx.coroutines.launch
 
 /** Code editor: tab, simpan, simpan sebagai, jalankan, build, cari/ganti, undo/redo, simbol, riwayat. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit = {}, onRunStarted: () -> Unit) {
     val client by vm.client.collectAsState()
@@ -91,6 +96,8 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
     var busy by remember { mutableStateOf<String?>(null) }
     val problems by editor.problems.collectAsState()
     val breadcrumb by editor.breadcrumb.collectAsState()
+    val imeVisible = WindowInsets.isImeVisible
+    fun toggleKeyboard() = scope.launch { if (imeVisible) editor.hideKeyboard() else editor.showKeyboard() }
     val autoSaveJobs = remember { mutableMapOf<String, kotlinx.coroutines.Job>() }
     var colorDialog by remember { mutableStateOf(false) }
     var textColorInput by remember(prefs) { mutableStateOf(prefs.textColor) }
@@ -218,6 +225,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
         } else { editor.switchTab(tab.id); refreshGit(tab) }
         pendingGoto?.let { (id, line, col) -> if (id == tab.id && editor.hasTab(id)) { editor.gotoLine(line, col); pendingGoto = null } }
     }
+    LaunchedEffect(prefs.tapKeyboard) { editor.setTapKeyboard(prefs.tapKeyboard) }
     LaunchedEffect(prefs) { editor.applyPrefs(prefs.darkTheme, prefs.fontSize, prefs.wordWrap, prefs.tabSize, prefs.textColor, prefs.backgroundColor) }
     LaunchedEffect(Unit) {
         editor.eventsFlow.collect { ev ->
@@ -269,6 +277,8 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
         }
         // Baris 2 (ringkas): toolbar
         Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToolIcon(if (imeVisible) Icons.Default.KeyboardHide else Icons.Default.Keyboard,
+                     if (imeVisible) "Tutup keyboard" else "Buka keyboard", enabled = active != null, onClick = { toggleKeyboard() })
             if (canWrite) ToolIcon(Icons.AutoMirrored.Filled.NoteAdd, "File baru", enabled = project != null, onClick = { newFile = true })
             if (canWrite) ToolIcon(Icons.Default.Save, "Simpan", enabled = active != null, onClick = { scope.launch { active?.let { save(it) } } })
             if ("execute" in perms) ToolIcon(Icons.Default.PlayArrow, "Jalankan", enabled = active != null, onClick = { scope.launch { runActive(false) } })
@@ -326,6 +336,8 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                         menu = false; scope.launch { renameFrom = editor.currentWord() }
                     })
                     DropdownMenuItem({ Text("Buka file cepat…") }, enabled = project != null, onClick = { menu = false; quickOpen = true })
+                    DropdownMenuItem({ Text(if (prefs.tapKeyboard) "Ketuk kode: jangan munculkan keyboard" else "Ketuk kode: munculkan keyboard") },
+                        onClick = { menu = false; vm.setEditorPrefs(prefs.copy(tapKeyboard = !prefs.tapKeyboard)) })
                     DropdownMenuItem({ Text(if (prefs.keyBar) "Sembunyikan tombol ekstra" else "Tampilkan tombol ekstra") },
                         onClick = { menu = false; vm.setEditorPrefs(prefs.copy(keyBar = !prefs.keyBar)) })
                     if (canWrite) DropdownMenuItem({ Text(if (prefs.autoSave) "Matikan simpan otomatis" else "Aktifkan simpan otomatis") },
@@ -375,6 +387,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
             AndroidView(factory = { editor.detach(); editor.webView }, modifier = Modifier.fillMaxSize().heightIn(min = 300.dp))
         }
         if (prefs.keyBar && active != null) EditorKeyBar(
+            imeVisible = imeVisible, onToggleKeyboard = { toggleKeyboard() },
             onKey = { k -> scope.launch { editor.key(k) } },
             onText = { t -> scope.launch { editor.typeText(t) } },
         )
@@ -680,7 +693,7 @@ private fun FileTab(name: String, dirty: Boolean, selected: Boolean, onClick: ()
 
 /** Baris tombol ekstra di atas keyboard HP: karakter yang sulit diketik + navigasi & perintah editor. */
 @Composable
-private fun EditorKeyBar(onKey: (String) -> Unit, onText: (String) -> Unit) {
+private fun EditorKeyBar(imeVisible: Boolean, onToggleKeyboard: () -> Unit, onKey: (String) -> Unit, onText: (String) -> Unit) {
     val keys = listOf("tab" to "⇥", "untab" to "⇤", "left" to "←", "right" to "→", "up" to "↑", "down" to "↓",
                       "home" to "⇱", "end" to "⇲", "comment" to "//", "complete" to "⌘␣", "duplicate" to "⧉", "deleteLine" to "⌫ln")
     val chars = listOf("{", "}", "(", ")", "[", "]", ";", ":", "\"", "'", "<", ">", "=", "+", "-", "*", "/", "\\",
@@ -689,6 +702,7 @@ private fun EditorKeyBar(onKey: (String) -> Unit, onText: (String) -> Unit) {
             .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 3.dp),
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically) {
+        EditorKey(if (imeVisible) "⌨ ▼" else "⌨ ▲", highlight = true, onClick = onToggleKeyboard)
         keys.take(2).forEach { (k, l) -> EditorKey(l) { onKey(k) } }
         chars.forEach { ch -> EditorKey(ch) { onText(ch) } }
         keys.drop(2).forEach { (k, l) -> EditorKey(l) { onKey(k) } }
@@ -696,12 +710,14 @@ private fun EditorKeyBar(onKey: (String) -> Unit, onText: (String) -> Unit) {
 }
 
 @Composable
-private fun EditorKey(label: String, onClick: () -> Unit) {
-    Box(Modifier.height(34.dp).widthIn(min = 38.dp).background(MaterialTheme.colorScheme.surface,
+private fun EditorKey(label: String, highlight: Boolean = false, onClick: () -> Unit) {
+    Box(Modifier.height(34.dp).widthIn(min = 38.dp).background(
+            if (highlight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
             androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
             .clickable(onClick = onClick).padding(horizontal = 9.dp),
         contentAlignment = Alignment.Center) {
-        Text(label, style = MaterialTheme.typography.labelLarge, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+        Text(label, style = MaterialTheme.typography.labelLarge, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+             color = if (highlight) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface)
     }
 }
 

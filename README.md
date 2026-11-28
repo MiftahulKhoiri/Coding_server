@@ -8,7 +8,7 @@ menguji, dan memperbaiki kode dari HP. Kodenya tersimpan dan dijalankan di Pi, d
 
 | | |
 |---|---|
-| Versi server | **1.6.0** (FastAPI, Python 3) |
+| Versi server | **1.6.1** (FastAPI, Python 3) |
 | Aplikasi | Android 8.0+ (Kotlin + Jetpack Compose), dibangun otomatis oleh GitHub Actions |
 | Platform uji | Raspberry Pi 5 16 GB · Debian 13 (trixie) aarch64 · kernel 6.x · NVMe |
 | Port bawaan | `8800` · API `/api/v1` · dokumentasi interaktif `/docs` |
@@ -73,7 +73,8 @@ kosong, tanpa jaringan, dan hanya folder proyek yang bisa ditulis. Output dikiri
   - syntax highlighting 18+ bahasa, banyak tab (dipulihkan saat aplikasi dibuka lagi), cari & ganti, lompat ke baris,
     lipat kode, multi-kursor, kurung otomatis, riwayat versi & restore, tema & warna sendiri;
   - **baris tombol ekstra** di atas keyboard (⇥ ⇤ { } ( ) [ ] ; : " ' < > = …, panah, Home/End, komentar, saran,
-    duplikat/hapus baris) dan **simpan otomatis**;
+    duplikat/hapus baris), tombol **⌨ buka/tutup keyboard** dan pilihan "ketuk kode = keyboard muncul" (mati = enak
+    membaca kode tanpa keyboard menutupi layar), serta **simpan otomatis**;
   - **Buka file cepat**, **Cari & ganti di seluruh proyek** (teks/regex, kata utuh, huruf besar-kecil);
   - **Format kode**: clang-format (C/C++/Java/C#), ruff (Python), prettier (JS/TS/CSS/HTML/JSON/YAML/Markdown), gofmt;
   - **penanda baris Git** (ditambah/diubah/dihapus dibanding commit terakhir), **outline** & **breadcrumb**,
@@ -96,6 +97,7 @@ kosong, tanpa jaringan, dan hanya folder proyek yang bisa ditulis. Output dikiri
 
 ### AI
 - **AI Chat** dengan model lokal (llama-server) atau online (API kompatibel OpenAI): streaming, "Berpikir…", dan riwayat.
+  Jawaban dibuat di server: tetap selesai & tersimpan walau aplikasi ditutup atau HP mati, dan tampil lagi saat dibuka.
   Kamu bisa menyertakan file yang sedang dibuka. Perubahan kode muncul sebagai kartu diff **Terapkan / Tolak / Batalkan**.
 - **AI Agent Tasks**: beri tugas seperti "buat halaman login dan pastikan jalan". Agen memeriksa proyek, membuat rencana,
   mengusulkan perubahan (risiko LOW/MEDIUM/HIGH), menginstal dependensi, menjalankan build/test di sandbox, memperbaiki

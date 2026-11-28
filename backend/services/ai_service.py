@@ -74,6 +74,9 @@ class AIService:
         self.secrets = SecretStore(settings.secret_key)
         self._lock = asyncio.Lock()
         self.profiles = ModelProfiles(settings, db)
+        from backend.services.chat_jobs import ChatJobs
+
+        self.jobs = ChatJobs()  # jawaban chat yang berjalan di server (lepas dari koneksi aplikasi)
         self.state: dict = {"status": "idle", "connection_id": None, "model": None, "message": "",
                             "loaded_by_us": False, "last_activity": 0.0, "target": None}
         # Model llama-server yang dimuat untuk agent / Uji Model (selain model chat aktif): (cid, model) -> terakhir dipakai
@@ -529,8 +532,11 @@ class AIService:
 
     # ---------- percakapan ----------
     def conversations(self, user: dict) -> list[dict]:
-        return self.db.all("SELECT c.*, (SELECT COUNT(*) FROM ai_messages m WHERE m.conversation_id=c.id) AS messages "
+        rows = self.db.all("SELECT c.*, (SELECT COUNT(*) FROM ai_messages m WHERE m.conversation_id=c.id) AS messages "
                            "FROM ai_conversations c WHERE user_id=? ORDER BY updated_at DESC LIMIT 200", (user["id"],))
+        for r in rows:
+            r["generating"] = self.jobs.generating(r["id"])
+        return rows
 
     def conversation(self, user: dict, conv_id: int) -> dict:
         c = self.db.one("SELECT * FROM ai_conversations WHERE id=? AND user_id=?", (conv_id, user["id"]))
@@ -538,6 +544,7 @@ class AIService:
             raise NotFound("Percakapan tidak ditemukan")
         c["messages"] = self.db.all("SELECT id, role, content, reasoning, model, created_at FROM ai_messages "
                                     "WHERE conversation_id=? ORDER BY id", (conv_id,))
+        c["generating"] = self.jobs.generating(conv_id)  # jawaban masih dibuat di server -> aplikasi bisa attach
         return c
 
     def create_conversation(self, user: dict, title: str = "Percakapan baru") -> dict:

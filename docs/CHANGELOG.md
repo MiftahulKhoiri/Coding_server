@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.1 — 2026-11-28
+### Ditambahkan
+- Code Editor: tombol **⌨ buka/tutup keyboard** (toolbar & baris tombol ekstra) dan pengaturan **"Ketuk kode =
+  keyboard muncul"** (Pengaturan → Editor / menu ⋮). Mati: ketukan hanya memindah kursor untuk membaca kode.
+### Diperbaiki
+- Menggeser kode untuk membaca tidak lagi memunculkan keyboard.
+- **AI Chat tidak berhenti saat aplikasi ditutup / HP mati / layar terkunci**: jawaban dibuat di server sebagai
+  pekerjaan tersendiri, disimpan ke percakapan, dan aplikasi menyambung lagi otomatis (⏳ di daftar percakapan).
+  Sebelumnya jawaban dibatalkan, dan bila HP mati mendadak model lokal bisa tetap sibuk sehingga pertanyaan
+  berikutnya tampak macet. Satu jawaban berjalan per pengguna; Stop dan "Paksa lepas" tetap menghentikannya.
+
 ## 1.6.0 — 2026-11-28 (IDE)
 Fokus: Code Editor menjadi IDE yang lengkap untuk HP.
 ### Ditambahkan

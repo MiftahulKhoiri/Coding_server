@@ -40,6 +40,11 @@ const wrapConf = new Compartment();
 const fontConf = new Compartment();
 const readOnlyConf = new Compartment();
 const indentConf = new Compartment();
+const inputModeConf = new Compartment();
+// false = ketukan hanya memindah kursor (keyboard muncul lewat tombol ⌨). Diatur dari aplikasi.
+let tapKeyboard = true;
+let keyboardOpen = false;  // keyboard dibuka lewat tombol saat tapKeyboard=false
+const inputModeExt = () => EditorView.contentAttributes.of(tapKeyboard || keyboardOpen ? {} : { inputmode: "none" });
 
 let settings = { theme: "dark", fontSize: 14, wordWrap: false, tabSize: 4, textColor: "", backgroundColor: "" };
 const tabs = new Map(); // id -> { state, lang, filename, savedVersion }
@@ -152,6 +157,7 @@ function baseExtensions(lang, editable = true) {
     readOnlyConf.of([EditorState.readOnly.of(!editable), EditorView.editable.of(editable)]),
     editable ? [] : placeholderExt,
     indentConf.of([indentUnit.of(" ".repeat(settings.tabSize)), EditorState.tabSize.of(settings.tabSize)]),
+    inputModeConf.of(inputModeExt()),
     EditorView.updateListener.of((u) => {
       if (u.docChanged && !suppress && current) {
         const t = tabs.get(current);
@@ -199,6 +205,7 @@ function reconfigureAll() {
       wrapConf.reconfigure(settings.wordWrap ? EditorView.lineWrapping : []),
       fontConf.reconfigure(fontTheme(settings.fontSize)),
       indentConf.reconfigure([indentUnit.of(" ".repeat(settings.tabSize)), EditorState.tabSize.of(settings.tabSize)]),
+      inputModeConf.reconfigure(inputModeExt()),
     ],
   });
   document.body.className = settings.theme;
@@ -480,6 +487,15 @@ window.CS = {
   setTabSize(n) { settings.tabSize = Math.max(1, Math.min(8, Number(n) || 4)); reconfigureAll(); },
   setReadOnly(on) { view.dispatch({ effects: readOnlyConf.reconfigure([EditorState.readOnly.of(!!on), EditorView.editable.of(!on)]) }); },
   hasFocus() { return view.hasFocus; },
+  /** on=false: ketuk/geser kode tidak memunculkan keyboard (inputmode=none); keyboard hanya lewat tombol ⌨. */
+  setTapKeyboard(on) { tapKeyboard = !!on; keyboardOpen = false; reconfigureAll(); return true; },
+  /** Dipanggil aplikasi saat tombol ⌨ membuka/menutup keyboard. */
+  setKeyboardOpen(open) {
+    keyboardOpen = !!open;
+    view.dispatch({ effects: inputModeConf.reconfigure(inputModeExt()) });
+    if (open && current) view.focus();
+    return true;
+  },
   configure(json) { Object.assign(settings, typeof json === "string" ? JSON.parse(json) : json); reconfigureAll(); },
   undo() { return undo(view); },
   redo() { return redo(view); },
@@ -650,7 +666,18 @@ if (window.visualViewport) {
 document.addEventListener("DOMContentLoaded", syncEditorViewport, { once: true });
 syncEditorViewport();
 
-// Ketukan di area kosong di bawah teks tetap memberi fokus (memunculkan keyboard).
-document.getElementById("editor").addEventListener("touchend", () => { if (current && !view.hasFocus) view.focus(); });
+// Ketukan (bukan geseran) di area kosong di bawah teks memberi fokus; geser untuk membaca tidak memicu keyboard.
+let touchFrom = null;
+const editorEl = document.getElementById("editor");
+editorEl.addEventListener("touchstart", (e) => { const t = e.touches[0]; touchFrom = t ? { x: t.clientX, y: t.clientY } : null; }, { passive: true });
+editorEl.addEventListener("touchmove", (e) => {
+  const t = e.touches[0];
+  if (touchFrom && t && Math.hypot(t.clientX - touchFrom.x, t.clientY - touchFrom.y) > 10) touchFrom = null;
+}, { passive: true });
+editorEl.addEventListener("touchend", () => {
+  const tap = touchFrom !== null;
+  touchFrom = null;
+  if (tap && current && !view.hasFocus && (tapKeyboard || keyboardOpen)) view.focus();
+});
 document.body.className = settings.theme;
 bridge.onReady();
