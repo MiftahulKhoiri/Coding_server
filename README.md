@@ -8,7 +8,7 @@ menguji, dan memperbaiki kode dari HP. Kodenya tersimpan dan dijalankan di Pi, d
 
 | | |
 |---|---|
-| Versi server | 1.4.0 (FastAPI, Python 3) |
+| Versi server | **1.5.0** — rilis stabil (FastAPI, Python 3) |
 | Aplikasi | Android 8.0+ (Kotlin + Jetpack Compose), dibangun otomatis oleh GitHub Actions |
 | Platform uji | Raspberry Pi 5 16 GB · Debian 13 (trixie) aarch64 · kernel 6.x · NVMe |
 | Port bawaan | `8800` · API `/api/v1` · dokumentasi interaktif `/docs` |
@@ -91,13 +91,22 @@ kosong, tanpa jaringan, dan hanya folder proyek yang bisa ditulis. Output dikiri
 - **AI Agent Tasks**: beri tugas seperti "buat halaman login dan pastikan jalan". Agen memeriksa proyek, membuat rencana,
   mengusulkan perubahan (risiko LOW/MEDIUM/HIGH), menginstal dependensi, menjalankan build/test di sandbox, memperbaiki
   bila gagal, lalu membuat laporan. Agen punya peran Perencana, Pelaksana, dan Peninjau, dan modelnya bisa berbeda per peran.
-- **Model AI**: kelola koneksi, muat/bongkar model (termasuk "lepas semua model dari RAM"), **profil model** dan
-  **Uji Model** (kalibrasi otomatis parameter yang paling cocok untuk tiap model).
+- **Model AI**: kelola koneksi, muat/bongkar model, **profil model** dan **Uji Model** (kalibrasi otomatis parameter
+  yang paling cocok untuk tiap model).
+- **Konteks model**: ukuran konteks bawaan & per model diatur dari APK (disimpan sebagai preset llama-server, dimuat
+  ulang tanpa restart).
+- **Lepas semua model dari RAM**: versi aman melewati model yang sedang dipakai; **Paksa lepas** untuk Pi yang macet —
+  task AI Agent dijeda dari checkpoint (lanjutkan kapan saja), Uji Model dihentikan, semua model dibongkar.
+- **AI Agent tahan banting**: batas langkah per task diatur dari APK, jeda langsung berhenti dan aman dilanjutkan,
+  konteks model otomatis dipadatkan bila penuh, cek otomatis file kode (sintaks & fungsi ganda) setelah ditulis, dan
+  task tidak bisa "selesai" bila kodenya masih rusak.
 
 ### Akun & tampilan
 - **Profil pengguna**: foto profil, nama tampilan, email, bio, dan ganti sandi sendiri. Profil aktif tampil di Dashboard
   dan menu samping.
 - **Kelola pengguna** (admin): tambah akun, ubah peran, reset sandi, nonaktifkan, dan hapus akun (proyeknya dipindah ke admin utama).
+- **Izin per kelompok**: menu dan tombol yang tidak boleh dipakai sebuah peran **disembunyikan** di aplikasi (bukan
+  sekadar ditolak server), jadi tiap pengguna hanya melihat yang bisa ia gunakan.
 - **Admin utama terkunci**: akun pemulihan yang tidak bisa dihapus atau diubah dari aplikasi ([detail](#akun-profil--admin-utama)).
 - **Tema aplikasi**: mode Ikuti sistem / Gelap / Terang, 11 warna aksen (termasuk Dinamis dari wallpaper, Android 12+),
   **7 warna latar tampilan** (Netral, Ikut aksen, Biru malam, Hijau hutan, Ungu anggur, Sepia, Abu batu), dan hitam pekat AMOLED.
@@ -167,17 +176,21 @@ Kelola sandi admin utama dari Pi:
 3. **Pengaturan → Akun & profil → Ubah profil**: pasang foto profil, nama tampilan, email, dan bio.
 4. Bila sandi akun mana pun lupa, login sebagai `admin` lalu buka **Pengguna → ⋮ → Reset sandi**.
 
-**Peran**
+**Peran & izin**
 
-| Peran | Hak |
-|---|---|
-| Admin | semua akses + kelola pengguna, backup, proses sistem |
-| Developer | baca, tulis, hapus, jalankan, build, terminal |
-| Runner | baca, jalankan, build |
-| Viewer | hanya melihat |
-| AI | peran internal agen (baca, tulis, jalankan, build; tanpa terminal/hapus/admin) |
+| Peran | Hak | Yang tidak tampil di aplikasi |
+|---|---|---|
+| **Admin utama (root)** | semua, termasuk backup/restore, proses server & audit, kelola admin | – |
+| Admin | semua proyek, kelola pengguna non-admin, pengaturan AI (model, konteks, lepas model, Uji Model, profil) | Backup, daftar proses server |
+| Developer | proyek sendiri: baca, tulis, hapus, jalankan, build, terminal, AI Chat & AI Agent | Kelola pengguna, pengaturan Model AI (hanya Ringkasan), backup |
+| Runner | baca, jalankan, build | + Terminal, Git, tombol tulis/hapus/simpan/file baru |
+| Viewer | hanya melihat | + AI Chat, AI Agent, HTTP Client, tombol Jalankan/Build/Instal |
+| AI | peran internal agen (baca, tulis, jalankan, build; tanpa terminal/hapus/admin) | – |
 
-Setiap pengguna hanya melihat proyek miliknya sendiri, kecuali admin.
+Izin di server: `read write delete execute build terminal` + `admin` (lihat semua proyek), `users` (kelola pengguna),
+`ai_manage` (pengaturan AI), `system` (khusus root). Hak tambahan `admin`/`users` hanya bisa diberikan admin utama.
+Setiap pengguna hanya melihat proyek miliknya sendiri, kecuali admin. Disarankan memakai akun **Developer** untuk
+kerja harian dan `admin` hanya untuk pemulihan.
 
 ---
 
@@ -204,7 +217,8 @@ Setiap pengguna hanya melihat proyek miliknya sendiri, kecuali admin.
 | Database | menu Database → pilih/buat DB → query |
 | Uji API | menu HTTP Client |
 | Ubah tampilan | Pengaturan → Tampilan → mode, warna aksen, **warna latar**, AMOLED |
-| Backup | Pengaturan → Backup server (admin) |
+| Backup | Pengaturan → Backup server (admin utama) |
+| Pi macet karena model AI | Model AI → AI Agent → ⛔ **Paksa lepas** → lanjutkan task agent nanti dengan **Lanjutkan** |
 
 Ekstensi yang dikenali: `.py .js .mjs .php .go .c .cpp .cc .java .cs .sql .html .css .sh`. Detail ada di
 [docs/EXECUTION_ENGINE.md](docs/EXECUTION_ENGINE.md).
@@ -212,12 +226,20 @@ Ekstensi yang dikenali: `.py .js .mjs .php .go .c .cpp .cc .java .cs .sql .html 
 ---
 
 ## AI: chat, model lokal & AI Agent
-**Menyiapkan model lokal** (contoh llama.cpp di Pi):
+**Menyiapkan model lokal** (llama.cpp mode router di Pi — banyak model `.gguf` dalam satu folder):
 ```bash
-~/llama.cpp/build/bin/llama-server -m ~/models/Qwen3-1.7B-Q4_K_M.gguf --host 0.0.0.0 --port 8080
+~/llama.cpp/build/bin/llama-server --models-preset ~/models/coding_server_presets.ini \
+  --models-dir ~/models --no-models-autoload --jinja --host 0.0.0.0 --port 8080
 ```
+Jangan memberi `-c`/`--ctx-size` di perintah ini: konteks diatur dari APK (**Model AI → AI Agent → Konteks model**) lewat
+file preset. Bila service lama masih memakai `-c`, aplikasi menampilkan perintah `sudo` sekali-jalan untuk
+memperbaikinya.
+
 Di APK: **Model AI → Lokal → tambah koneksi** `http://127.0.0.1:8080` → pilih model → **Terapkan**. Model online
 (API kompatibel OpenAI) juga bisa ditambahkan beserta API key-nya (disimpan terenkripsi di server).
+
+**Saran model**: di Pi 5 16 GB, satu model untuk semua peran agent (mis. Qwen3.5-9B atau Qwen2.5-Coder-7B) dengan
+konteks 16K lebih stabil daripada beberapa model yang bergantian dimuat.
 
 **AI Agent** (menu AI Agent):
 1. Pilih proyek, lalu tulis tugasnya. Contoh: *"buat dashboard dengan halaman login lengkap memakai Flask"*.
@@ -227,7 +249,9 @@ Di APK: **Model AI → Lokal → tambah koneksi** `http://127.0.0.1:8080` → pi
 4. Library dipasang agen lewat tool `install_deps`, tidak lewat skrip installer.
 5. Laporan akhir memisahkan **hasil terverifikasi server** (exit code build/test) dari **ringkasan AI**.
 
-Task tersimpan di database. Bila server restart, task dijeda dan bisa dilanjutkan. Proses agen juga bisa dipantau dari
+Task tersimpan di database dengan checkpoint. **Jeda** langsung berhenti (juga saat model sedang berpikir) dan
+**Lanjutkan** mengulang langkah terakhir dari checkpoint tanpa merusak file. Bila langkah habis, **Ulangi** memberi
+tambahan langkah. Bila server restart, task dijeda dan bisa dilanjutkan. Proses agen juga bisa dipantau dari
 notifikasi Android. Model lokal kecil di Pi cukup lambat (±1–5 token/detik), jadi task besar bisa memakan
 puluhan menit. Detail ada di [docs/AI_AGENT.md](docs/AI_AGENT.md).
 
@@ -280,7 +304,8 @@ Setelah mengubah file ini, jalankan `./scripts/restart.sh`.
 | `CS_HTTP_ALLOW_PRIVATE` | `false` | HTTP client boleh ke IP lokal (192.168.x.x) |
 | `CS_BACKUP_RETENTION` | 7 | jumlah backup harian yang disimpan |
 | `CS_AI_BASE_URL` / `CS_AI_MODEL` | – | koneksi AI awal (opsional, bisa diatur dari APK) |
-| `CS_AGENT_MAX_STEPS` / `CS_AGENT_TASK_TIMEOUT` | 60 / 21600 dtk | batas langkah & waktu agen (6 jam) |
+| `CS_AGENT_MAX_STEPS` / `CS_AGENT_TASK_TIMEOUT` | 100 / 21600 dtk | batas atas langkah per task (nilai bawaan diatur di APK) & waktu agen (6 jam) |
+| `CS_LLAMA_PRESETS_FILE` | `~/models/coding_server_presets.ini` | file preset konteks llama-server yang ditulis dari APK |
 
 ---
 
@@ -389,6 +414,9 @@ APK resmi (API 35, tanda tangan rilis) dibuat oleh GitHub Actions setiap push ke
 | Program `TIMEOUT` | naikkan `CS_RUN_TIMEOUT` atau timeout di request |
 | APK tidak mau update ("tanda tangan beda") | hapus aplikasi sekali, pasang APK dari Releases |
 | Agen AI sangat lambat | wajar untuk model lokal di Pi; pakai model lebih kecil atau model online untuk peran Perencana |
+| Pi macet / RAM penuh saat agen berjalan | Model AI → AI Agent → ⛔ Paksa lepas; kurangi "Model lokal termuat bersamaan" ke 1 |
+| Agen gagal "konteks terlampaui" | naikkan konteks di Model AI → AI Agent → Konteks model (mis. 16K); jalankan perintah sudo yang ditampilkan bila diminta |
+| Menu tidak ada (mis. Terminal, Backup) | peran akun tidak punya izinnya — minta admin mengubah peran |
 
 Selengkapnya ada di [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 

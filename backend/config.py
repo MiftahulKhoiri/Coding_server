@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 
 def _load_env_file(path: Path) -> dict[str, str]:

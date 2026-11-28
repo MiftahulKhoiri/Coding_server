@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.5.0 — 2026-11-28 (rilis stabil)
+### Ditambahkan
+- **Profil pengguna**: foto profil (lama dihapus saat diganti), nama tampilan, email, bio; profil aktif di Dashboard
+  & menu samping. **Admin utama (root) terkunci** sebagai akun pemulihan; sandinya hanya dari server.
+- **Izin per kelompok**: hak baru `users`, `ai_manage`, `system` (khusus root). Admin biasa tanpa backup/proses/audit;
+  hak tambahan `admin`/`users` hanya bisa diberi root. APK **menyembunyikan** menu, tab, dan tombol yang tidak diizinkan
+  (drawer, Model AI, Backup, proses server, Explorer, Proyek, Editor).
+- **Instal dependensi di sandbox** (pip ke `.venv` proyek, npm, go, composer) + tool agen `install_deps`.
+- **Konteks model** llama-server (bawaan & per model) dari APK lewat file preset, tanpa restart.
+- **Paksa lepas semua model dari RAM**: menjeda task AI Agent dari checkpoint dan menghentikan Uji Model.
+- **Batas langkah per task** AI Agent diatur dari APK.
+- Warna latar tampilan (7 pilihan), README ditulis ulang.
+### Diperbaiki
+- AI Agent: isi `write_file` yang rusak dipulihkan; konteks penuh → riwayat dipadatkan & diulang; galat berulang
+  memicu eskalasi; jeda langsung berhenti walau model sedang berpikir; task lanjutan memakai prompt terbaru;
+  cek otomatis sintaks & fungsi ganda setelah menulis kode; `finish` ditolak bila kode masih rusak.
+- APK: upload foto profil selalu gagal; detail AI Agent tidak bisa digulir; log terbaru kini di atas.
+- Backup menyertakan foto profil & sandi admin utama (izin 0600 saat restore).
+- Tes LSP kadang gagal `CancelledError` (penutupan WebSocket kini rapi).
+
 ## 1.4.0 — 2026-11-24
 ### Keamanan
 - **P0** Pencarian isi file tidak lagi membaca lewat symlink (sebelumnya symlink ke `~/.ssh/...` membocorkan isi).

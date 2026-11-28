@@ -85,6 +85,9 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
     var colorError by remember { mutableStateOf<String?>(null) }
     val project by vm.project.collectAsState()
     val active = tabs.firstOrNull { it.id == activeId }
+    val me by vm.user.collectAsState()
+    val perms = me?.permissions.orEmpty().toSet()
+    val canWrite = "write" in perms  // Runner/Viewer: tombol simpan & file baru disembunyikan
 
     suspend fun save(tab: EditorTab, force: Boolean = false): Boolean {
         val c = client ?: return false
@@ -148,7 +151,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
         editor.eventsFlow.collect { ev ->
             when (ev) {
                 is EditorEvent.Changed -> vm.updateTab(ev.tabId) { it.copy(dirty = ev.dirty) }
-                is EditorEvent.SaveRequested -> vm.tabs.value.firstOrNull { it.id == ev.tabId }?.let { save(it) }
+                is EditorEvent.SaveRequested -> if (vm.user.value?.permissions?.contains("write") == true) vm.tabs.value.firstOrNull { it.id == ev.tabId }?.let { save(it) }
                 is EditorEvent.RunRequested -> runActive(false)
                 is EditorEvent.OpenFile -> {
                     val pid = project?.id ?: vm.tabs.value.firstOrNull { it.id == activeId }?.projectId
@@ -180,10 +183,10 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
         }
         // Baris 2 (ringkas): toolbar
         Row(Modifier.fillMaxWidth().height(38.dp), verticalAlignment = Alignment.CenterVertically) {
-            ToolIcon(Icons.AutoMirrored.Filled.NoteAdd, "File baru", enabled = project != null, onClick = { newFile = true })
-            ToolIcon(Icons.Default.Save, "Simpan", enabled = active != null, onClick = { scope.launch { active?.let { save(it) } } })
-            ToolIcon(Icons.Default.PlayArrow, "Jalankan", enabled = active != null, onClick = { scope.launch { runActive(false) } })
-            ToolIcon(Icons.Default.Build, "Build", enabled = active != null, onClick = { scope.launch { runActive(true) } })
+            if (canWrite) ToolIcon(Icons.AutoMirrored.Filled.NoteAdd, "File baru", enabled = project != null, onClick = { newFile = true })
+            if (canWrite) ToolIcon(Icons.Default.Save, "Simpan", enabled = active != null, onClick = { scope.launch { active?.let { save(it) } } })
+            if ("execute" in perms) ToolIcon(Icons.Default.PlayArrow, "Jalankan", enabled = active != null, onClick = { scope.launch { runActive(false) } })
+            if ("build" in perms) ToolIcon(Icons.Default.Build, "Build", enabled = active != null, onClick = { scope.launch { runActive(true) } })
             ToolIcon(Icons.AutoMirrored.Filled.Undo, "Undo", enabled = active != null, onClick = { scope.launch { editor.undo() } })
             ToolIcon(Icons.AutoMirrored.Filled.Redo, "Redo", enabled = active != null, onClick = { scope.launch { editor.redo() } })
             ToolIcon(Icons.Default.Search, "Cari & ganti", enabled = active != null, onClick = { scope.launch { editor.openSearch() } })
@@ -195,7 +198,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
             Box {
                 ToolIcon(Icons.Default.MoreVert, "Lainnya", onClick = { menu = true })
                 DropdownMenu(menu, { menu = false }) {
-                    DropdownMenuItem({ Text("Simpan sebagai…") }, enabled = active != null, onClick = { menu = false; saveAs = true })
+                    if (canWrite) DropdownMenuItem({ Text("Simpan sebagai…") }, enabled = active != null, onClick = { menu = false; saveAs = true })
                     DropdownMenuItem({ Text("Ke baris…") }, enabled = active != null, onClick = { menu = false; gotoLine = true })
                     DropdownMenuItem({ Text("Simbol dokumen") }, enabled = active != null, onClick = {
                         menu = false; scope.launch { symbols = editor.symbols() }

@@ -51,6 +51,14 @@ class Client:
         self.notify("initialized", {})
         return r
 
+    def shutdown(self):
+        """Tutup rapi seperti editor: shutdown + exit, lalu tunggu server menutup WS. Tanpa ini TestClient
+        membatalkan handler yang masih membereskan proses language server (tes kadang gagal CancelledError)."""
+        self.request("shutdown", None)
+        self.notify("exit", None)
+        self.wait_note("cs/exit")
+        assert self.ws.receive()["type"] == "websocket.close"
+
 
 def put(client, auth, project, path, content):
     assert client.put("/api/v1/files/write", json={"project_id": project, "path": path, "content": content},
@@ -90,6 +98,7 @@ def test_clangd_diagnostics_completion_definition(client, auth, token, project):
         # hover
         r = c.request("textDocument/hover", {"textDocument": {"uri": uri}, "position": {"line": 4, "character": 11}})
         assert "tambah" in str(r["result"])
+        c.shutdown()
 
 
 @pytest.mark.skipif(not lsp_available("python"), reason="pyright tidak terpasang")
@@ -110,6 +119,7 @@ def test_pyright_diagnostics_and_completion(client, auth, token, project):
         r = c.request("textDocument/definition", {"textDocument": {"uri": uri}, "position": {"line": 3, "character": 15}})
         locs = r["result"] if isinstance(r["result"], list) else [r["result"]]
         assert any(l.get("uri", l.get("targetUri", "")) == URI + "lib/hitung.py" for l in locs), locs
+        c.shutdown()
 
 
 def test_lsp_rejects_bad_language(client, token, project):
