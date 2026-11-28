@@ -37,6 +37,19 @@ sandbox **bubblewrap aktif** · `llama-server` (systemd sistem, mode router, `--
 - **Backend di Pi 5**: 171 tes (pytest) lulus, termasuk uji sandbox bwrap asli dan LSP nyata.
 - **CI GitHub**: Backend tests ✅, Android APK ✅ (rilis `android-latest`).
 - **APK**: diuji pemilik seharian di HP — profil, foto, tema, editor, terminal, AI Agent, izin.
+- **Install → pakai → uninstall bersih (28 Nov 2026, Pi 5)** dari clone baru GitHub v1.5.0 di folder terpisah
+  (`CS_PORT=8811`, `CS_SERVICE_NAME=coding-server-test`), server utama tetap berjalan:
+  - `./scripts/install.sh` selesai 54 dtk, exit 0: cek OS/Python/git/bwrap, venv + paket, runtime (.NET, PHP,
+    clangd, pyright), 11 engine AVAILABLE, sandbox AVAILABLE, systemd --user enabled + linger, health OK,
+    sandi admin utama ditampilkan.
+  - Uji fungsi: health 1.5.0 sandbox=True, login admin, buat proyek, jalankan Python di sandbox
+    (COMPLETED, exit 0, output benar), buat akun Developer (izin sesuai), backup terverifikasi.
+  - Skrip kontrol: `status`, `stop`, `start`, `restart`, `admin_password.sh` berfungsi; proses dibunuh paksa
+    (`kill -9`) → systemd menghidupkan lagi otomatis.
+  - `./scripts/uninstall.sh --purge --dry-run` menampilkan langkah tanpa mengubah apa pun;
+    `./scripts/uninstall.sh --remove-repo -y`: backup akhir terverifikasi di `~`, service + unit + symlink autostart
+    dihapus, proses berhenti, venv/log/cache/data/.env dihapus, folder repo hilang. Sesudahnya: port 8811 bebas,
+    tidak ada proses/unit tersisa, crontab & unit lain (gameserver, coding-server utama) tidak berubah.
 
 ## Pekerjaan rumah (masa depan)
 1. **Uji panjang AI Agent dengan model asli**: 1 model untuk semua peran, konteks 16K, ulangi task contoh
