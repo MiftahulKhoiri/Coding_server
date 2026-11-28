@@ -54,9 +54,17 @@ sandbox **bubblewrap aktif** · `llama-server` (systemd sistem, mode router, `--
 ## Pekerjaan rumah (masa depan)
 1. **Uji panjang AI Agent dengan model asli**: 1 model untuk semua peran, konteks 16K, ulangi task contoh
    "dasbor login/register/lupa sandi" sampai selesai. Butuh waktu lama di Pi (model lokal ±1–5 token/detik).
-2. Secret `ANDROID_KEYSTORE_PASSWORD` di GitHub bila ingin tanda tangan rilis tetap (lihat docs/ANDROID.md).
-3. Opsional: service sistem dengan user khusus (`sudo ./scripts/install_systemd.sh`), reverse proxy HTTPS / VPN
+2. Opsional: service sistem dengan user khusus (`sudo ./scripts/install_systemd.sh`), reverse proxy HTTPS / VPN
    untuk akses dari luar rumah.
+
+## Kunci tanda tangan APK (jangan dibuat baru)
+APK resmi **sudah** ditandatangani kunci rilis tetap (CI: `SIGNING: release`), alias `codingserver`, berlaku sampai
+2081, SHA-256 `1F:09:AC:44:E1:2C:E9:BB:F1:BD:0E:8D:69:F8:19:B1:D7:3F:0D:22:2C:E7:72:4E:85:B7:DB:C5:A4:83:5C:92`.
+- Kunci terenkripsi di repo: `android/signing/release.jks.enc`; dibuka CI dengan secret `ANDROID_KEYSTORE_PASSWORD`.
+- Salinan asli di Pi: `~/.coding_server_signing/release.jks` + `ANDROID_KEYSTORE_PASSWORD` (izin 0600).
+- Pengembangan berikutnya cukup push ke `main`; APK baru otomatis bisa memperbarui yang terpasang.
+- Kunci baru = Android menolak update ("tanda tangan beda") dan aplikasi harus dihapus dulu (data lokal hilang).
+- Simpan salinan cadangan sandi kunci di luar Pi (pengelola sandi). Bila sandi & file hilang, kunci tidak bisa dipulihkan.
 
 ## Catatan jujur
 - Build APK lokal di Pi membutuhkan aapt2 ARM64 (`-Pandroid.aapt2FromMavenOverride=...`, lihat README); build resmi
