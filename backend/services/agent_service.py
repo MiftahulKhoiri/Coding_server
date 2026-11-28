@@ -404,6 +404,30 @@ class AgentService:
             self._update(task_id, current_op="Akan dijeda setelah langkah ini selesai")
         return self.get(user, task_id)
 
+    async def pause_all(self, reason: str) -> list[str]:
+        """Jeda SEGERA semua task yang sedang berjalan (dipakai saat model dilepas paksa dari RAM).
+
+        Sama seperti tombol Jeda saat menunggu model: status PAUSED dari checkpoint terakhir, langkah yang belum
+        selesai diulang saat dilanjutkan. Bila sedang menjalankan build/test/instal, proses itu ikut dihentikan."""
+        paused = []
+        for task_id, t in list(self._tasks.items()):
+            if t.done():
+                continue
+            self._pause.add(task_id)
+            self._pause_now.add(task_id)
+            t.cancel()
+            paused.append(task_id)
+        for task_id in paused:
+            t = self._tasks.get(task_id)
+            if t:
+                try:
+                    await asyncio.wait_for(asyncio.shield(t), 15)
+                except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                    pass
+            self._event(task_id, "status", {"status": "PAUSED", "message": reason})
+            self._update(task_id, current_op=reason)
+        return paused
+
     def resume(self, user: dict, task_id: str) -> dict:
         row = self._owned(task_id, user)
         if row["status"] in ACTIVE and task_id in self._tasks and not self._tasks[task_id].done():

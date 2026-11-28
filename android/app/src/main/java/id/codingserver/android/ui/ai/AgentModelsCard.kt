@@ -264,25 +264,50 @@ private val APPROVAL_OPTIONS = listOf(
 fun UnloadAllButton(vm: AppViewModel, hub: AiModelHubState, modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     var confirm by remember { mutableStateOf(false) }
-    OutlinedButton(onClick = { confirm = true }, enabled = !hub.unloadingAll, modifier = modifier.fillMaxWidth(),
-                   colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrRed)) {
-        if (hub.unloadingAll) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-        else Text("⏏ Lepas semua model dari RAM")
+    var offerForce by remember { mutableStateOf<List<String>?>(null) }  // model yang dilewati karena dipakai
+    var confirmForce by remember { mutableStateOf(false) }
+
+    fun run(force: Boolean) = scope.launch {
+        hub.unloadAll(force).onSuccess { r ->
+            vm.toast(buildString {
+                append(if (r.unloaded.isEmpty()) "Tidak ada model yang perlu dilepas" else "${r.unloaded.size} model dilepas dari RAM")
+                if (r.paused_tasks.isNotEmpty()) append(" · ${r.paused_tasks.size} task agent dijeda")
+                if (r.cancelled_bench.isNotEmpty()) append(" · Uji Model dihentikan")
+                if (r.errors.isNotEmpty()) append(" · ${r.errors.size} gagal")
+            })
+            if (!force && r.skipped.isNotEmpty()) offerForce = r.skipped
+        }.onFailure { vm.toast(it.message ?: "Gagal melepas model") }
+    }
+
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedButton(onClick = { confirm = true }, enabled = !hub.unloadingAll, modifier = Modifier.fillMaxWidth(),
+                       colors = ButtonDefaults.outlinedButtonColors(contentColor = ErrRed)) {
+            if (hub.unloadingAll) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            else Text("⏏ Lepas semua model dari RAM")
+        }
+        TextButton(onClick = { confirmForce = true }, enabled = !hub.unloadingAll, modifier = Modifier.fillMaxWidth()) {
+            Text("⛔ Paksa lepas (Pi macet / proses terlalu berat)", color = ErrRed)
+        }
     }
     if (confirm) ConfirmDialog("Lepas semua model?",
         "Semua model lokal (chat, agent, Uji Model) dibongkar dari RAM Pi sekarang. Model yang sedang dipakai task " +
-            "agent / Uji Model dilewati agar pekerjaannya tidak rusak. Model dimuat lagi otomatis saat dipakai.",
-        "Lepas semua", onConfirm = {
-            scope.launch {
-                hub.unloadAll().onSuccess { r ->
-                    vm.toast(buildString {
-                        append(if (r.unloaded.isEmpty()) "Tidak ada model yang perlu dilepas" else "${r.unloaded.size} model dilepas dari RAM")
-                        if (r.skipped.isNotEmpty()) append(" · ${r.skipped.size} dilewati (sedang dipakai)")
-                        if (r.errors.isNotEmpty()) append(" · ${r.errors.size} gagal")
-                    })
-                }.onFailure { vm.toast(it.message ?: "Gagal melepas model") }
-            }
-        }, onDismiss = { confirm = false })
+            "agent / Uji Model dilewati agar pekerjaannya tidak terputus. Model dimuat lagi otomatis saat dipakai.",
+        "Lepas semua", onConfirm = { run(false) }, onDismiss = { confirm = false })
+    offerForce?.let { models ->
+        ConfirmDialog("Model masih dipakai",
+            "${models.joinToString()} tidak dilepas karena sedang dipakai task AI Agent / Uji Model.\n\n" +
+                "Paksa lepas? Task agent DIJEDA dari checkpoint terakhir (hasil kerja tetap aman; langkah yang belum " +
+                "selesai diulang saat kamu tekan Lanjutkan) dan Uji Model dihentikan.",
+            "Paksa lepas", onConfirm = { run(true) }, onDismiss = { offerForce = null })
+    }
+    if (confirmForce) ConfirmDialog("Paksa lepas semua model?",
+        "Untuk Pi yang macet karena model terlalu berat. Yang terjadi:\n" +
+            "• Task AI Agent yang berjalan DIJEDA dari checkpoint terakhir — file & langkah yang sudah selesai tetap " +
+            "aman, langkah yang sedang dikerjakan diulang saat kamu tekan Lanjutkan.\n" +
+            "• Build/test/instal yang sedang berjalan dihentikan.\n" +
+            "• Uji Model dihentikan.\n" +
+            "• Semua model lokal dilepas dari RAM, termasuk yang sedang dipakai.",
+        "Paksa lepas", onConfirm = { run(true) }, onDismiss = { confirmForce = false })
 }
 
 @Composable

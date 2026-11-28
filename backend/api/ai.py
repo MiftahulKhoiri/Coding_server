@@ -70,9 +70,15 @@ async def unload(user: dict = Depends(require("admin")), svc: Services = Depends
     return await svc.ai.status(user)
 
 
-@router.post("/unload-all", summary="Lepas semua model lokal dari RAM (kecuali yang sedang dipakai agent/Uji Model)")
-async def unload_all(user: dict = Depends(require("admin")), svc: Services = Depends(services)):
-    out = await svc.ai.unload_all()
+@router.post("/unload-all", summary="Lepas semua model lokal dari RAM. force=true: jeda task agent & hentikan Uji "
+                                    "Model dulu, lalu lepas model yang sedang dipakai juga (untuk Pi yang macet)")
+async def unload_all(force: bool = False, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+    paused, cancelled = [], []
+    if force:
+        paused = await svc.agent.pause_all("Dijeda paksa: semua model dilepas dari RAM. Tekan Lanjutkan untuk meneruskan.")
+        cancelled = await svc.bench.cancel_all()
+    out = await svc.ai.unload_all(force=force)
+    out["paused_tasks"], out["cancelled_bench"] = paused, cancelled
     svc.db.audit("ai_unload_all", user=user, detail=out)
     return out
 

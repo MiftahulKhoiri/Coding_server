@@ -413,6 +413,29 @@ def test_pause_while_model_thinks_is_immediate_and_resume_is_safe(client, auth, 
     assert t["steps_used"] == 3
 
 
+def test_force_unload_all_pauses_running_agent_task(client, auth, project, model):
+    """'Paksa lepas' menjeda task agent yang sedang memakai model (dari checkpoint), bukan melewatinya."""
+    SCRIPT.extend([J("write_file", path="satu.txt") + "\n```\nsatu\n```"])
+    SLOW_FROM["n"] = 2
+    tid = client.post("/api/v1/agent/tasks", json={"project_id": project, "description": "paksa", "auto_apply": True},
+                      headers=auth).json()["id"]
+    try:
+        end = time.time() + 20
+        while not (client.app.state.services.projects.project_dir(project) / "satu.txt").exists():
+            assert time.time() < end
+            time.sleep(0.1)
+        time.sleep(0.5)
+        r = client.post("/api/v1/ai/unload-all?force=true", headers=auth)
+        assert r.status_code == 200, r.text
+        assert tid in r.json()["paused_tasks"]
+        t = wait_status(client, auth, tid, {"PAUSED"}, timeout=10)
+        assert t["steps_used"] == 1
+    finally:
+        SLOW_FROM["n"] = None
+        SCRIPT.clear()
+        client.post(f"/api/v1/agent/tasks/{tid}/cancel", headers=auth)
+
+
 def test_resumed_task_uses_latest_system_prompt(client):
     from backend.services.agent_service import system_prompt
 

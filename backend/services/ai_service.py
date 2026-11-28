@@ -447,9 +447,10 @@ class AIService:
             self.state.update(status="idle", model=None, loaded_by_us=False, message="Model dibongkar", target=None)
         return dict(self.state)
 
-    async def unload_all(self) -> dict:
+    async def unload_all(self, force: bool = False) -> dict:
         """Lepas semua model lokal dari RAM: model chat, model agent/Uji Model, dan model lain yang masih termuat
-        di llama-server. Model yang sedang dipakai agent / Uji Model dilewati (tidak dihentikan paksa)."""
+        di llama-server. Model yang sedang dipakai agent / Uji Model dilewati, kecuali force=True (pemanggil sudah
+        menjeda task agent & menghentikan Uji Model lebih dulu)."""
         unloaded: list[str] = []
         skipped: list[str] = []
         errors: list[str] = []
@@ -470,7 +471,7 @@ class AIService:
                     if m.get("status") not in ("loaded", "loading"):
                         continue
                     key = (r["id"], m["id"])
-                    if self.in_use(key):
+                    if self.in_use(key) and not force:
                         skipped.append(m["id"])
                         continue
                     try:
@@ -483,7 +484,8 @@ class AIService:
                     if key == active:
                         st.update(status="idle", model=None, loaded_by_us=False, target=None,
                                   message="Dibongkar lewat tombol Lepas semua model")
-        log.info("Lepas semua model: %d dibongkar, %d dilewati (dipakai)", len(unloaded), len(skipped))
+        log.info("Lepas semua model%s: %d dibongkar, %d dilewati (dipakai)", " (paksa)" if force else "",
+                 len(unloaded), len(skipped))
         return {"unloaded": unloaded, "skipped": skipped, "errors": errors}
 
     async def idle_loop(self) -> None:

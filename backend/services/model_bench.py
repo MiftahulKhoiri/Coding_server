@@ -440,6 +440,12 @@ class ModelBench:
             raise Conflict("Batalkan uji dulu sebelum dihapus")
         self.db.execute("DELETE FROM model_bench_runs WHERE id=?", (run_id,))
 
+    async def cancel_all(self) -> list[str]:
+        ids = [rid for rid, t in list(self._tasks.items()) if not t.done()]
+        for rid in ids:
+            await self.cancel(rid)
+        return ids
+
     async def shutdown(self) -> None:
         for t in list(self._tasks.values()):
             t.cancel()

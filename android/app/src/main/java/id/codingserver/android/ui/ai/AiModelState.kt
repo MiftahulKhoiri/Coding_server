@@ -132,9 +132,9 @@ class AiModelHubState(val c: ApiClient) {
     var unloadingAll by mutableStateOf(false)
 
     /** Lepas semua model lokal dari RAM (endpoint /ai/unload-all); model yang sedang dipakai dilewati server. */
-    suspend fun unloadAll(): Result<UnloadAllResult> {
+    suspend fun unloadAll(force: Boolean = false): Result<UnloadAllResult> {
         unloadingAll = true
-        val r = apiCall { c.api.aiUnloadAll() }
+        val r = apiCall { c.api.aiUnloadAll(force) }
         apiCall { c.api.aiStatus() }.onSuccess { status = it }
         unloadingAll = false
         refreshLoaded()

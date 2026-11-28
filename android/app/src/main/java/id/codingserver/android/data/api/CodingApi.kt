@@ -128,7 +128,7 @@ interface CodingApi {
     @GET("api/v1/ai/connections/{id}/models") suspend fun aiModels(@Path("id") id: String): AIModels
     @POST("api/v1/ai/apply") suspend fun aiApply(@Body body: AIApply): AIStatus
     @POST("api/v1/ai/unload") suspend fun aiUnload(): AIStatus
-    @POST("api/v1/ai/unload-all") suspend fun aiUnloadAll(): UnloadAllResult
+    @POST("api/v1/ai/unload-all") suspend fun aiUnloadAll(@Query("force") force: Boolean = false): UnloadAllResult
     @PUT("api/v1/ai/settings") suspend fun aiSettings(@Body body: AISettings): AIStatus
     @GET("api/v1/ai/agent-models") suspend fun agentModels(): AgentModels
     /** Body JSON mentah: kunci peran yang dikirim null = kosongkan peran (kembali ke model aktif). */

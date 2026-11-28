@@ -257,6 +257,8 @@ import kotlinx.serialization.json.JsonElement
 /** Hasil "Lepas semua model": model yang dibongkar, dilewati (sedang dipakai), dan error per koneksi. */
 @Serializable data class UnloadAllResult(
     val unloaded: List<String> = emptyList(), val skipped: List<String> = emptyList(), val errors: List<String> = emptyList(),
+    /** Hanya pada force=true: task agent yang dijeda & Uji Model yang dihentikan. */
+    val paused_tasks: List<String> = emptyList(), val cancelled_bench: List<String> = emptyList(),
 )
 @Serializable data class BenchSummary(
     val score: Double = 0.0, val passed: Int = 0, val total: Int = 0, val format_ok: Int = 0,
