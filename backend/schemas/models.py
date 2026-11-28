@@ -49,6 +49,7 @@ class UserOut(BaseModel):
     updated_at: float = 0.0
     last_login_at: float | None = None
     avatar_version: float | None = None  # ada foto profil bila tidak null → GET /auth/users/{id}/avatar
+    email_verified: bool = False  # email berasal dari akun GitHub/Google tertaut
 
 
 class TokenResponse(BaseModel):
@@ -145,6 +146,16 @@ class FileCreate(BaseModel):
     path: str
     type: Literal["file", "folder"] = "file"
     content: str = ""
+
+
+class OAuthConfigIn(BaseModel):
+    github_client_id: str | None = Field(default=None, max_length=200)
+    google_client_id: str | None = Field(default=None, max_length=300)
+    google_client_secret: str | None = Field(default=None, max_length=300)
+
+
+class LinkStart(BaseModel):
+    allow_push: bool = False  # GitHub: izinkan push (scope repo), token disimpan sebagai kredensial Git
 
 
 class GrepRequest(BaseModel):

@@ -19,9 +19,25 @@ import kotlinx.serialization.json.JsonElement
     val is_root: Boolean = false, val updated_at: Double = 0.0, val last_login_at: Double? = null,
     /** Tidak null = punya foto profil (GET auth/users/{id}/avatar); nilainya berubah tiap foto diganti. */
     val avatar_version: Double? = null,
+    /** Email berasal dari akun GitHub/Google yang ditautkan. */
+    val email_verified: Boolean = false,
 ) {
     val shownName: String get() = display_name.ifBlank { username }
 }
+@Serializable data class OAuthProviders(val github: Boolean = false, val google: Boolean = false)
+@Serializable data class OAuthConfig(val github_client_id: String = "", val google_client_id: String = "",
+                                     val google_secret_set: Boolean = false)
+@Serializable data class OAuthConfigIn(val github_client_id: String? = null, val google_client_id: String? = null,
+                                       val google_client_secret: String? = null)
+@Serializable data class LinkedIdentity(val provider: String, val login: String = "", val name: String = "",
+                                        val emails: List<String> = emptyList(), val avatar_url: String = "",
+                                        val git_push: Boolean = false, val linked_at: Double = 0.0)
+@Serializable data class Identities(val identities: List<LinkedIdentity> = emptyList(), val verified_emails: List<String> = emptyList())
+@Serializable data class LinkStart(val allow_push: Boolean = false)
+@Serializable data class LinkFlow(val flow_id: String, val provider: String = "", val user_code: String = "",
+                                  val verification_uri: String = "", val interval: Int = 5, val expires_in: Int = 0,
+                                  val status: String = "pending", val message: String = "", val identity: LinkedIdentity? = null)
+
 @Serializable data class ProfileUpdate(val display_name: String? = null, val email: String? = null, val bio: String? = null)
 @Serializable data class PasswordChange(val old_password: String, val new_password: String)
 @Serializable data class UserCreate(

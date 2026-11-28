@@ -91,6 +91,7 @@ fun AccountSection(vm: AppViewModel, onServers: () -> Unit) {
     val u = user
     val c = client
     ProfileCard(vm, u, c, onServers)
+    if (u != null && c != null) LinkedAccountsCard(vm, u, c)
     if (u != null && c != null && "users" in u.permissions) UsersCard(vm, u, c)
 }
 
@@ -120,7 +121,11 @@ private fun ProfileCard(vm: AppViewModel, u: UserOut?, c: ApiClient?, onServers:
                     if (u?.is_root == true) RootBadge()
                 }
             }
-            u?.email?.takeIf { it.isNotBlank() }?.let { Text("✉ $it", style = MaterialTheme.typography.bodySmall) }
+            u?.email?.takeIf { it.isNotBlank() }?.let {
+                Text("✉ $it " + if (u.email_verified) "✓ terverifikasi" else "(belum terverifikasi — tautkan akun)",
+                     style = MaterialTheme.typography.bodySmall,
+                     color = if (u.email_verified) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            }
             u?.bio?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
             Text("Izin: ${u?.permissions?.joinToString() ?: "-"}", style = MaterialTheme.typography.labelSmall)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -141,11 +146,14 @@ private fun ProfileCard(vm: AppViewModel, u: UserOut?, c: ApiClient?, onServers:
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ProfileDialog(vm: AppViewModel, u: UserOut, c: ApiClient, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(u.display_name) }
     var email by remember { mutableStateOf(u.email) }
+    var verified by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(Unit) { apiCall { c.api.identities() }.onSuccess { verified = it.verified_emails } }
     var bio by remember { mutableStateOf(u.bio) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -189,8 +197,18 @@ private fun ProfileDialog(vm: AppViewModel, u: UserOut, c: ApiClient, onDismiss:
                 if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text("Username @${u.username} tidak bisa diubah.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(name, { name = it.take(80) }, label = { Text("Nama tampilan") }, singleLine = true)
-                OutlinedTextField(email, { email = it.take(120) }, label = { Text("Email (opsional)") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email))
+                // Email aktif saja: dipilih dari email terverifikasi akun GitHub/Google yang ditautkan.
+                Text("Email", style = MaterialTheme.typography.labelLarge)
+                val opts = verified
+                if (opts == null) Text("Memuat…", style = MaterialTheme.typography.bodySmall)
+                else if (opts.isEmpty()) Text("Belum ada email terverifikasi. Tautkan akun GitHub atau Google di kartu " +
+                    "\"Akun tertaut\" untuk memakai email.", style = MaterialTheme.typography.bodySmall)
+                else FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (opts + "").forEach { e ->
+                        androidx.compose.material3.FilterChip(email == e, { email = e },
+                            label = { Text(if (e.isEmpty()) "Tanpa email" else e, maxLines = 1) })
+                    }
+                }
                 OutlinedTextField(bio, { bio = it.take(500) }, label = { Text("Bio (opsional)") }, minLines = 2, maxLines = 5)
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
@@ -199,7 +217,8 @@ private fun ProfileDialog(vm: AppViewModel, u: UserOut, c: ApiClient, onDismiss:
             TextButton(enabled = !busy, onClick = {
                 busy = true
                 scope.launch {
-                    apiCall { c.api.updateMe(ProfileUpdate(name, email, bio)) }
+                    // email hanya dikirim bila diubah (email lama yang belum terverifikasi tetap boleh disimpan apa adanya)
+                    apiCall { c.api.updateMe(ProfileUpdate(name, email.takeIf { it != u.email }, bio)) }
                         .onSuccess { vm.setUser(it); vm.toast("Profil disimpan"); onDismiss() }
                         .onFailure { error = it.message }
                     busy = false

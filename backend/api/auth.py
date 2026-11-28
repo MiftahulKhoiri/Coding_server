@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 
 from backend.dependencies import Services, client_ip, current_user, require, services
-from backend.schemas.models import (LoginRequest, LogoutRequest, OkResponse, PasswordChange, ProfileUpdate,
+from backend.schemas.models import (LinkStart, LoginRequest, LogoutRequest, OAuthConfigIn, OkResponse, PasswordChange,
+                                    ProfileUpdate,
                                     RefreshRequest, TokenResponse, UserCreate, UserDeleted, UserOut, UserUpdate)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -73,6 +74,45 @@ def get_avatar(user_id: int, _: dict = Depends(current_user), svc: Services = De
     data, ctype = svc.auth.avatar(user_id)
     return Response(content=data, media_type=ctype, headers={"Cache-Control": "private, max-age=86400",
                                                              "X-Content-Type-Options": "nosniff"})
+
+
+# ---------- akun tertaut (GitHub / Google, OAuth device flow) ----------
+@router.get("/oauth/providers", summary="Penyedia yang sudah diatur admin (github/google)")
+def oauth_providers(_: dict = Depends(current_user), svc: Services = Depends(services)):
+    return svc.oauth.providers()
+
+
+@router.get("/oauth/config", summary="Client ID OAuth (khusus admin utama)")
+def oauth_config(_: dict = Depends(require("system")), svc: Services = Depends(services)):
+    return svc.oauth.public_config()
+
+
+@router.put("/oauth/config", summary="Simpan Client ID/secret OAuth (khusus admin utama)")
+def oauth_config_save(body: OAuthConfigIn, user: dict = Depends(require("system")), svc: Services = Depends(services)):
+    out = svc.oauth.save_config(body.github_client_id, body.google_client_id, body.google_client_secret)
+    svc.db.audit("oauth_config", user=user)
+    return out
+
+
+@router.get("/identities", summary="Akun GitHub/Google yang ditautkan + email terverifikasi")
+def identities(user: dict = Depends(current_user), svc: Services = Depends(services)):
+    return {"identities": svc.oauth.identities(user), "verified_emails": svc.oauth.verified_emails(user["id"])}
+
+
+@router.post("/identities/{provider}/link", summary="Mulai menautkan akun (device flow): tampilkan user_code ke pengguna")
+async def identity_link(provider: str, body: LinkStart, user: dict = Depends(current_user), svc: Services = Depends(services)):
+    return await svc.oauth.start(user, provider, body.allow_push)
+
+
+@router.get("/identities/flows/{flow_id}", summary="Status penautan (pending|linked|denied|expired|error)")
+def identity_flow(flow_id: str, user: dict = Depends(current_user), svc: Services = Depends(services)):
+    return svc.oauth.flow(user, flow_id)
+
+
+@router.delete("/identities/{provider}", response_model=OkResponse, summary="Lepas tautan akun")
+def identity_unlink(provider: str, user: dict = Depends(current_user), svc: Services = Depends(services)):
+    svc.oauth.unlink(user, provider)
+    return {"ok": True}
 
 
 @router.post("/password", response_model=OkResponse)

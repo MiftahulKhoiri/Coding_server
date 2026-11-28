@@ -24,13 +24,16 @@ def test_me_has_profile_fields(client, auth):
 
 
 def test_update_own_profile(client, auth):
-    r = client.patch("/api/v1/auth/me", json={"display_name": "  Admin   Utama ", "email": "admin@contoh.id",
-                                             "bio": "pemilik server"}, headers=auth)
+    r = client.patch("/api/v1/auth/me", json={"display_name": "  Admin   Utama ", "bio": "pemilik server"}, headers=auth)
     assert r.status_code == 200, r.text
     me = r.json()
-    assert me["display_name"] == "Admin Utama" and me["email"] == "admin@contoh.id" and me["bio"] == "pemilik server"
+    assert me["display_name"] == "Admin Utama" and me["bio"] == "pemilik server"
     bad = client.patch("/api/v1/auth/me", json={"email": "bukan-email"}, headers=auth)
     assert bad.status_code == 400 and bad.json()["error"]["code"] == "bad_profile"
+    # email aktif saja: email yang tidak berasal dari akun tertaut ditolak (lihat test_oauth.py)
+    bad = client.patch("/api/v1/auth/me", json={"email": "admin@contoh.id"}, headers=auth)
+    assert bad.status_code == 400 and bad.json()["error"]["code"] == "email_unverified"
+    assert client.patch("/api/v1/auth/me", json={"email": ""}, headers=auth).json()["email_verified"] is False
 
 
 def test_root_cannot_be_changed(client, auth):

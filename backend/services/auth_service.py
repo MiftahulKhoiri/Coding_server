@@ -120,6 +120,7 @@ class AuthService:
             "created_at": row["created_at"],
             "display_name": row.get("display_name") or "", "email": row.get("email") or "",
             "bio": row.get("bio") or "", "is_root": bool(row.get("is_root")),
+            "email_verified": bool(row.get("email_verified")) and bool(row.get("email")),
             "updated_at": row.get("updated_at") or 0.0, "last_login_at": row.get("last_login_at"),
             "avatar_version": row.get("avatar_version"),
         }
@@ -188,6 +189,9 @@ class AuthService:
         if actor is not None and not self._is_root(actor) and set(extra_perms) & ROOT_GRANT_ONLY:
             raise _root_forbidden("Hanya admin utama yang boleh memberi hak admin/kelola pengguna")
         prof = self._profile_fields(display_name, email, None)
+        if prof.get("email"):
+            raise AppError("Email diisi sendiri oleh pengguna lewat akun GitHub/Google yang ditautkan",
+                           code="email_unverified")
         if self.db.one("SELECT id FROM users WHERE username=?", (username,)):
             raise Conflict("Username sudah dipakai")
         now = time.time()
@@ -232,7 +236,10 @@ class AuthService:
         if password is not None:
             self._check_password(password)
             sets["password_hash"] = hash_password(password)
-        sets.update(self._profile_fields(display_name, email, None))
+        prof = self._profile_fields(display_name, email, None)
+        if "email" in prof:
+            prof.update(self._check_email(user_id, prof["email"]))
+        sets.update(prof)
         if sets:
             sets["updated_at"] = time.time()
             cols = ", ".join(f"{k}=?" for k in sets)
@@ -253,7 +260,7 @@ class AuthService:
         with self.db.tx() as c:
             if root:
                 moved = c.execute("UPDATE projects SET owner_id=? WHERE owner_id=?", (root["id"], user_id)).rowcount
-            for table in ("favorites", "recent_files", "git_credentials"):
+            for table in ("favorites", "recent_files", "git_credentials", "user_identities"):
                 c.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
             c.execute("DELETE FROM users WHERE id=?", (user_id,))
         self._avatar_path(user_id).unlink(missing_ok=True)
@@ -307,9 +314,28 @@ class AuthService:
         return data, self.avatar_type(data) or "application/octet-stream"
 
     # ---------------- profil sendiri ----------------
+    def verified_emails(self, user_id: int) -> list[str]:
+        """Email terverifikasi dari akun GitHub/Google yang ditautkan."""
+        import json as _json
+        out: list[str] = []
+        for r in self.db.all("SELECT emails FROM user_identities WHERE user_id=?", (user_id,)):
+            out += [e for e in _json.loads(r["emails"] or "[]") if e not in out]
+        return out
+
+    def _check_email(self, user_id: int, email: str) -> dict:
+        """Email profil harus email aktif: salah satu email terverifikasi dari akun tertaut (atau kosong)."""
+        if not email:
+            return {"email": "", "email_verified": 0}
+        if email.lower() not in [e.lower() for e in self.verified_emails(user_id)]:
+            raise AppError("Email harus dari akun GitHub/Google yang ditautkan (Profil → Akun tertaut)",
+                           code="email_unverified")
+        return {"email": email, "email_verified": 1}
+
     def update_profile(self, user: dict, display_name: str | None = None, email: str | None = None,
                        bio: str | None = None) -> dict:
         sets = self._profile_fields(display_name, email, bio)
+        if "email" in sets:
+            sets.update(self._check_email(user["id"], sets["email"]))
         if sets:
             sets["updated_at"] = time.time()
             cols = ", ".join(f"{k}=?" for k in sets)

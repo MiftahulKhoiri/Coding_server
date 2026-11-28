@@ -52,6 +52,7 @@ class Services:
     bench: ModelBench
     llama_ctx: "LlamaContextService"
     fmt: "FormatService"
+    oauth: "OAuthService"
     login_limiter: RateLimiter
     api_limiter: RateLimiter
 
@@ -73,10 +74,14 @@ def build_services(settings: Settings, registry: EngineRegistry) -> Services:
         bench=ModelBench(settings, db, lambda: holder["svc"]),
         llama_ctx=None,  # diisi di bawah (butuh AIService)
         fmt=FormatService(settings),
+        oauth=None,  # diisi di bawah
     )
     from backend.services.llama_context import LlamaContextService
 
     svc.llama_ctx = LlamaContextService(settings, svc.ai)
+    from backend.services.oauth_service import OAuthService
+
+    svc.oauth = OAuthService(db, svc.ai.secrets, svc.auth, svc.git)
     holder["svc"] = svc
     return svc
 

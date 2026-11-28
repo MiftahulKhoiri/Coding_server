@@ -51,6 +51,9 @@ Error: `{"error":{"code","message","details"}}`.
 | POST | /database/backup | read | salinan terverifikasi |
 | GET | /git/status · /git/log · /git/branches · /git/diff | read | |
 | GET | /git/head-file?project_id&path | read | isi file di HEAD (penanda baris berubah di editor) |
+| GET | /auth/oauth/providers · GET/PUT /auth/oauth/config | login · system | penyedia login yang aktif / Client ID (root) |
+| POST | /auth/identities/{github\|google}/link `{allow_push}` → `{flow_id, user_code, verification_uri}` | login | mulai device flow |
+| GET | /auth/identities/flows/{flow_id} · GET /auth/identities · DELETE /auth/identities/{provider} | login | status, daftar, lepas |
 | POST | /git/init · /git/add · /git/commit · /git/branch · /git/checkout · /git/remote · /git/pull · /git/push · /git/clone | write | |
 | GET/POST/DELETE | /git/credentials | write | token terenkripsi |
 | POST | /http/request | execute | anti-SSRF |

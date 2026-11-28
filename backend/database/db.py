@@ -23,6 +23,7 @@ MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("updated_at", "REAL NOT NULL DEFAULT 0"),
         ("last_login_at", "REAL"),
         ("avatar_version", "REAL"),  # waktu foto profil diunggah (NULL = tanpa foto); dipakai klien untuk cache
+        ("email_verified", "INTEGER NOT NULL DEFAULT 0"),  # 1 = email berasal dari akun GitHub/Google tertaut
     ],
     "ai_proposals": [
         ("conversation_id", "INTEGER"), ("message_id", "INTEGER"),
@@ -157,6 +158,13 @@ CREATE TABLE IF NOT EXISTS model_bench_runs (
     created_at REAL NOT NULL, started_at REAL, finished_at REAL
 );
 CREATE INDEX IF NOT EXISTS ix_bench_model ON model_bench_runs(connection_id, model, created_at);
+CREATE TABLE IF NOT EXISTS user_identities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL, provider TEXT NOT NULL, provider_user_id TEXT NOT NULL,
+    login TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '', emails TEXT NOT NULL DEFAULT '[]',
+    avatar_url TEXT NOT NULL DEFAULT '', git_token INTEGER NOT NULL DEFAULT 0, linked_at REAL NOT NULL,
+    UNIQUE(provider, provider_user_id), UNIQUE(user_id, provider)
+);
 CREATE TABLE IF NOT EXISTS ai_proposals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id TEXT NOT NULL, user_id INTEGER NOT NULL, path TEXT NOT NULL, action TEXT NOT NULL,

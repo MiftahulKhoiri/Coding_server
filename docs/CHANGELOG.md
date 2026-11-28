@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.7.0 — 2026-11-28
+### Ditambahkan
+- **Akun tertaut GitHub & Google** (Pengaturan → Akun tertaut), lewat OAuth *device flow* (tanpa domain publik):
+  aplikasi menampilkan kode → buka github.com/login/device atau google.com/device → setujui.
+  `POST /auth/identities/{github|google}/link`, `GET /auth/identities/flows/{id}`, `GET/DELETE /auth/identities…`.
+- **Email profil = email aktif**: hanya boleh salah satu email terverifikasi dari akun tertaut (✓ terverifikasi);
+  email ketikan ditolak (`email_unverified`). Email lama tetap tersimpan, ditandai "belum terverifikasi".
+- **GitHub untuk push**: opsi "Izinkan push" menyimpan token (terenkripsi) sebagai kredensial Git github.com —
+  Commit semua → Push langsung jalan tanpa token manual. Lepas tautan ikut menghapus token itu.
+- **Commit atas nama sendiri**: nama tampilan & email terverifikasi dipakai sebagai author/committer Git
+  (sebelumnya `username@coding-server.local`), sehingga commit tampil di profil GitHub.
+- Admin utama mengisi Client ID GitHub OAuth App (Enable Device Flow) dan Client ID+secret Google
+  ("TVs and Limited Input devices") di aplikasi (`PUT /auth/oauth/config`, secret terenkripsi) atau lewat env
+  `CS_GITHUB_CLIENT_ID`, `CS_GOOGLE_CLIENT_ID`, `CS_GOOGLE_CLIENT_SECRET`.
+### Database
+- Tabel `user_identities`, kolom `users.email_verified` (migrasi otomatis).
+
 ## 1.6.2 — 2026-11-28
 ### Ditambahkan
 - Project Explorer: **Buka di terminal** (ikon terminal di toolbar = akar proyek; menu ⋮ folder/file = folder itu).

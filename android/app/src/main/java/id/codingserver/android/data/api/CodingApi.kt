@@ -19,6 +19,14 @@ interface CodingApi {
     @POST("api/v1/auth/login") suspend fun login(@Body body: LoginRequest): TokenResponse
     @POST("api/v1/auth/logout") suspend fun logout(@Body body: LogoutRequest): OkResponse
     @GET("api/v1/auth/me") suspend fun me(): UserOut
+    @GET("api/v1/auth/oauth/providers") suspend fun oauthProviders(): OAuthProviders
+    @GET("api/v1/auth/oauth/config") suspend fun oauthConfig(): OAuthConfig
+    @PUT("api/v1/auth/oauth/config") suspend fun saveOauthConfig(@Body body: OAuthConfigIn): OAuthConfig
+    @GET("api/v1/auth/identities") suspend fun identities(): Identities
+    @POST("api/v1/auth/identities/{provider}/link") suspend fun linkIdentity(@Path("provider") provider: String,
+                                                                            @Body body: LinkStart): LinkFlow
+    @GET("api/v1/auth/identities/flows/{id}") suspend fun linkFlow(@Path("id") id: String): LinkFlow
+    @DELETE("api/v1/auth/identities/{provider}") suspend fun unlinkIdentity(@Path("provider") provider: String): OkResponse
     @PATCH("api/v1/auth/me") suspend fun updateMe(@Body body: ProfileUpdate): UserOut
     @POST("api/v1/auth/password") suspend fun changePassword(@Body body: PasswordChange): OkResponse
     @GET("api/v1/auth/users") suspend fun users(): List<UserOut>

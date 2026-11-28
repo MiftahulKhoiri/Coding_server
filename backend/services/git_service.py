@@ -87,10 +87,13 @@ class GitService:
         git = find_executable("git")
         if not git:
             raise AppError("git belum terpasang di server", code="engine_unavailable", status_code=503)
+        # Commit memakai nama & email terverifikasi (akun tertaut) agar tercatat di profil GitHub pemiliknya.
+        name = user.get("display_name") or user["username"]
+        email = user.get("email") if user.get("email_verified") else f"{user['username']}@coding-server.local"
         env = {
             "GIT_TERMINAL_PROMPT": "0",
-            "GIT_AUTHOR_NAME": user["username"], "GIT_AUTHOR_EMAIL": f"{user['username']}@coding-server.local",
-            "GIT_COMMITTER_NAME": user["username"], "GIT_COMMITTER_EMAIL": f"{user['username']}@coding-server.local",
+            "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email,
+            "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
             "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
         }
         env.update(self._cred_env(user, host))

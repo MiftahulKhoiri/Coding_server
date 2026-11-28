@@ -8,7 +8,7 @@ menguji, dan memperbaiki kode dari HP. Kodenya tersimpan dan dijalankan di Pi, d
 
 | | |
 |---|---|
-| Versi server | **1.6.2** (FastAPI, Python 3) |
+| Versi server | **1.7.0** (FastAPI, Python 3) |
 | Aplikasi | Android 8.0+ (Kotlin + Jetpack Compose), dibangun otomatis oleh GitHub Actions |
 | Platform uji | Raspberry Pi 5 16 GB · Debian 13 (trixie) aarch64 · kernel 6.x · NVMe |
 | Port bawaan | `8800` · API `/api/v1` · dokumentasi interaktif `/docs` |
@@ -115,6 +115,8 @@ kosong, tanpa jaringan, dan hanya folder proyek yang bisa ditulis. Output dikiri
   task tidak bisa "selesai" bila kodenya masih rusak.
 
 ### Akun & tampilan
+- **Akun tertaut GitHub / Google**: email profil hanya dari akun tertaut (email aktif, ✓ terverifikasi); GitHub
+  sekaligus memberi izin push repo dan commit tercatat atas namamu ([detail](#akun-tertaut-github--google)).
 - **Profil pengguna**: foto profil, nama tampilan, email, bio, dan ganti sandi sendiri. Profil aktif tampil di Dashboard
   dan menu samping.
 - **Kelola pengguna** (admin): tambah akun, ubah peran, reset sandi, nonaktifkan, dan hapus akun (proyeknya dipindah ke admin utama).
@@ -191,6 +193,21 @@ Kelola sandi admin utama dari Pi:
 3. **Pengaturan → Akun & profil → Ubah profil**: pasang foto profil, nama tampilan, email, dan bio.
 4. Bila sandi akun mana pun lupa, login sebagai `admin` lalu buka **Pengguna → ⋮ → Reset sandi**.
 
+### Akun tertaut (GitHub & Google)
+Email profil harus **email aktif**: dipilih dari email terverifikasi akun GitHub/Google yang ditautkan.
+
+**Sekali saja (admin utama)** — Pengaturan → Akun tertaut → **Atur Client ID GitHub/Google**:
+1. **GitHub**: github.com → Settings → Developer settings → OAuth Apps → *New OAuth App* (Homepage & callback URL
+   boleh `http://localhost`) → centang **Enable Device Flow** → salin *Client ID*.
+2. **Google**: console.cloud.google.com → APIs & Services → Credentials → *Create OAuth client ID* → jenis
+   **TVs and Limited Input devices** → salin *Client ID* & *Client secret* (layar persetujuan OAuth harus dibuat dulu).
+
+Bisa juga lewat `.env`: `CS_GITHUB_CLIENT_ID`, `CS_GOOGLE_CLIENT_ID`, `CS_GOOGLE_CLIENT_SECRET`.
+
+**Setiap pengguna** — Pengaturan → Akun tertaut → **Tautkan** → **Salin kode & buka GitHub/Google** → tempel kode →
+setujui → kembali ke aplikasi. Tidak perlu domain publik/HTTPS (OAuth *device flow*); sandi GitHub/Google tidak
+pernah melewati server. Centang **Izinkan push** (GitHub) agar Git Manager bisa push tanpa token manual.
+
 **Peran & izin**
 
 | Peran | Hak | Yang tidak tampil di aplikasi |
@@ -237,7 +254,7 @@ kerja harian dan `admin` hanya untuk pemulihan.
 | Pasang library | Explorer → ⬇ **Instal dependensi** (baca `requirements.txt`, `package.json`, `go.mod`, `composer.json`, atau ketik nama paket) |
 | Terminal | menu Terminal → sesi baru (shell di sandbox proyek), atau Explorer → ⋮ folder → **Buka di terminal** |
 | Pasang library dari terminal | `deps` (semua dependensi folder ini) · `pip install x` (otomatis ke `.venv` proyek) · `npm install x` · `go get x` |
-| Git | menu Git → status, commit, push/pull, branch |
+| Git | menu Git → status, **Commit semua** → **Push** / Pull, branch. Token: tautkan GitHub (izinkan push) atau tombol "Token Git" |
 | Database | menu Database → pilih/buat DB → query |
 | Uji API | menu HTTP Client |
 | Ubah tampilan | Pengaturan → Tampilan → mode, warna aksen, **warna latar**, AMOLED |
