@@ -601,7 +601,7 @@ class AgentService:
                 return t
         t = ai.default_target()
         if not t:
-            raise AppError("Belum ada model AI. Buka menu Model AI: terapkan model atau atur peran model agent.",
+            raise AppError("Belum ada model AI. Buka menu AI Pengaturan: terapkan model atau atur peran model agent.",
                            code="ai_not_configured", status_code=503)
         return t
 

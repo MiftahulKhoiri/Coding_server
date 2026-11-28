@@ -380,7 +380,7 @@ fun ModelPickerDialog(
                     FilterChip(location == "online", { location = "online"; selConn = null; models = null }, label = { Text("Online") })
                 }
                 val list = conns.filter { it.location == location }
-                if (list.isEmpty()) Text("Belum ada koneksi ${locationLabel(location)}. Tambahkan di Model AI → Model & Koneksi.",
+                if (list.isEmpty()) Text("Belum ada koneksi ${locationLabel(location)}. Tambahkan di AI Pengaturan → Model & Koneksi.",
                                          style = MaterialTheme.typography.bodySmall)
                 list.forEach { cn ->
                     Row(Modifier.fillMaxWidth().clickable { selConn = cn.id; selModel = null }, verticalAlignment = Alignment.CenterVertically) {

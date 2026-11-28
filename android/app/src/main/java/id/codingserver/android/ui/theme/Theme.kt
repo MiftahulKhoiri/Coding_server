@@ -82,7 +82,47 @@ data class AppTheme(
     /** Latar hitam pekat di mode gelap — hemat baterai di layar AMOLED. */
     val amoled: Boolean = false,
     val background: BackgroundTone = BackgroundTone.NEUTRAL,
+    /** Jenis huruf tampilan aplikasi (lihat AppFonts). */
+    val font: String = "default",
+    /** Skala ukuran teks aplikasi (dikalikan dengan ukuran huruf sistem). */
+    val textScale: Float = 1.0f,
 )
+
+/** Huruf tampilan aplikasi (res/font, lisensi SIL OFL). id -> nama tampilan. */
+val AppFonts = linkedMapOf("default" to "Bawaan (Roboto)", "inter" to "Inter", "poppins" to "Poppins",
+                           "nunito" to "Nunito", "open_sans" to "Open Sans", "lato" to "Lato", "serif" to "Serif")
+val AppTextScales = listOf(0.85f to "Kecil", 1.0f to "Normal", 1.15f to "Besar", 1.3f to "Sangat besar")
+
+fun appFontFamily(key: String): androidx.compose.ui.text.font.FontFamily {
+    fun f(r: Int, w: androidx.compose.ui.text.font.FontWeight) = androidx.compose.ui.text.font.Font(r, w)
+    val W = androidx.compose.ui.text.font.FontWeight
+    return when (key) {
+        "inter" -> androidx.compose.ui.text.font.FontFamily(f(id.codingserver.android.R.font.inter_regular, W.Normal), f(id.codingserver.android.R.font.inter_medium, W.Medium), f(id.codingserver.android.R.font.inter_bold, W.Bold))
+        "poppins" -> androidx.compose.ui.text.font.FontFamily(f(id.codingserver.android.R.font.poppins_regular, W.Normal), f(id.codingserver.android.R.font.poppins_medium, W.Medium), f(id.codingserver.android.R.font.poppins_bold, W.Bold))
+        "nunito" -> androidx.compose.ui.text.font.FontFamily(f(id.codingserver.android.R.font.nunito_regular, W.Normal), f(id.codingserver.android.R.font.nunito_medium, W.Medium), f(id.codingserver.android.R.font.nunito_bold, W.Bold))
+        "open_sans" -> androidx.compose.ui.text.font.FontFamily(f(id.codingserver.android.R.font.open_sans_regular, W.Normal), f(id.codingserver.android.R.font.open_sans_medium, W.Medium), f(id.codingserver.android.R.font.open_sans_bold, W.Bold))
+        "lato" -> androidx.compose.ui.text.font.FontFamily(f(id.codingserver.android.R.font.lato_regular, W.Normal), f(id.codingserver.android.R.font.lato_regular, W.Medium), f(id.codingserver.android.R.font.lato_bold, W.Bold))
+        "serif" -> androidx.compose.ui.text.font.FontFamily.Serif
+        else -> androidx.compose.ui.text.font.FontFamily.Default
+    }
+}
+
+/** Typography Material 3 dengan jenis huruf pilihan pada semua gaya teks. */
+fun typographyFor(key: String): Typography {
+    val t = Typography()
+    if (key == "default") return t
+    val ff = appFontFamily(key)
+    return Typography(
+        displayLarge = t.displayLarge.copy(fontFamily = ff), displayMedium = t.displayMedium.copy(fontFamily = ff),
+        displaySmall = t.displaySmall.copy(fontFamily = ff), headlineLarge = t.headlineLarge.copy(fontFamily = ff),
+        headlineMedium = t.headlineMedium.copy(fontFamily = ff), headlineSmall = t.headlineSmall.copy(fontFamily = ff),
+        titleLarge = t.titleLarge.copy(fontFamily = ff), titleMedium = t.titleMedium.copy(fontFamily = ff),
+        titleSmall = t.titleSmall.copy(fontFamily = ff), bodyLarge = t.bodyLarge.copy(fontFamily = ff),
+        bodyMedium = t.bodyMedium.copy(fontFamily = ff), bodySmall = t.bodySmall.copy(fontFamily = ff),
+        labelLarge = t.labelLarge.copy(fontFamily = ff), labelMedium = t.labelMedium.copy(fontFamily = ff),
+        labelSmall = t.labelSmall.copy(fontFamily = ff),
+    )
+}
 
 private fun mix(a: Color, b: Color, t: Float) = Color(
     red = a.red + (b.red - a.red) * t, green = a.green + (b.green - a.green) * t,
@@ -157,5 +197,10 @@ fun CodingServerTheme(theme: AppTheme = AppTheme(), content: @Composable () -> U
         } else dynamicLightColorScheme(ctx)
         applyBackground(base, theme.background, dark, theme.amoled && theme.background != BackgroundTone.NEUTRAL, base.primary)
     } else colorSchemeFor(theme.accent, dark, theme.amoled, theme.background)
-    MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(density.density, density.fontScale * theme.textScale),
+    ) {
+        MaterialTheme(colorScheme = scheme, typography = typographyFor(theme.font), content = content)
+    }
 }

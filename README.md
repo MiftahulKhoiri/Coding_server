@@ -8,7 +8,7 @@ menguji, dan memperbaiki kode dari HP. Kodenya tersimpan dan dijalankan di Pi, d
 
 | | |
 |---|---|
-| Versi server | **1.7.1** (FastAPI, Python 3) |
+| Versi server | **1.7.2** (FastAPI, Python 3) |
 | Aplikasi | Android 8.0+ (Kotlin + Jetpack Compose), dibangun otomatis oleh GitHub Actions |
 | Platform uji | Raspberry Pi 5 16 GB · Debian 13 (trixie) aarch64 · kernel 6.x · NVMe |
 | Port bawaan | `8800` · API `/api/v1` · dokumentasi interaktif `/docs` |
@@ -104,7 +104,7 @@ kosong, tanpa jaringan, dan hanya folder proyek yang bisa ditulis. Output dikiri
 - **AI Agent Tasks**: beri tugas seperti "buat halaman login dan pastikan jalan". Agen memeriksa proyek, membuat rencana,
   mengusulkan perubahan (risiko LOW/MEDIUM/HIGH), menginstal dependensi, menjalankan build/test di sandbox, memperbaiki
   bila gagal, lalu membuat laporan. Agen punya peran Perencana, Pelaksana, dan Peninjau, dan modelnya bisa berbeda per peran.
-- **Model AI**: kelola koneksi, muat/bongkar model, **profil model** dan **Uji Model** (kalibrasi otomatis parameter
+- **AI Pengaturan**: kelola koneksi, muat/bongkar model, **profil model** dan **Uji Model** (kalibrasi otomatis parameter
   yang paling cocok untuk tiap model).
 - **Konteks model**: ukuran konteks bawaan & per model diatur dari APK (disimpan sebagai preset llama-server, dimuat
   ulang tanpa restart).
@@ -214,7 +214,7 @@ pernah melewati server. Centang **Izinkan push** (GitHub) agar Git Manager bisa 
 |---|---|---|
 | **Admin utama (root)** | semua, termasuk backup/restore, proses server & audit, kelola admin | – |
 | Admin | semua proyek, kelola pengguna non-admin, pengaturan AI (model, konteks, lepas model, Uji Model, profil) | Backup, daftar proses server |
-| Developer | proyek sendiri: baca, tulis, hapus, jalankan, build, terminal, AI Chat & AI Agent | Kelola pengguna, pengaturan Model AI (hanya Ringkasan), backup |
+| Developer | proyek sendiri: baca, tulis, hapus, jalankan, build, terminal, AI Chat & AI Agent | Kelola pengguna, pengaturan AI Pengaturan (hanya Ringkasan), backup |
 | Runner | baca, jalankan, build | + Terminal, Git, tombol tulis/hapus/simpan/file baru |
 | Viewer | hanya melihat | + AI Chat, AI Agent, HTTP Client, tombol Jalankan/Build/Instal |
 | AI | peran internal agen (baca, tulis, jalankan, build; tanpa terminal/hapus/admin) | – |
@@ -257,11 +257,12 @@ kerja harian dan `admin` hanya untuk pemulihan.
 | Git | menu Git → status, **Commit semua** → **Push** / Pull, branch. Token: tautkan GitHub (izinkan push) atau tombol "Token Git" |
 | Database | menu Database → pilih/buat DB → query |
 | Uji API | menu HTTP Client |
-| Ubah tampilan | Pengaturan → **Warna** (tema aplikasi, warna editor, tema terminal) · **Font** (jenis & ukuran huruf editor/terminal) |
-| Atur perilaku editor | Code Editor → ⋮ → **Pengaturan editor** (LSP, ketuk = keyboard, tombol ekstra, simpan otomatis, word wrap, tab) |
+| Ubah tampilan | Pengaturan → **Warna** (tema aplikasi, warna editor, tema terminal) · **Font** (huruf & ukuran teks tampilan aplikasi) |
+| Atur editor | Code Editor → ⋮ → **Pengaturan editor** (jenis & ukuran huruf, LSP, ketuk = keyboard, tombol ekstra, simpan otomatis, word wrap, tab) |
+| Atur terminal | Terminal → ⚙ (jenis & ukuran huruf, tema, kursor, tombol) |
 | Foto & latar profil | Pengaturan → Profil → **Ubah profil** (foto, latar di belakang foto); ketuk foto = tampilan penuh |
 | Backup | Server Monitor → Backup server (admin utama) |
-| Pi macet karena model AI | Model AI → AI Agent → ⛔ **Paksa lepas** → lanjutkan task agent nanti dengan **Lanjutkan** |
+| Pi macet karena model AI | AI Pengaturan → AI Agent → ⛔ **Paksa lepas** → lanjutkan task agent nanti dengan **Lanjutkan** |
 
 Ekstensi yang dikenali: `.py .js .mjs .php .go .c .cpp .cc .java .cs .sql .html .css .sh`. Detail ada di
 [docs/EXECUTION_ENGINE.md](docs/EXECUTION_ENGINE.md).
@@ -274,11 +275,11 @@ Ekstensi yang dikenali: `.py .js .mjs .php .go .c .cpp .cc .java .cs .sql .html 
 ~/llama.cpp/build/bin/llama-server --models-preset ~/models/coding_server_presets.ini \
   --models-dir ~/models --no-models-autoload --jinja --host 0.0.0.0 --port 8080
 ```
-Jangan memberi `-c`/`--ctx-size` di perintah ini: konteks diatur dari APK (**Model AI → AI Agent → Konteks model**) lewat
+Jangan memberi `-c`/`--ctx-size` di perintah ini: konteks diatur dari APK (**AI Pengaturan → AI Agent → Konteks model**) lewat
 file preset. Bila service lama masih memakai `-c`, aplikasi menampilkan perintah `sudo` sekali-jalan untuk
 memperbaikinya.
 
-Di APK: **Model AI → Lokal → tambah koneksi** `http://127.0.0.1:8080` → pilih model → **Terapkan**. Model online
+Di APK: **AI Pengaturan → Lokal → tambah koneksi** `http://127.0.0.1:8080` → pilih model → **Terapkan**. Model online
 (API kompatibel OpenAI) juga bisa ditambahkan beserta API key-nya (disimpan terenkripsi di server).
 
 **Saran model**: di Pi 5 16 GB, satu model untuk semua peran agent (mis. Qwen3.5-9B atau Qwen2.5-Coder-7B) dengan
@@ -462,8 +463,8 @@ APK resmi (API 35, tanda tangan rilis) dibuat oleh GitHub Actions setiap push ke
 | Program `TIMEOUT` | naikkan `CS_RUN_TIMEOUT` atau timeout di request |
 | APK tidak mau update ("tanda tangan beda") | hapus aplikasi sekali, pasang APK dari Releases |
 | Agen AI sangat lambat | wajar untuk model lokal di Pi; pakai model lebih kecil atau model online untuk peran Perencana |
-| Pi macet / RAM penuh saat agen berjalan | Model AI → AI Agent → ⛔ Paksa lepas; kurangi "Model lokal termuat bersamaan" ke 1 |
-| Agen gagal "konteks terlampaui" | naikkan konteks di Model AI → AI Agent → Konteks model (mis. 16K); jalankan perintah sudo yang ditampilkan bila diminta |
+| Pi macet / RAM penuh saat agen berjalan | AI Pengaturan → AI Agent → ⛔ Paksa lepas; kurangi "Model lokal termuat bersamaan" ke 1 |
+| Agen gagal "konteks terlampaui" | naikkan konteks di AI Pengaturan → AI Agent → Konteks model (mis. 16K); jalankan perintah sudo yang ditampilkan bila diminta |
 | Menu tidak ada (mis. Terminal, Backup) | peran akun tidak punya izinnya — minta admin mengubah peran |
 | Autocomplete/error editor tidak muncul | ⋮ → Aktifkan language server; proyek harus terbuka; cek `GET /api/v1/lsp/status`; jalankan `scripts/install_runtimes.sh` |
 | "Format kode" gagal | pesan menunjukkan error sintaks dari formatter; perbaiki kodenya dulu. Formatter hilang → `scripts/install_runtimes.sh` |

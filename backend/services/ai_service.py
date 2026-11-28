@@ -576,7 +576,7 @@ class AIService:
         if st["status"] == "loading":
             raise AppError(f"Model masih dimuat: {st['message']}", code="ai_loading", status_code=503)
         if st["status"] != "ready" or not st["model"]:
-            raise AppError("Belum ada model AI yang diterapkan. Buka menu Model AI, pilih model, lalu Terapkan.",
+            raise AppError("Belum ada model AI yang diterapkan. Buka menu AI Pengaturan, pilih model, lalu Terapkan.",
                            code="ai_not_configured", status_code=503)
         row, prov = self.provider(st["connection_id"])
         return row, prov, st["model"]

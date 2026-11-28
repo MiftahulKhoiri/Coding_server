@@ -93,6 +93,8 @@ class ServerStore(private val context: Context) {
     private val kThemeAccent = stringPreferencesKey("app_theme_accent")
     private val kThemeAmoled = booleanPreferencesKey("app_theme_amoled")
     private val kThemeBg = stringPreferencesKey("app_theme_background")
+    private val kThemeFont = stringPreferencesKey("app_theme_font")
+    private val kThemeScale = stringPreferencesKey("app_text_scale")
     private val kTermFont = intPreferencesKey("term_font")
     private val kTermTheme = stringPreferencesKey("term_theme")
     private val kTermCursor = stringPreferencesKey("term_cursor")
@@ -134,7 +136,7 @@ class ServerStore(private val context: Context) {
 
     val appTheme: Flow<AppTheme> = context.dataStore.data.map {
         AppTheme(ThemeMode.fromKey(it[kThemeMode]), AccentPalette.fromKey(it[kThemeAccent]), it[kThemeAmoled] ?: false,
-                 BackgroundTone.fromKey(it[kThemeBg]))
+                 BackgroundTone.fromKey(it[kThemeBg]), it[kThemeFont] ?: "default", it[kThemeScale]?.toFloatOrNull() ?: 1.0f)
     }
 
     suspend fun setAppTheme(t: AppTheme) {
@@ -143,6 +145,8 @@ class ServerStore(private val context: Context) {
             it[kThemeAccent] = t.accent.key
             it[kThemeAmoled] = t.amoled
             it[kThemeBg] = t.background.key
+            it[kThemeFont] = t.font
+            it[kThemeScale] = t.textScale.toString()
         }
     }
 

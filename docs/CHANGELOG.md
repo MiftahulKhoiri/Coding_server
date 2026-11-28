@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.2 — 2026-11-29
+### Diubah
+- Menu **"Model AI" → "AI Pengaturan"**, urutan: AI Chat · AI Agent · AI Pengaturan (ikon tetap).
+- Jenis & ukuran huruf **kode** kini diatur di tempatnya: Code Editor → ⋮ → Pengaturan editor, dan Terminal → ⚙.
+- Pengaturan → **Font** = huruf **tampilan aplikasi**: Bawaan (Roboto), Inter, Poppins, Nunito, Open Sans, Lato,
+  Serif (TTF dibundel, SIL OFL) dan ukuran teks Kecil / Normal / Besar / Sangat besar.
+
 ## 1.7.1 — 2026-11-29
 ### Diubah
 - **Pengaturan disusun ulang**: hanya 1 · Profil, 2 · Manajer akun, 3 · Pembaruan aplikasi, 4 · Font, 5 · Warna.

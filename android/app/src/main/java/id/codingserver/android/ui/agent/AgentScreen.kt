@@ -163,7 +163,7 @@ private fun TaskList(vm: AppViewModel, c: ApiClient, projectId: String, projectN
         Column(Modifier.padding(pad).fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Proyek: $projectName", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-                IconButton(onClick = onOpenModels) { Icon(Icons.Default.Psychology, "Model AI Agent") }
+                IconButton(onClick = onOpenModels) { Icon(Icons.Default.Psychology, "Pengaturan AI Agent") }
                 IconButton(onClick = { reload++ }) { Icon(Icons.Default.Refresh, "Muat ulang") }
             }
             error?.let { ErrorCard(it) { reload++ } }
@@ -178,7 +178,7 @@ private fun TaskList(vm: AppViewModel, c: ApiClient, projectId: String, projectN
                             "Agen akan memeriksa proyek, membuat rencana, mengusulkan perubahan (perlu persetujuanmu), " +
                             "menjalankan build/test di sandbox, lalu memberi laporan.\n\nAgen berjalan di server: aplikasi " +
                             "boleh ditutup, notifikasi muncul saat selesai / butuh persetujuan.\n\nPastikan model sudah " +
-                            "diterapkan di menu Model AI (atau atur peran di Model AI → AI Agent).")
+                            "diterapkan di menu AI Pengaturan (atau atur peran di AI Pengaturan → AI Agent).")
                 }
                 else -> LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(list.orEmpty(), key = { it.id }) { t -> TaskRow(t) { onOpen(t.id) } }
@@ -198,7 +198,7 @@ private fun TaskList(vm: AppViewModel, c: ApiClient, projectId: String, projectN
                 .onSuccess { AgentMonitorService.start(ctx); onOpen(it.id) }
                 .onFailure {
                     vm.toast(it.message ?: "Gagal membuat task")
-                    if (it.message?.contains("Model AI") == true || it.message?.contains("model", true) == true) onOpenModels()
+                    if (it.message?.contains("AI Pengaturan") == true || it.message?.contains("model", true) == true) onOpenModels()
                 }
         }
     }
@@ -247,7 +247,7 @@ private fun NewTaskDialog(approvalMode: String?, onDismiss: () -> Unit, onCreate
                     InfoButton("Terapkan otomatis", "Perubahan file berisiko rendah/sedang langsung diterapkan tanpa menunggu " +
                         "persetujuanmu (tetap tercatat & bisa dibatalkan). Perubahan berisiko TINGGI tetap minta persetujuan, " +
                         "kecuali Izin agent diatur \"Penuh\".\n\nTanpa ini, agent berhenti sebelum menjalankan/menguji kode " +
-                        "sampai kamu menyetujui perubahannya di Approval Center.\n\nBawaannya diatur di Model AI → AI Agent → Izin agent.")
+                        "sampai kamu menyetujui perubahannya di Approval Center.\n\nBawaannya diatur di AI Pengaturan → AI Agent → Izin agent.")
                 }
                 if (auto && approvalMode == "penuh") Text("Mode penuh: agent jalan terus tanpa berhenti, termasuk perubahan berisiko tinggi.",
                                                           style = MaterialTheme.typography.labelSmall)

@@ -28,43 +28,40 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import id.codingserver.android.data.settings.EditorFonts
 import id.codingserver.android.ui.AppViewModel
+import id.codingserver.android.ui.theme.AppFonts
+import id.codingserver.android.ui.theme.AppTextScales
+import id.codingserver.android.ui.theme.appFontFamily
 import id.codingserver.android.ui.common.TitleWithInfo
 import id.codingserver.android.ui.editor.EditorPresetRow
 import id.codingserver.android.ui.terminal.TERMINAL_THEMES
 
+/** Pengaturan → Font: jenis & ukuran huruf tampilan aplikasi (editor & terminal diatur di layarnya masing-masing). */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FontPicker(label: String, current: String, size: Int, sizeRange: ClosedFloatingPointRange<Float>,
-                       onFont: (String) -> Unit, onSize: (Int) -> Unit) {
-    Text(label, style = MaterialTheme.typography.titleSmall)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        EditorFonts.forEach { (id, name) ->
-            FilterChip(current == id, { onFont(id) }, label = { Text(name) })
-        }
-    }
-    Text("Ukuran: $size", style = MaterialTheme.typography.bodySmall)
-    Slider(size.toFloat(), { onSize(it.toInt()) }, valueRange = sizeRange)
-    Text("Contoh ukuran: fun main() { println(\"Halo\") }", fontSize = size.sp, fontFamily = FontFamily.Monospace,
-         modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
-             .padding(8.dp))
-}
-
-/** Pengaturan → Font: jenis & ukuran huruf Code Editor dan Terminal. */
-@Composable
 fun FontSettingsCard(vm: AppViewModel) {
-    val ed by vm.editorPrefs.collectAsState()
-    val term by vm.terminalPrefs.collectAsState()
+    val theme by vm.appTheme.collectAsState()
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            TitleWithInfo("Font", "Jenis huruf monospace yang dibundel di aplikasi (lisensi SIL OFL). Fira Code punya " +
-                "ligatur (=> != tampil menyatu). Ubuntu Mono lebih ramping: muat lebih banyak kolom di layar HP.")
-            FontPicker("Code Editor", ed.fontFamily, ed.fontSize, 9f..28f,
-                onFont = { vm.setEditorPrefs(ed.copy(fontFamily = it)) }, onSize = { vm.setEditorPrefs(ed.copy(fontSize = it)) })
-            HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            FontPicker("Terminal", term.fontFamily, term.fontSize, 8f..28f,
-                onFont = { vm.setTerminalPrefs(term.copy(fontFamily = it)) }, onSize = { vm.setTerminalPrefs(term.copy(fontSize = it)) })
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TitleWithInfo("Font tampilan", "Jenis & ukuran huruf seluruh tampilan aplikasi (menu, pengaturan, dialog). " +
+                "Huruf kode diatur terpisah: Code Editor → ⋮ → Pengaturan editor, dan Terminal → ⚙.")
+            Text("Jenis huruf", style = MaterialTheme.typography.titleSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                AppFonts.forEach { (key, name) ->
+                    FilterChip(theme.font == key, { vm.setAppTheme(theme.copy(font = key)) },
+                        label = { Text(name, fontFamily = appFontFamily(key)) })
+                }
+            }
+            Text("Ukuran teks", style = MaterialTheme.typography.titleSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                AppTextScales.forEach { (scale, name) ->
+                    FilterChip(kotlin.math.abs(theme.textScale - scale) < 0.01f, { vm.setAppTheme(theme.copy(textScale = scale)) },
+                        label = { Text(name) })
+                }
+            }
+            Text("Contoh: Proyek tes · 4 file · AI Agent selesai ✓", style = MaterialTheme.typography.bodyLarge,
+                 modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+                     .padding(10.dp))
         }
     }
 }

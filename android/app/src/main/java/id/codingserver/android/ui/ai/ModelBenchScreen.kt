@@ -240,7 +240,7 @@ private fun RecommendationRow(rec: BenchRecommendation, isAdmin: Boolean, onAppl
                 "Dihitung dari hasil uji model lokal.\n\n🧠 Perencana & 🔍 Peninjau: ${p.model} (skor ${p.score.toInt()}) — skor tertinggi.\n" +
                     (rec.executor?.let { "⚙️ Pelaksana: ${it.model} (skor ${it.score.toInt()}${it.avg_tps?.let { t -> ", $t tok/dtk" } ?: ""}) — " +
                         "tercepat di antara model yang skornya ≥ 60.\n" } ?: "") +
-                    "\n\"Terapkan\" mengisi peran di Model AI → AI Agent. Bisa diubah lagi kapan saja.")
+                    "\n\"Terapkan\" mengisi peran di AI Pengaturan → AI Agent. Bisa diubah lagi kapan saja.")
             if (isAdmin) TextButton(onClick = onApply) { Text("Terapkan") }
         }
     }

@@ -69,6 +69,8 @@ fun TerminalSettingsDialog(p: TerminalPrefs, onChange: (TerminalPrefs) -> Unit, 
                     Text("~/proyek$ █", color = th.accent, style = style)
                 }
 
+                Text("Jenis huruf", style = MaterialTheme.typography.titleSmall)
+                id.codingserver.android.ui.common.MonoFontChips(p.fontFamily) { onChange(p.copy(fontFamily = it)) }
                 Text("Ukuran huruf: ${p.fontSize}", style = MaterialTheme.typography.titleSmall)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(enabled = p.fontSize > 8, onClick = { onChange(p.copy(fontSize = p.fontSize - 1)) }) { Text("A−") }

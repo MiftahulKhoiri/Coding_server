@@ -39,6 +39,11 @@ fun EditorSettingsDialog(vm: AppViewModel, onDismiss: () -> Unit) {
         title = { Text("Pengaturan editor") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Jenis huruf", style = MaterialTheme.typography.titleSmall)
+                id.codingserver.android.ui.common.MonoFontChips(prefs.fontFamily) { vm.setEditorPrefs(prefs.copy(fontFamily = it)) }
+                Text("Ukuran huruf: ${prefs.fontSize}", style = MaterialTheme.typography.titleSmall)
+                Slider(prefs.fontSize.toFloat(), { vm.setEditorPrefs(prefs.copy(fontSize = it.toInt())) }, valueRange = 9f..28f)
+                androidx.compose.material3.HorizontalDivider()
                 Toggle("Language server", prefs.lsp, "Autocomplete pintar, error saat mengetik, info simbol, ke definisi, " +
                     "referensi & ganti nama lintas file. Dijalankan di server untuk C/C++, Python, JS/TS, Go, PHP, HTML, " +
                     "CSS, JSON, dan Bash.") { vm.setEditorPrefs(prefs.copy(lsp = it)) }
@@ -51,7 +56,7 @@ fun EditorSettingsDialog(vm: AppViewModel, onDismiss: () -> Unit) {
                 Toggle("Word wrap", prefs.wordWrap) { vm.setEditorPrefs(prefs.copy(wordWrap = it)) }
                 Text("Lebar tab: ${prefs.tabSize}", style = MaterialTheme.typography.bodyMedium)
                 Slider(prefs.tabSize.toFloat(), { vm.setEditorPrefs(prefs.copy(tabSize = it.toInt())) }, valueRange = 2f..8f, steps = 5)
-                Text("Jenis & ukuran huruf ada di Pengaturan → Font; warna di Pengaturan → Warna.",
+                Text("Warna editor: Pengaturan → Warna, atau ⋮ → Pengaturan warna editor.",
                      style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },

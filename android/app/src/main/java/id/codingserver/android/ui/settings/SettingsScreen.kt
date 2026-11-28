@@ -61,7 +61,7 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
         SectionHeader("5 · Warna")
         ColorSettingsCards(vm)
         Text("Pengaturan lain ada di tempatnya: Code Editor → ⋮ → Pengaturan editor · Terminal → ⚙ · " +
-             "Model AI (semua tentang AI) · Server Monitor → Backup.",
+             "AI Pengaturan (semua tentang AI) · Server Monitor → Backup.",
              style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
              modifier = Modifier.padding(4.dp))
     }

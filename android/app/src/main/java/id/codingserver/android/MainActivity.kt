@@ -126,8 +126,8 @@ private val DESTS = listOf(
     Dest("output", "Build Output", Icons.AutoMirrored.Filled.Article, "DEVELOPMENT"),
     // Uji Model & Profil Model ada di dalam Model AI (Laboratorium & Konfigurasi), bukan menu terpisah.
     Dest("ai_chat", "AI Chat", Icons.Default.SmartToy, "AI DEVELOPMENT", perm = "execute"),
-    Dest("ai_models", "Model AI", Icons.Default.Psychology, "AI DEVELOPMENT"),
     Dest("agent", "AI Agent", Icons.Default.AutoFixHigh, "AI DEVELOPMENT", perm = "execute"),
+    Dest("ai_models", "AI Pengaturan", Icons.Default.Psychology, "AI DEVELOPMENT"),
     Dest("git", "Git", Icons.Default.AccountTree, "PROJECT TOOLS", perm = "write"),
     Dest("database", "Database", Icons.Default.Storage, "PROJECT TOOLS"),
     Dest("http", "HTTP Client", Icons.Default.Http, "PROJECT TOOLS", perm = "execute"),
