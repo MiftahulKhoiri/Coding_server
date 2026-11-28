@@ -22,7 +22,7 @@ import time
 from backend.config import Settings
 from backend.core.exceptions import AppError, Conflict, Forbidden, NotFound, Unauthorized
 from backend.core.logging import get_logger
-from backend.core.permissions import ROLES, effective_perms
+from backend.core.permissions import ALL, ROLES, ROOT_GRANT_ONLY, ROOT_ONLY, effective_perms
 from backend.core.security import create_token, decode_token, hash_password, verify_password
 from backend.database.db import Database
 
@@ -116,7 +116,8 @@ class AuthService:
         extra = json.loads(row.get("extra_perms") or "[]")
         return {
             "id": row["id"], "username": row["username"], "role": row["role"], "is_active": bool(row["is_active"]),
-            "permissions": sorted(effective_perms(row["role"], extra)), "created_at": row["created_at"],
+            "permissions": sorted(effective_perms(row["role"], extra, bool(row.get("is_root")))),
+            "created_at": row["created_at"],
             "display_name": row.get("display_name") or "", "email": row.get("email") or "",
             "bio": row.get("bio") or "", "is_root": bool(row.get("is_root")),
             "updated_at": row.get("updated_at") or 0.0, "last_login_at": row.get("last_login_at"),
@@ -180,6 +181,12 @@ class AuthService:
             raise AppError("Peran tidak dikenal", code="bad_role")
         if role == "admin" and actor is not None and not self._is_root(actor):
             raise _root_forbidden("Hanya admin utama yang boleh membuat akun admin")
+        extra_perms = sorted(set(extra_perms or []))
+        bad = [p for p in extra_perms if p not in ALL or p in ROOT_ONLY]
+        if bad:
+            raise AppError(f"Hak tambahan tidak dikenal/tidak boleh: {', '.join(bad)}", code="bad_perm")
+        if actor is not None and not self._is_root(actor) and set(extra_perms) & ROOT_GRANT_ONLY:
+            raise _root_forbidden("Hanya admin utama yang boleh memberi hak admin/kelola pengguna")
         prof = self._profile_fields(display_name, email, None)
         if self.db.one("SELECT id FROM users WHERE username=?", (username,)):
             raise Conflict("Username sudah dipakai")

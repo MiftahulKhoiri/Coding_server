@@ -2,6 +2,7 @@
 
 
 def _login(client, username, password):
+    client.app.state.services.login_limiter._hits.clear()  # banyak login di satu sesi tes ≠ serangan brute force
     r = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
     return {"Authorization": f"Bearer {r.json()['access_token']}"}
@@ -130,3 +131,46 @@ def test_avatar_upload_get_delete(client, auth):
     d = client.delete("/api/v1/auth/me/avatar", headers=auth)
     assert d.status_code == 200 and d.json()["avatar_version"] is None
     assert client.get(f"/api/v1/auth/users/{me['id']}/avatar", headers=auth).status_code == 404
+
+
+def test_permission_groups(client, auth):
+    """Root: semua. Admin biasa: kelola pengguna & AI, tanpa hak sistem. Developer: tanpa kelola pengguna/AI/sistem."""
+    me = client.get("/api/v1/auth/me", headers=auth).json()
+    assert {"system", "users", "ai_manage", "admin"} <= set(me["permissions"])
+    for name, role in (("adm5", "admin"), ("dev5", "developer")):
+        assert client.post("/api/v1/auth/users", json={"username": name, "password": name + "-pass-1", "role": role},
+                           headers=auth).status_code == 201
+    ha, hd = _login(client, "adm5", "adm5-pass-1"), _login(client, "dev5", "dev5-pass-1")
+    pa = set(client.get("/api/v1/auth/me", headers=ha).json()["permissions"])
+    pd = set(client.get("/api/v1/auth/me", headers=hd).json()["permissions"])
+    assert "system" not in pa and {"users", "ai_manage", "admin"} <= pa
+    assert not pd & {"system", "users", "ai_manage", "admin"} and {"read", "write", "terminal"} <= pd
+    # sistem (backup/proses/audit) hanya root
+    for url in ("/api/v1/backup", "/api/v1/system/processes", "/api/v1/system/audit"):
+        assert client.get(url, headers=auth).status_code == 200, url
+        assert client.get(url, headers=ha).status_code == 403, url
+    # kelola pengguna: admin boleh, developer tidak
+    assert client.get("/api/v1/auth/users", headers=ha).status_code == 200
+    assert client.get("/api/v1/auth/users", headers=hd).status_code == 403
+    # pengaturan AI: developer tidak boleh
+    r = client.post("/api/v1/ai/unload-all", headers=hd)
+    assert r.status_code == 403 and r.json()["error"]["code"] == "permission_denied"
+    users = {u["username"]: u["id"] for u in client.get("/api/v1/auth/users", headers=auth).json()}
+    for name in ("adm5", "dev5"):
+        client.delete(f"/api/v1/auth/users/{users[name]}", headers=auth)
+
+
+def test_extra_perms_guard(client):
+    auth_svc = client.app.state.services.auth
+    import pytest
+    from backend.core.exceptions import AppError
+    with pytest.raises(AppError):
+        auth_svc.create_user("x1", "x1-pass-123", "developer", ["system"])
+    root = auth_svc.root()
+    adm = auth_svc.create_user("x2", "x2-pass-123", "admin", actor={**root, "is_root": 1})
+    with pytest.raises(AppError):
+        auth_svc.create_user("x3", "x3-pass-123", "developer", ["users"], actor=adm)
+    u = auth_svc.create_user("x4", "x4-pass-123", "developer", ["ai_manage"], actor=adm)
+    assert "ai_manage" in u["permissions"]
+    for n in ("x2", "x4"):
+        auth_svc.delete_user({**root, "is_root": 1}, auth_svc.db.one("SELECT id FROM users WHERE username=?", (n,))["id"])

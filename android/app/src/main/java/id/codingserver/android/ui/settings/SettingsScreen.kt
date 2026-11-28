@@ -64,7 +64,7 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
     var backups by remember { mutableStateOf<List<BackupInfo>?>(null) }
     var ai by remember { mutableStateOf<AIStatus?>(null) }
     val updater = remember { AppUpdater() }
-    val isAdmin = user?.permissions?.contains("admin") == true
+    val isAdmin = user?.permissions?.contains("system") == true
 
     LaunchedEffect(client) {
         val c = client ?: return@LaunchedEffect

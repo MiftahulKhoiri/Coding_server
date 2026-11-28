@@ -112,7 +112,9 @@ import kotlinx.coroutines.launch
 /** Rute lama (notifikasi Uji Model, tautan internal) → bagian Model AI yang sesuai. */
 private val AI_ROUTE_ALIAS = mapOf("ai_bench" to AiModelTab.LAB, "ai_profiles" to AiModelTab.CONFIG)
 
-private data class Dest(val route: String, val label: String, val icon: ImageVector, val section: String)
+/** perm = hak yang dibutuhkan layar; menu disembunyikan bila pengguna tidak punya hak itu. */
+private data class Dest(val route: String, val label: String, val icon: ImageVector, val section: String,
+                        val perm: String? = null)
 
 // Menu dikelompokkan per area kerja agar tetap ringkas di layar kecil.
 private val DESTS = listOf(
@@ -120,15 +122,15 @@ private val DESTS = listOf(
     Dest("projects", "Proyek", Icons.Default.Folder, "WORKSPACE"),
     Dest("explorer", "Project Explorer", Icons.Default.FolderOpen, "WORKSPACE"),
     Dest("editor", "Code Editor", Icons.Default.Code, "WORKSPACE"),
-    Dest("terminal", "Terminal", Icons.Default.Terminal, "DEVELOPMENT"),
+    Dest("terminal", "Terminal", Icons.Default.Terminal, "DEVELOPMENT", perm = "terminal"),
     Dest("output", "Build Output", Icons.AutoMirrored.Filled.Article, "DEVELOPMENT"),
     // Uji Model & Profil Model ada di dalam Model AI (Laboratorium & Konfigurasi), bukan menu terpisah.
-    Dest("ai_chat", "AI Chat", Icons.Default.SmartToy, "AI DEVELOPMENT"),
+    Dest("ai_chat", "AI Chat", Icons.Default.SmartToy, "AI DEVELOPMENT", perm = "execute"),
     Dest("ai_models", "Model AI", Icons.Default.Psychology, "AI DEVELOPMENT"),
-    Dest("agent", "AI Agent", Icons.Default.AutoFixHigh, "AI DEVELOPMENT"),
-    Dest("git", "Git", Icons.Default.AccountTree, "PROJECT TOOLS"),
+    Dest("agent", "AI Agent", Icons.Default.AutoFixHigh, "AI DEVELOPMENT", perm = "execute"),
+    Dest("git", "Git", Icons.Default.AccountTree, "PROJECT TOOLS", perm = "write"),
     Dest("database", "Database", Icons.Default.Storage, "PROJECT TOOLS"),
-    Dest("http", "HTTP Client", Icons.Default.Http, "PROJECT TOOLS"),
+    Dest("http", "HTTP Client", Icons.Default.Http, "PROJECT TOOLS", perm = "execute"),
     Dest("monitor", "Server Monitor", Icons.Default.Monitor, "SERVER"),
     Dest("servers", "Koneksi Server", Icons.Default.Dns, "SYSTEM"),
     Dest("settings", "Pengaturan", Icons.Default.Settings, "SYSTEM"),
@@ -268,8 +270,10 @@ private fun App(vm: AppViewModel, editor: EditorController, terminal: TerminalCo
                     Text("Aplikasi v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                          modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.labelSmall)
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
-                    DESTS.forEachIndexed { i, d ->
-                        if (i == 0 || DESTS[i - 1].section != d.section) Text(
+                    val perms = drawerUser?.permissions.orEmpty()
+                    val menu = DESTS.filter { it.perm == null || it.perm in perms }
+                    menu.forEachIndexed { i, d ->
+                        if (i == 0 || menu[i - 1].section != d.section) Text(
                             d.section, style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(start = 28.dp, top = if (i == 0) 0.dp else 10.dp, bottom = 2.dp),

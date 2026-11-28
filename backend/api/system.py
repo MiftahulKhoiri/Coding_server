@@ -37,11 +37,11 @@ def engines(refresh: bool = False, _: dict = Depends(current_user), svc: Service
 
 
 @router.get("/processes")
-def processes(_: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def processes(_: dict = Depends(require("system")), svc: Services = Depends(services)):
     return {"processes": svc.monitor.processes(), "jobs": svc.execution.active(),
             "terminals": len(svc.terminal.sessions)}
 
 
 @router.get("/audit")
-def audit(limit: int = 100, _: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def audit(limit: int = 100, _: dict = Depends(require("system")), svc: Services = Depends(services)):
     return {"entries": svc.db.all("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (min(limit, 1000),))}

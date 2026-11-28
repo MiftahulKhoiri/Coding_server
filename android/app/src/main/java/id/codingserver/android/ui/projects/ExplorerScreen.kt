@@ -77,6 +77,9 @@ fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (Fi
                    onInstall: (List<String>) -> Unit = {}) {
     val client by vm.client.collectAsState()
     val project by vm.project.collectAsState()
+    val me by vm.user.collectAsState()
+    val perms = me?.permissions.orEmpty().toSet()
+    val canWrite = "write" in perms
     val children = remember { mutableStateMapOf<String, List<FileEntry>>() }
     val expanded = remember { mutableStateListOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -120,10 +123,10 @@ fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (Fi
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(p.name, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            IconButton(onClick = { dialog = Dlg.NewFile("") }) { Icon(Icons.AutoMirrored.Filled.NoteAdd, "File baru") }
-            IconButton(onClick = { dialog = Dlg.NewFolder("") }) { Icon(Icons.Default.CreateNewFolder, "Folder baru") }
+            if (canWrite) IconButton(onClick = { dialog = Dlg.NewFile("") }) { Icon(Icons.AutoMirrored.Filled.NoteAdd, "File baru") }
+            if (canWrite) IconButton(onClick = { dialog = Dlg.NewFolder("") }) { Icon(Icons.Default.CreateNewFolder, "Folder baru") }
             IconButton(onClick = { searching = !searching; results = null }) { Icon(Icons.Default.Search, "Cari") }
-            IconButton(onClick = { installDlg = true }) { Icon(Icons.Default.Download, "Instal dependensi") }
+            if ("execute" in perms) IconButton(onClick = { installDlg = true }) { Icon(Icons.Default.Download, "Instal dependensi") }
             IconButton(onClick = { refreshAll() }) { Icon(Icons.Default.Refresh, "Refresh") }
         }
         if (installDlg) InstallDepsDialog(c, p.id, onInstall = onInstall, onDismiss = { installDlg = false })
@@ -158,7 +161,7 @@ fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (Fi
         } else {
             LazyColumn(Modifier.fillMaxSize()) {
                 items(rows, key = { it.first.path }) { (e, depth) ->
-                    FileRow(e, depth, e.path in expanded,
+                    FileRow(e, depth, e.path in expanded, perms,
                         onClick = {
                             if (e.isFolder) {
                                 if (e.path in expanded) expanded.remove(e.path) else {
@@ -236,7 +239,8 @@ fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (Fi
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FileRow(e: FileEntry, depth: Int, isExpanded: Boolean, onClick: () -> Unit, onAction: (String) -> Unit) {
+private fun FileRow(e: FileEntry, depth: Int, isExpanded: Boolean, perms: Set<String>, onClick: () -> Unit,
+                    onAction: (String) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     Row(
         Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = { menu = true })
@@ -257,11 +261,15 @@ private fun FileRow(e: FileEntry, depth: Int, isExpanded: Boolean, onClick: () -
             IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Aksi") }
             DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                 val items = buildList {
-                    if (!e.isFolder) { add("open" to "Buka"); add("run" to "Jalankan") }
-                    add("newfile" to "File baru"); add("newfolder" to "Folder baru")
-                    add("rename" to "Ganti nama"); add("copy" to "Salin"); add("move" to "Pindahkan")
+                    // Aksi yang tidak diizinkan untuk peran pengguna tidak ditampilkan.
+                    if (!e.isFolder) add("open" to "Buka")
+                    if (!e.isFolder && "execute" in perms) add("run" to "Jalankan")
+                    if ("write" in perms) {
+                        add("newfile" to "File baru"); add("newfolder" to "Folder baru")
+                        add("rename" to "Ganti nama"); add("copy" to "Salin"); add("move" to "Pindahkan")
+                    }
                     if (!e.isFolder) add("fav" to "Favorit")
-                    add("delete" to "Hapus")
+                    if ("delete" in perms) add("delete" to "Hapus")
                 }
                 items.forEach { (k, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { menu = false; onAction(k) }) }
             }

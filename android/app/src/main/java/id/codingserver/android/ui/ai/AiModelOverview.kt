@@ -198,11 +198,13 @@ fun AiModelOverview(vm: AppViewModel, hub: AiModelHubState, isAdmin: Boolean, on
         Text("Akses cepat", style = MaterialTheme.typography.titleSmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             QuickButton(Icons.Default.SmartToy, "AI Chat", onOpenChat)
-            QuickButton(Icons.Default.Psychology, "Kelola model") { onOpen(AiModelTab.MODELS) }
-            QuickButton(Icons.Default.Dns, "Kelola koneksi") { onOpen(AiModelTab.MODELS) }
-            QuickButton(Icons.Default.AutoFixHigh, "Peran AI Agent") { onOpen(AiModelTab.AGENT) }
-            QuickButton(Icons.Default.Science, "Uji model") { onOpen(AiModelTab.LAB) }
-            QuickButton(Icons.Default.Tune, "Profil model") { vm.selectAiConfigSection("profil"); onOpen(AiModelTab.CONFIG) }
+            if (isAdmin) {
+                QuickButton(Icons.Default.Psychology, "Kelola model") { onOpen(AiModelTab.MODELS) }
+                QuickButton(Icons.Default.Dns, "Kelola koneksi") { onOpen(AiModelTab.MODELS) }
+                QuickButton(Icons.Default.AutoFixHigh, "Peran AI Agent") { onOpen(AiModelTab.AGENT) }
+                QuickButton(Icons.Default.Science, "Uji model") { onOpen(AiModelTab.LAB) }
+                QuickButton(Icons.Default.Tune, "Profil model") { vm.selectAiConfigSection("profil"); onOpen(AiModelTab.CONFIG) }
+            }
             QuickButton(Icons.Default.AutoFixHigh, "Task agent", onOpenAgentTasks)
         }
         Spacer(Modifier.height(16.dp))

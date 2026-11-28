@@ -34,14 +34,16 @@ fun AiModelScreen(vm: AppViewModel, onOpenChat: () -> Unit, onOpenAgentTasks: ()
     val user by vm.user.collectAsState()
     val tabKey by vm.aiModelTab.collectAsState()
     val c = client ?: return
-    val isAdmin = user?.permissions?.contains("admin") == true
+    val isAdmin = user?.permissions?.contains("ai_manage") == true
     val hub = rememberAiModelHubState(c)
-    val tab = AiModelTab.of(tabKey)
+    // Tanpa hak kelola AI hanya Ringkasan yang ditampilkan (bagian lain hanya berisi pengaturan).
+    val tabs = if (isAdmin) AiModelTab.entries else listOf(AiModelTab.OVERVIEW)
+    val tab = AiModelTab.of(tabKey).takeIf { it in tabs } ?: AiModelTab.OVERVIEW
     fun open(t: AiModelTab) = vm.selectAiModelTab(t.key)
 
     Column(Modifier.fillMaxSize()) {
-        ScrollableTabRow(selectedTabIndex = tab.ordinal, edgePadding = 4.dp) {
-            AiModelTab.entries.forEach { t ->
+        if (tabs.size > 1) ScrollableTabRow(selectedTabIndex = tabs.indexOf(tab), edgePadding = 4.dp) {
+            tabs.forEach { t ->
                 Tab(selected = t == tab, onClick = { open(t) },
                     text = { Text(t.label, maxLines = 1, overflow = TextOverflow.Ellipsis) })
             }

@@ -98,7 +98,7 @@ private fun runLabel(s: String) = when (s) {
 fun ModelBenchScreen(vm: AppViewModel, onOpenProfiles: () -> Unit = {}) {
     val client by vm.client.collectAsState()
     val user by vm.user.collectAsState()
-    val isAdmin = user?.permissions?.contains("admin") == true
+    val isAdmin = user?.permissions?.contains("ai_manage") == true
     val c = client ?: return
     var data by remember { mutableStateOf<BenchOverview?>(null) }
     var error by remember { mutableStateOf<String?>(null) }

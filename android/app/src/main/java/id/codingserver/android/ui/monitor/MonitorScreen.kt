@@ -47,7 +47,7 @@ fun MonitorScreen(vm: AppViewModel) {
     var procs by remember { mutableStateOf<Processes?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshEngines by remember { mutableIntStateOf(0) }
-    val isAdmin = user?.permissions?.contains("admin") == true
+    val isAdmin = user?.permissions?.contains("system") == true
 
     LaunchedEffect(client) {
         val c = client ?: return@LaunchedEffect

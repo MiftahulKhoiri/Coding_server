@@ -113,7 +113,7 @@ fun presetText(p: ModelPreset): String = listOfNotNull(
 fun ModelProfilesScreen(vm: AppViewModel, onOpenBench: () -> Unit) {
     val client by vm.client.collectAsState()
     val user by vm.user.collectAsState()
-    val isAdmin = user?.permissions?.contains("admin") == true
+    val isAdmin = user?.permissions?.contains("ai_manage") == true
     val c = client ?: return
     var data by remember { mutableStateOf<ModelProfiles?>(null) }
     var error by remember { mutableStateOf<String?>(null) }

@@ -71,8 +71,8 @@ private val ROLE_LABEL = mapOf(
     "admin" to "Admin", "developer" to "Developer", "runner" to "Runner", "viewer" to "Viewer", "ai" to "AI",
 )
 private val ROLE_INFO = mapOf(
-    "admin" to "semua akses + kelola pengguna & backup",
-    "developer" to "baca, tulis, hapus, jalankan, build, terminal",
+    "admin" to "semua proyek, kelola pengguna & pengaturan AI (backup & sistem khusus admin utama)",
+    "developer" to "proyek sendiri: baca, tulis, hapus, jalankan, build, terminal, AI",
     "runner" to "baca, jalankan & build saja",
     "viewer" to "hanya melihat",
 )
@@ -91,7 +91,7 @@ fun AccountSection(vm: AppViewModel, onServers: () -> Unit) {
     val u = user
     val c = client
     ProfileCard(vm, u, c, onServers)
-    if (u != null && c != null && "admin" in u.permissions) UsersCard(vm, u, c)
+    if (u != null && c != null && "users" in u.permissions) UsersCard(vm, u, c)
 }
 
 @Composable

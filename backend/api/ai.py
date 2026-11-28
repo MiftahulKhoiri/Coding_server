@@ -32,21 +32,21 @@ def connections(_: dict = Depends(current_user), svc: Services = Depends(service
 
 
 @router.post("/connections", status_code=201)
-def add_connection(body: AIConnectionIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def add_connection(body: AIConnectionIn, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     c = svc.ai.save_connection(body.model_dump())
     svc.db.audit("ai_connection_add", user=user, target=c["id"], detail=c["base_url"])
     return c
 
 
 @router.put("/connections/{cid}")
-def update_connection(cid: str, body: AIConnectionIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def update_connection(cid: str, body: AIConnectionIn, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     c = svc.ai.save_connection(body.model_dump(), cid)
     svc.db.audit("ai_connection_update", user=user, target=cid)
     return c
 
 
 @router.delete("/connections/{cid}", response_model=OkResponse)
-def delete_connection(cid: str, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def delete_connection(cid: str, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     svc.ai.delete_connection(cid)
     svc.db.audit("ai_connection_delete", user=user, target=cid)
     return {"ok": True}
@@ -58,21 +58,21 @@ async def models(cid: str, _: dict = Depends(require("execute")), svc: Services 
 
 
 @router.post("/apply", summary="Terapkan model: bongkar model lama, muat model baru (lokal) / aktifkan (online)")
-async def apply(body: AIApply, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+async def apply(body: AIApply, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     st = await svc.ai.apply(body.connection_id, body.model, wait=body.wait)
     svc.db.audit("ai_apply", user=user, target=f"{body.connection_id}:{body.model}")
     return await svc.ai.status(user) if body.wait else st
 
 
 @router.post("/unload", summary="Bongkar model dari memori")
-async def unload(user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+async def unload(user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     await svc.ai.unload()
     return await svc.ai.status(user)
 
 
 @router.post("/unload-all", summary="Lepas semua model lokal dari RAM. force=true: jeda task agent & hentikan Uji "
                                     "Model dulu, lalu lepas model yang sedang dipakai juga (untuk Pi yang macet)")
-async def unload_all(force: bool = False, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+async def unload_all(force: bool = False, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     paused, cancelled = [], []
     if force:
         paused = await svc.agent.pause_all("Dijeda paksa: semua model dilepas dari RAM. Tekan Lanjutkan untuk meneruskan.")
@@ -84,7 +84,7 @@ async def unload_all(force: bool = False, user: dict = Depends(require("admin"))
 
 
 @router.put("/settings")
-async def update_settings(body: AISettingsIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+async def update_settings(body: AISettingsIn, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     svc.ai.save_settings(body.model_dump(exclude_none=True))
     return await svc.ai.status(user)
 
@@ -96,7 +96,7 @@ def agent_models(_: dict = Depends(current_user), svc: Services = Depends(servic
 
 
 @router.put("/agent-models", summary="Atur peran model agent; null = kosongkan (pakai model aktif)")
-def update_agent_models(body: AgentModelsIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def update_agent_models(body: AgentModelsIn, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     out = svc.ai.save_agent_models(body.model_dump(exclude_unset=True))
     svc.db.audit("ai_agent_models", user=user, detail={k: v for k, v in out.items() if k != "default"})
     return out
@@ -109,7 +109,7 @@ async def context_status(connection_id: str, _: dict = Depends(current_user), sv
 
 
 @router.put("/context", summary="Atur ukuran konteks (bawaan & per model); router memuat ulang preset tanpa restart")
-async def context_save(body: ContextIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+async def context_save(body: ContextIn, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     busy = svc.agent.any_active()
     out = await svc.llama_ctx.save(body.connection_id, body.default_ctx, body.models, busy)
     svc.agent.forget_context()  # anggaran riwayat agen dihitung ulang dari konteks baru
@@ -125,7 +125,7 @@ def bench_list(_: dict = Depends(require("read")), svc: Services = Depends(servi
 
 
 @router.post("/bench", status_code=201, summary="Mulai Uji Model (berjalan di latar belakang, bergiliran)")
-async def bench_start(body: ModelBenchIn, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+async def bench_start(body: ModelBenchIn, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     return {"runs": svc.bench.create(user, [t.model_dump() for t in body.targets], body.mode)}
 
 
@@ -135,7 +135,7 @@ def bench_get(run_id: str, _: dict = Depends(require("read")), svc: Services = D
 
 
 @router.post("/bench/{run_id}/save-profile", summary="Simpan draf profil hasil kalibrasi walau belum memenuhi syarat")
-def bench_save_profile(run_id: str, _: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def bench_save_profile(run_id: str, _: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     return svc.bench.save_draft(run_id)
 
 
@@ -160,7 +160,7 @@ def profile_get(model: str, _: dict = Depends(require("read")), svc: Services = 
 
 
 @router.put("/profiles/item", summary="Ubah profil manual (disimpan ke file + GitHub)")
-def profile_update(model: str, body: ModelProfileIn, user: dict = Depends(require("admin")),
+def profile_update(model: str, body: ModelProfileIn, user: dict = Depends(require("ai_manage")),
                    svc: Services = Depends(services)):
     out = svc.ai.profiles.update(model, body.model_dump(exclude_unset=True))
     svc.db.audit("model_profile_update", user=user, target=model)
@@ -168,14 +168,14 @@ def profile_update(model: str, body: ModelProfileIn, user: dict = Depends(requir
 
 
 @router.delete("/profiles/item", summary="Kembalikan profil ke bawaan (hapus file)")
-def profile_reset(model: str, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def profile_reset(model: str, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     out = svc.ai.profiles.delete(model)
     svc.db.audit("model_profile_reset", user=user, target=model)
     return out
 
 
 @router.post("/profiles/item/sync", summary="Sinkronkan file profil ke GitHub sekarang")
-async def profile_sync(model: str, _: dict = Depends(require("admin")), svc: Services = Depends(services)):
+async def profile_sync(model: str, _: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     if not svc.ai.profiles.stored(model):
         raise AppError("Profil masih bawaan (belum ada file untuk disinkronkan)", code="no_profile_file")
     await svc.ai.profiles.sync(model, f"profil model {model}: sinkron manual")
@@ -183,19 +183,19 @@ async def profile_sync(model: str, _: dict = Depends(require("admin")), svc: Ser
 
 
 @router.post("/profiles/import", summary="Impor file profil model (JSON hasil ekspor)")
-def profile_import(body: ModelProfileImport, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def profile_import(body: ModelProfileImport, user: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     out = svc.ai.profiles.import_profile(body.profile)
     svc.db.audit("model_profile_import", user=user, target=out["model"])
     return out
 
 
 @router.post("/bench/{run_id}/cancel")
-async def bench_cancel(run_id: str, _: dict = Depends(require("admin")), svc: Services = Depends(services)):
+async def bench_cancel(run_id: str, _: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     return await svc.bench.cancel(run_id)
 
 
 @router.delete("/bench/{run_id}", response_model=OkResponse)
-def bench_delete(run_id: str, _: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def bench_delete(run_id: str, _: dict = Depends(require("ai_manage")), svc: Services = Depends(services)):
     svc.bench.delete(run_id)
     return OkResponse()
 

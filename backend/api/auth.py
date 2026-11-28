@@ -83,12 +83,12 @@ def change_password(body: PasswordChange, user: dict = Depends(current_user), sv
 
 
 @router.get("/users", response_model=list[UserOut])
-def list_users(_: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def list_users(_: dict = Depends(require("users")), svc: Services = Depends(services)):
     return svc.auth.list_users()
 
 
 @router.post("/users", response_model=UserOut, status_code=201)
-def create_user(body: UserCreate, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def create_user(body: UserCreate, user: dict = Depends(require("users")), svc: Services = Depends(services)):
     u = svc.auth.create_user(body.username, body.password, body.role, actor=user,
                              display_name=body.display_name, email=body.email)
     svc.db.audit("user_create", user=user, target=body.username, detail={"role": body.role})
@@ -96,7 +96,7 @@ def create_user(body: UserCreate, user: dict = Depends(require("admin")), svc: S
 
 
 @router.patch("/users/{user_id}", response_model=UserOut)
-def update_user(user_id: int, body: UserUpdate, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def update_user(user_id: int, body: UserUpdate, user: dict = Depends(require("users")), svc: Services = Depends(services)):
     u = svc.auth.update_user(user_id, body.role, body.is_active, body.password, actor=user,
                              display_name=body.display_name, email=body.email)
     changed = [k for k, v in body.model_dump().items() if v is not None]
@@ -106,7 +106,7 @@ def update_user(user_id: int, body: UserUpdate, user: dict = Depends(require("ad
 
 @router.delete("/users/{user_id}", response_model=UserDeleted,
                summary="Hapus akun (bukan admin utama); proyeknya dipindahkan ke admin utama")
-def delete_user(user_id: int, user: dict = Depends(require("admin")), svc: Services = Depends(services)):
+def delete_user(user_id: int, user: dict = Depends(require("users")), svc: Services = Depends(services)):
     res = svc.auth.delete_user(user, user_id)
     svc.db.audit("user_delete", user=user, target=res["username"], detail=res)
     moved = res["projects_moved"]

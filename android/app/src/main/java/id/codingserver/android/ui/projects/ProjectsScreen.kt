@@ -72,8 +72,10 @@ fun ProjectsScreen(vm: AppViewModel, onOpen: (Project) -> Unit) {
         apiCall { c.api.projects() }.onSuccess { projects = it; error = null }.onFailure { error = it.message }
     }
 
+    val me by vm.user.collectAsState()
     Scaffold(floatingActionButton = {
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Peran tanpa hak tulis (Runner/Viewer) tidak bisa membuat atau meng-clone proyek.
+        if (me?.permissions?.contains("write") == true) Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SmallFloatingActionButton(onClick = { cloning = true }) { Icon(Icons.Default.CloudDownload, "Clone Git") }
             ExtendedFloatingActionButton(onClick = { creating = true }, icon = { Icon(Icons.Default.Add, null) }, text = { Text("Proyek baru") })
         }
@@ -93,7 +95,7 @@ fun ProjectsScreen(vm: AppViewModel, onOpen: (Project) -> Unit) {
                                 Text("${p.language.ifBlank { "-" }} · diubah ${formatTime(p.updated_at)}", style = MaterialTheme.typography.bodySmall)
                                 if (p.description.isNotBlank()) Text(p.description, style = MaterialTheme.typography.bodySmall)
                             }
-                            IconButton(onClick = { deleting = p }) { Icon(Icons.Default.Delete, "Hapus") }
+                            if (me?.permissions?.contains("delete") == true) IconButton(onClick = { deleting = p }) { Icon(Icons.Default.Delete, "Hapus") }
                         }
                     }
                 }
