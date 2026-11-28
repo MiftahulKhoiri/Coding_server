@@ -2,8 +2,15 @@
 // satu WebSocket per jenis server per proyek. URI file memakai akar virtual file:///workspace/.
 import { setDiagnostics } from "@codemirror/lint";
 
-const SERVER_OF = { c: "clangd", cpp: "clangd", python: "pyright" };
-const WS_LANG = { clangd: "cpp", pyright: "python" };
+const SERVER_OF = {
+  c: "clangd", cpp: "clangd", python: "pyright", javascript: "tsserver", typescript: "tsserver", go: "gopls",
+  php: "intelephense", html: "html", css: "css", json: "json", shell: "bash",
+};
+const WS_LANG = {
+  clangd: "cpp", pyright: "python", tsserver: "typescript", gopls: "go", intelephense: "php", html: "html", css: "css",
+  json: "json", bash: "shell",
+};
+const LANGUAGE_ID = { shell: "shellscript" };  // languageId LSP yang berbeda dari nama bahasa editor
 const ROOT = "file:///workspace/";
 const KIND = {
   1: "text", 2: "method", 3: "function", 4: "function", 5: "property", 6: "variable", 7: "class", 8: "interface",
@@ -214,7 +221,7 @@ export class LspManager {
   }
 
   sendOpen(c, doc, text) {
-    c.notify("textDocument/didOpen", { textDocument: { uri: doc.uri, languageId: doc.lang, version: doc.version, text } });
+    c.notify("textDocument/didOpen", { textDocument: { uri: doc.uri, languageId: LANGUAGE_ID[doc.lang] || doc.lang, version: doc.version, text } });
   }
 
   reopenAll(c) {

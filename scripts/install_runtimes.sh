@@ -50,6 +50,19 @@ npm_tool() {  # npm_tool PAKET@VERSI FILE_PENANDA(relatif .lsp) KETERANGAN
 }
 npm_tool pyright@1 node_modules/pyright/langserver.index.js "LSP Python"
 npm_tool prettier@3 node_modules/prettier/bin/prettier.cjs "format JS/TS/CSS/HTML/JSON/YAML/Markdown"
+npm_tool typescript@5 node_modules/typescript/lib/tsserver.js "TypeScript"
+npm_tool typescript-language-server@4 node_modules/typescript-language-server/lib/cli.mjs "LSP JavaScript/TypeScript"
+npm_tool intelephense@1 node_modules/intelephense/lib/intelephense.js "LSP PHP"
+npm_tool vscode-langservers-extracted@4 node_modules/vscode-langservers-extracted/bin/vscode-html-language-server "LSP HTML/CSS/JSON"
+npm_tool bash-language-server@5 node_modules/bash-language-server/out/cli.js "LSP Bash"
+if [ -x "$BASE/.lsp/bin/gopls" ]; then c_ok "gopls sudah ada (LSP Go)"
+elif command -v go >/dev/null; then
+  c_info "Memasang gopls (LSP Go, kompilasi ±5 menit di Pi)..."
+  GP=$(mktemp -d)
+  mkdir -p "$BASE/.lsp/bin" && GOBIN="$BASE/.lsp/bin" GOPATH="$GP" GOFLAGS=-modcacherw go install golang.org/x/tools/gopls@latest \
+    && c_ok "gopls terpasang" || c_warn "gopls gagal dipasang (opsional)"
+  rm -rf "$GP"
+else c_warn "go tidak ada: gopls dilewati (sudo apt install golang)"; fi
 for c in gcc g++ javac go node sqlite3 make cmake; do
   command -v $c >/dev/null && c_ok "$c tersedia" || c_warn "$c belum ada (sudo apt install: gcc g++ default-jdk golang nodejs sqlite3 make cmake ninja-build)"
 done

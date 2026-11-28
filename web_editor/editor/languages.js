@@ -18,9 +18,9 @@ import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { http } from "@codemirror/legacy-modes/mode/http";
 
 const EXT = {
-  py: "python", js: "javascript", mjs: "javascript", cjs: "javascript", ts: "typescript", php: "php",
+  py: "python", js: "javascript", mjs: "javascript", cjs: "javascript", ts: "typescript", tsx: "typescript", jsx: "javascript", mts: "typescript", cts: "typescript", php: "php",
   go: "go", c: "c", h: "c", cpp: "cpp", cc: "cpp", cxx: "cpp", hpp: "cpp", java: "java", cs: "csharp",
-  sql: "sql", html: "html", htm: "html", css: "css", json: "json", xml: "xml", csproj: "xml", yaml: "yaml",
+  sql: "sql", html: "html", htm: "html", css: "css", scss: "css", json: "json", jsonc: "json", xml: "xml", csproj: "xml", yaml: "yaml",
   yml: "yaml", md: "markdown", sh: "shell", bash: "shell", http: "http", kt: "kotlin",
 };
 

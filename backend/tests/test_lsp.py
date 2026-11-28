@@ -1,4 +1,6 @@
 """Language server nyata (clangd/pyright) lewat /ws/lsp di sandbox. Dilewati bila servernya tidak terpasang."""
+import time
+
 import pytest
 
 from backend.config import get_settings
@@ -149,6 +151,52 @@ def test_pyright_diagnostics_and_completion(client, auth, token, project):
         changes = res.get("changes") or {d["textDocument"]["uri"]: d["edits"] for d in res.get("documentChanges", [])
                                          if "textDocument" in d}
         assert URI + "lib/hitung.py" in changes and uri in changes, res
+        c.shutdown()
+
+
+CASES = [
+    # (bahasa ws, languageId, path, isi, jenis uji, posisi/pesan, harapan)
+    ("typescript", "typescript", "app.ts", 'const n: number = "x";\nMath.', "diag", None, "not assignable"),
+    ("typescript", "typescript", "app.ts", "const s = 'abc';\nMath.", "complete", (1, 5), "max"),
+    ("go", "go", "main.go", 'package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.\n}\n', "complete", (5, 5), "Println"),
+    ("go", "go", "main.go", "package main\n\nfunc main() {\n\tx := 1\n\tprintln(y)\n}\n", "diag", None, "undefined"),
+    ("php", "php", "index.php", "<?php\n$y = str_rep", "complete", (1, 12), "str_replace"),
+    ("html", "html", "index.html", "<html><body><di", "complete", (0, 15), "div"),
+    ("css", "css", "style.css", "a { colr: red; }\n", "diag", None, "Unknown property"),
+    ("json", "json", "data.json", '{"a": }\n', "diag", None, "Value expected"),
+    ("shell", "shellscript", "run.sh", "#!/bin/bash\nech", "complete", (1, 3), "echo"),
+]
+
+
+@pytest.mark.parametrize("lang,lang_id,path,text,kind,pos,expect", CASES, ids=[f"{c[0]}-{c[4]}" for c in CASES])
+def test_more_language_servers(client, auth, token, project, lang, lang_id, path, text, kind, pos, expect):
+    if not lsp_available(lang):
+        pytest.skip(f"language server {lang} tidak terpasang")
+    if lang == "go":
+        put(client, auth, project, "go.mod", "module contoh\n\ngo 1.21\n")
+    put(client, auth, project, path, text)
+    with client.websocket_connect(f"/ws/lsp?project_id={project}&language={lang}&token={token}") as ws:
+        c = Client(ws)
+        c.init()
+        uri = URI + path
+        c.notify("textDocument/didOpen", {"textDocument": {"uri": uri, "languageId": lang_id, "version": 1, "text": text}})
+        if kind == "diag":
+            d = c.wait_note("textDocument/publishDiagnostics", lambda m: m["params"]["uri"] == uri and m["params"]["diagnostics"])
+            msgs = " | ".join(x["message"] for x in d["params"]["diagnostics"])
+            assert expect.lower() in msgs.lower(), msgs
+            assert "/home/" not in str(d), d
+        else:
+            labels = set()
+            for _ in range(6):  # server butuh waktu memuat proyek/stdlib pertama kali
+                r = c.request("textDocument/completion", {"textDocument": {"uri": uri}, "context": {"triggerKind": 1},
+                                                          "position": {"line": pos[0], "character": pos[1]}})
+                res = r.get("result") or []
+                items = res.get("items", []) if isinstance(res, dict) else res
+                labels = {i["label"].strip() for i in items}
+                if any(expect in lab for lab in labels):
+                    break
+                time.sleep(1)
+            assert any(expect in lab for lab in labels), sorted(labels)[:30]
         c.shutdown()
 
 

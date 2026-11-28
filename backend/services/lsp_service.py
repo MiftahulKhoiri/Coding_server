@@ -1,4 +1,5 @@
-"""Language Server Protocol (LSP): clangd (C/C++) dan pyright (Python) untuk editor.
+"""Language Server Protocol (LSP) untuk editor: clangd (C/C++), pyright (Python), typescript-language-server
+(JavaScript/TypeScript), gopls (Go), intelephense (PHP), vscode-html/css/json-language-server, bash-language-server.
 
 Satu proses language server per koneksi WebSocket (/ws/lsp), dijalankan di sandbox bubblewrap:
 folder proyek READ-ONLY, jaringan diputus, $HOME kosong. Proxy ini:
@@ -27,7 +28,25 @@ log = get_logger("lsp")
 
 VIRTUAL_ROOT = "/workspace"
 MAX_MESSAGE = 8 * 1024 * 1024
-LANG_SERVER = {"c": "clangd", "cpp": "clangd", "python": "pyright"}
+LANG_SERVER = {"c": "clangd", "cpp": "clangd", "python": "pyright", "javascript": "tsserver", "typescript": "tsserver",
+               "go": "gopls", "php": "intelephense", "html": "html", "css": "css", "json": "json", "shell": "bash"}
+# stub bawaan intelephense (fungsi/kelas PHP inti & ekstensi umum)
+INTELEPHENSE_STUBS = ["apache", "bcmath", "bz2", "calendar", "com_dotnet", "Core", "ctype", "curl", "date", "dba", "dom",
+                      "enchant", "exif", "FFI", "fileinfo", "filter", "fpm", "ftp", "gd", "gettext", "gmp", "hash", "iconv",
+                      "imap", "intl", "json", "ldap", "libxml", "mbstring", "meta", "mysqli", "oci8", "odbc", "openssl",
+                      "pcntl", "pcre", "PDO", "pdo_mysql", "pdo_pgsql", "pdo_sqlite", "pgsql", "Phar", "posix", "pspell",
+                      "random", "readline", "Reflection", "session", "shmop", "SimpleXML", "snmp", "soap", "sockets",
+                      "sodium", "SPL", "sqlite3", "standard", "superglobals", "sysvmsg", "sysvsem", "sysvshm", "tidy",
+                      "tokenizer", "xml", "xmlreader", "xmlrpc", "xmlwriter", "xsl", "Zend OPcache", "zip", "zlib"]
+# server berbasis Node di .lsp/node_modules: id -> (file JS, argumen)
+NODE_SERVERS = {
+    "tsserver": ("typescript-language-server/lib/cli.mjs", ["--stdio"]),
+    "intelephense": ("intelephense/lib/intelephense.js", ["--stdio"]),
+    "html": ("vscode-langservers-extracted/bin/vscode-html-language-server", ["--stdio"]),
+    "css": ("vscode-langservers-extracted/bin/vscode-css-language-server", ["--stdio"]),
+    "json": ("vscode-langservers-extracted/bin/vscode-json-language-server", ["--stdio"]),
+    "bash": ("bash-language-server/out/cli.js", ["start"]),
+}
 
 
 @dataclass
@@ -64,7 +83,7 @@ class LspService:
     def __init__(self, settings: Settings):
         self.s = settings
         self.active = 0
-        self.max_sessions = int(os.environ.get("CS_LSP_MAX_SESSIONS", "4"))
+        self.max_sessions = int(os.environ.get("CS_LSP_MAX_SESSIONS", "6"))
 
     # ---------- ketersediaan ----------
     def server_for(self, language: str) -> ServerInfo | None:
@@ -84,6 +103,23 @@ class LspService:
             node, js = found
             return ServerInfo("pyright", [str(node), "--max-old-space-size=512", str(js), "--stdio"],
                               [self.s.base_dir / ".lsp"], {})
+        if kind in NODE_SERVERS:
+            node = shutil.which("node")
+            rel, args = NODE_SERVERS[kind]
+            js = self.s.base_dir / ".lsp" / "node_modules" / rel
+            if not node or not js.is_file():
+                return None
+            return ServerInfo(kind, [os.path.realpath(node), "--max-old-space-size=512", str(js), *args],
+                              [self.s.base_dir / ".lsp"], {})
+        if kind == "gopls":
+            exe = self.s.base_dir / ".lsp" / "bin" / "gopls"
+            go = shutil.which("go")
+            if not exe.is_file() or not go:
+                return None
+            goroot = Path(os.path.realpath(go)).parent.parent
+            ro = [self.s.base_dir / ".lsp"] + ([goroot] if str(goroot).startswith(str(Path.home())) else [])
+            return ServerInfo("gopls", [str(exe)], ro, {"GOFLAGS": "-mod=mod", "GOPROXY": "off", "GOTOOLCHAIN": "local",
+                                                        "PATH": f"{goroot / 'bin'}:/usr/local/bin:/usr/bin:/bin"})
         return None
 
     def status(self) -> dict:
@@ -129,6 +165,11 @@ class LspSession:
         self.last_activity = time.time()
         self._closed = False
         self._write_lock = asyncio.Lock()
+        # intelephense menjawab kosong (dan terus kosong untuk dokumen itu) bila diminta sebelum indeks pertama selesai:
+        # tahan permintaan klien sampai notifikasi "indexingEnded".
+        self._indexed = asyncio.Event()
+        if info.id != "intelephense":
+            self._indexed.set()
 
     # ---------- penulisan path ----------
     def to_server(self, text: str) -> str:
@@ -139,6 +180,15 @@ class LspSession:
         return text.replace(self.root, VIRTUAL_ROOT)
 
     def _init_options(self) -> dict:
+        lsp_dir = self.svc.s.base_dir / ".lsp" / "node_modules"
+        if self.info.id == "tsserver":
+            return {"tsserver": {"path": str(lsp_dir / "typescript" / "lib" / "tsserver.js")},
+                    "preferences": {"includeCompletionsForModuleExports": True}}
+        if self.info.id == "intelephense":
+            store = str(self.svc.s.cache_dir / "lsp" / "intelephense")
+            return {"storagePath": store, "globalStoragePath": store, "clearCache": False}
+        if self.info.id in ("html", "css", "json"):
+            return {"provideFormatter": False, "embeddedLanguages": {"css": True, "javascript": True}}
         if self.info.id != "clangd":
             return {}
         # tanpa -std: clangd memilih C/C++ dari ekstensi file (satu sesi melayani .c dan .cpp)
@@ -151,6 +201,13 @@ class LspSession:
         if db:
             opts["compilationDatabasePath"] = db
         return opts
+
+    def _config_for(self, section: str | None):
+        """Jawaban workspace/configuration. intelephense butuh objek pengaturan (null = tanpa stub fungsi bawaan PHP)."""
+        if self.info.id == "intelephense" and section in (None, "intelephense"):
+            return {"stubs": INTELEPHENSE_STUBS, "files": {"maxSize": 1000000}, "telemetry": {"enabled": False},
+                    "completion": {"insertUseDeclaration": True, "fullyQualifyGlobalConstantsAndFunctions": False}}
+        return None
 
     def _compile_db(self) -> str | None:
         """compile_commands.json dari build CMake terakhir proyek ini (bila ada) atau di akar proyek."""
@@ -176,6 +233,12 @@ class LspSession:
     # ---------- IO ----------
     async def send(self, msg: dict) -> None:
         self.last_activity = time.time()
+        if (not self._indexed.is_set() and "id" in msg and msg.get("method")
+                and msg["method"] not in ("initialize", "shutdown")):
+            try:
+                await asyncio.wait_for(self._indexed.wait(), 30)
+            except asyncio.TimeoutError:
+                self._indexed.set()
         msg = self.prepare_from_client(msg)
         body = self.to_server(json.dumps(msg, ensure_ascii=False)).encode()
         if self.proc.stdin is None or self.proc.returncode is not None:
@@ -212,7 +275,7 @@ class LspSession:
             if method and "id" in msg:  # request dari server
                 result = None
                 if method == "workspace/configuration":
-                    result = [None for _ in (msg.get("params") or {}).get("items", [])]
+                    result = [self._config_for((it or {}).get("section")) for it in (msg.get("params") or {}).get("items", [])]
                 elif method == "workspace/workspaceFolders":
                     result = [{"uri": "file://" + VIRTUAL_ROOT, "name": self.project_id}]
                 elif method not in ("client/registerCapability", "client/unregisterCapability",
@@ -222,6 +285,8 @@ class LspSession:
                     return msg  # biarkan klien yang memutuskan
                 await self.send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
                 continue
+            if method == "indexingEnded":
+                self._indexed.set()
             if method in ("$/progress", "window/logMessage", "telemetry/event", "pyright/beginProgress",
                           "pyright/reportProgress", "pyright/endProgress", "textDocument/clangd.fileStatus"):
                 continue

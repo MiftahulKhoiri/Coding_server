@@ -246,7 +246,7 @@ function gotoDefinition() {
 }
 
 async function hoverAtCursor() {
-  if (!current || !lsp.supports(current)) { showInfo("Info simbol butuh language server (C/C++/Python, proyek terbuka)."); return false; }
+  if (!current || !lsp.supports(current)) { showInfo("Info simbol butuh language server untuk bahasa ini (proyek terbuka & LSP aktif)."); return false; }
   const text = await lsp.hover(current, view.state, view.state.selection.main.head);
   showInfo(text || "Tidak ada info untuk simbol di kursor");
   return true;
