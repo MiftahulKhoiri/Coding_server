@@ -74,6 +74,11 @@ def search(project_id: str, q: str = Query(min_length=1), content: bool = False,
     return svc.files.search(project_dir(svc, project_id, user), q, content=content, path=path)
 
 
+@router.get("/list", summary="Semua path file proyek (untuk Buka file cepat); tanpa .git, node_modules, .venv, cache")
+def list_files(project_id: str, user: dict = Depends(require("read")), svc: Services = Depends(services)):
+    return svc.files.list_files(project_dir(svc, project_id, user))
+
+
 @router.get("/history")
 def history(project_id: str, path: str | None = None, user: dict = Depends(require("read")), svc: Services = Depends(services)):
     project_dir(svc, project_id, user)

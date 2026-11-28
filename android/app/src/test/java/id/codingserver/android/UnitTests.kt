@@ -9,11 +9,20 @@ import id.codingserver.android.data.api.normalizeBaseUrl
 import id.codingserver.android.data.update.AppUpdater
 import id.codingserver.android.ui.ai.splitMarkdown
 import id.codingserver.android.ui.editor.DiagnosticParser
+import id.codingserver.android.ui.editor.quickOpenFilter
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UnitTests {
+    @Test fun quickOpenRanksFileNameFirst() {
+        val files = listOf("docs/main_notes.md", "src/app/main.py", "src/domain/util.py", "main.cpp", "tests/test_main.py")
+        val r = quickOpenFilter(files, "main")
+        assertEquals(listOf("main.cpp", "src/app/main.py", "docs/main_notes.md", "tests/test_main.py", "src/domain/util.py"), r)  // terakhir: fuzzy "do-main"
+        assertEquals(listOf("src/domain/util.py"), quickOpenFilter(files, "sdu"))  // fuzzy: s…d…u berurutan di path
+        assertEquals(files, quickOpenFilter(files, " "))
+    }
+
     @Test fun decodeAgentTaskAndEvents() {
         val json = """{"id":"abc","project_id":"p","title":"t","description":"d","status":"COMPLETED","stage":"COMPLETED",
             "progress":1.0,"current_op":"","model":"coder","error":"","max_steps":30,"steps_used":5,"created_at":1.0,

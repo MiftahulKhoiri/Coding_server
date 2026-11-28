@@ -41,6 +41,10 @@ jobs:
         working-directory: web_editor
         run: npm ci --no-audit --no-fund && npm run build
 
+      - name: Uji editor di Chrome headless (API window.CS)
+        working-directory: web_editor
+        run: CHROME=$(command -v google-chrome || command -v chromium) npm test
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin

@@ -58,6 +58,7 @@ interface CodingApi {
                                                       @Query("recursive") recursive: Boolean = false): OkResponse
     @GET("api/v1/files/search") suspend fun search(@Query("project_id") projectId: String, @Query("q") q: String,
                                                    @Query("content") content: Boolean = false): List<FileEntry>
+    @GET("api/v1/files/list") suspend fun listFiles(@Query("project_id") projectId: String): ProjectFiles
     @GET("api/v1/files/recent") suspend fun recent(): FileList
     @GET("api/v1/files/favorites") suspend fun favorites(): FileList
     @POST("api/v1/files/favorites") suspend fun addFavorite(@Body body: FavoriteRequest): OkResponse

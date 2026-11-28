@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -116,6 +117,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toast(msg: String) { _messages.tryEmit(msg) }
 
+    /** false selama ganti server/login: perubahan tab saat itu (dikosongkan) tidak boleh menimpa tab tersimpan. */
+    @Volatile private var tabsReady = false
+
+    init {
+        // Simpan daftar tab editor yang terbuka (per server) agar dipulihkan saat aplikasi dibuka lagi.
+        viewModelScope.launch {
+            kotlinx.coroutines.flow.combine(_tabs, _activeTab) { t, a -> t.map { it.id } to a }
+                .distinctUntilChanged()
+                .collect { (ids, a) ->
+                    val sid = _client.value?.server?.id ?: return@collect
+                    if (tabsReady && _auth.value == AuthState.LOGGED_IN) serverStore.setOpenTabs(sid, ids, a)
+                }
+        }
+    }
+
     // ---------- AI Agent (notifikasi & pemantau latar belakang) ----------
     /** Task agent yang diminta dibuka dari notifikasi; dikonsumsi oleh layar Agent Tasks. */
     private val _agentTarget = MutableStateFlow<String?>(null)
@@ -168,6 +184,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- server & auth ----------
     suspend fun activate(server: ServerProfile, restoreProject: Boolean = false) {
+        tabsReady = false
         serverStore.setActive(server.id)
         val c = ApiClient(server, app.tokens) {
             _auth.value = AuthState.LOGGED_OUT
@@ -196,6 +213,21 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         if (restoreProject) {
             serverStore.lastProject.first()?.let { pid -> apiCall { c.api.project(pid) }.onSuccess { p -> _project.value = p } }
         }
+        if (_auth.value == AuthState.LOGGED_IN) restoreTabs(server.id)
+    }
+
+    /** Pulihkan tab editor terakhir server ini (isi dimuat ulang dari server saat tab dibuka). */
+    private suspend fun restoreTabs(serverId: String) {
+        val (ids, active) = serverStore.openTabs(serverId)
+        val restored = ids.mapNotNull { id ->
+            val i = id.indexOf(':')
+            if (i <= 0) null else EditorTab(id.substring(0, i), id.substring(i + 1), null)
+        }
+        if (restored.isNotEmpty() && _tabs.value.isEmpty()) {
+            _tabs.value = restored
+            _activeTab.value = active?.takeIf { a -> restored.any { it.id == a } } ?: restored.last().id
+        }
+        tabsReady = true
     }
 
     private fun startHealthLoop(c: ApiClient) {
@@ -217,6 +249,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             _online.value = true
             serverStore.upsert(c.server.copy(username = username))
             resumeAgentMonitor(c)
+            restoreTabs(c.server.id)
             res.user
         }
     }
@@ -225,6 +258,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         val c = _client.value ?: return
         id.codingserver.android.agent.AgentMonitorService.stop(getApplication())
         viewModelScope.launch {
+            tabsReady = false
             c.logout()
             _user.value = null
             _tabs.value = emptyList()

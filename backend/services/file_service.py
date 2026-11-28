@@ -187,6 +187,19 @@ class FileService:
             (project_id, self.rel_of(root, p), action, name, hashlib.sha256(data).hexdigest(), len(data),
              actor.get("id") if actor else None, actor_type, note, time.time()),
         )
+        self._prune_history(project_id, self.rel_of(root, p))
+
+    HISTORY_KEEP = 50  # versi per file (simpan otomatis editor membuat banyak versi)
+
+    def _prune_history(self, project_id: str, rel: str) -> None:
+        old = self.db.all("SELECT id, snapshot FROM file_history WHERE project_id=? AND path=? ORDER BY id DESC LIMIT -1 OFFSET ?",
+                          (project_id, rel, self.HISTORY_KEEP))
+        for r in old:
+            try:
+                (self.s.history_dir / project_id / r["snapshot"]).unlink(missing_ok=True)
+            except OSError:
+                pass
+            self.db.execute("DELETE FROM file_history WHERE id=?", (r["id"],))
 
     def write(self, project_id: str, root: Path, rel: str, content: str, *, actor: dict | None = None,
               actor_type: str = "user", expected_sha256: str | None = None, create_only: bool = False, note: str = "") -> dict:
@@ -281,6 +294,20 @@ class FileService:
         else:
             shutil.move(str(src), str(dst))
         return self._entry(root, dst)
+
+    LIST_SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", ".mypy_cache", ".pytest_cache", "build",
+                      ".gradle", ".cs_build", ".cs-build"}
+
+    def list_files(self, root: Path, limit: int = 5000) -> dict:
+        """Semua file proyek (path relatif) untuk Buka file cepat. Symlink tidak diikuti."""
+        out: list[str] = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(d for d in dirnames if d not in self.LIST_SKIP_DIRS and not (Path(dirpath) / d).is_symlink())
+            for name in sorted(filenames):
+                out.append(self.rel_of(root, Path(dirpath) / name))
+                if len(out) >= limit:
+                    return {"files": out, "truncated": True}
+        return {"files": out, "truncated": False}
 
     def search(self, root: Path, query: str, *, content: bool = False, path: str = "", limit: int = 200) -> list[dict]:
         base = self.resolve(root, path, must_exist=True)

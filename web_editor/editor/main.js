@@ -5,14 +5,18 @@ import {
   EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, drawSelection,
   dropCursor, rectangularSelection, crosshairCursor, highlightActiveLine, placeholder,
 } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo, undoDepth, redoDepth } from "@codemirror/commands";
+import {
+  defaultKeymap, history, historyKeymap, indentWithTab, undo, redo, undoDepth, redoDepth,
+  cursorCharLeft, cursorCharRight, cursorLineUp, cursorLineDown, cursorLineBoundaryBackward, cursorLineBoundaryForward,
+  indentMore, indentLess, insertTab, toggleComment, selectLine, copyLineDown, deleteLine,
+} from "@codemirror/commands";
 import {
   indentOnInput, syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, foldKeymap,
   foldAll, unfoldAll, indentUnit,
 } from "@codemirror/language";
 import { searchKeymap, highlightSelectionMatches, openSearchPanel, closeSearchPanel, search } from "@codemirror/search";
 import {
-  autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, completeAnyWord,
+  autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, completeAnyWord, insertBracket, startCompletion,
 } from "@codemirror/autocomplete";
 import { lintKeymap, setDiagnostics, lintGutter } from "@codemirror/lint";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -248,6 +252,14 @@ function regexDefinition() {
   return false;
 }
 
+const KEY_COMMANDS = {
+  left: cursorCharLeft, right: cursorCharRight, up: cursorLineUp, down: cursorLineDown,
+  home: cursorLineBoundaryBackward, end: cursorLineBoundaryForward,
+  tab: (v) => (v.state.selection.ranges.some((r) => !r.empty) ? indentMore(v) : insertTab(v)),
+  untab: indentLess, comment: toggleComment, selectLine, duplicate: copyLineDown, deleteLine,
+  undo, redo, complete: startCompletion,
+};
+
 window.CS = {
   version: "1.0.0",
   openTab(id, text, filename, lang) {
@@ -348,6 +360,24 @@ window.CS = {
   lspActive() { return !!(current && lsp.supports(current)); },
   symbols(id) { return JSON.stringify(symbols(id)); },
   insert(text) { view.dispatch(view.state.replaceSelection(text)); view.focus(); },
+  // Baris tombol ekstra di atas keyboard HP: ketik karakter (kurung otomatis berpasangan) atau perintah.
+  typeText(text) {
+    if (!current) return false;
+    if (text.length === 1) {
+      const tr = insertBracket(view.state, text);
+      if (tr) { view.dispatch(tr); view.focus(); return true; }
+    }
+    view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true });
+    view.focus();
+    return true;
+  },
+  key(name) {
+    if (!current) return false;
+    const cmd = KEY_COMMANDS[name];
+    const ok = cmd ? cmd(view) : false;
+    view.focus();
+    return !!ok;
+  },
   focus() { view.focus(); },
   // diagnostics: [{line, column?, endLine?, endColumn?, severity: error|warning|info, message}]
   setDiagnostics(json) {

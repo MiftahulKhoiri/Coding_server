@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.FindInPage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -79,6 +81,8 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
     var history by remember { mutableStateOf<List<HistoryEntry>?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var newFile by remember { mutableStateOf(false) }
+    var quickOpen by remember { mutableStateOf(false) }
+    val autoSaveJobs = remember { mutableMapOf<String, kotlinx.coroutines.Job>() }
     var colorDialog by remember { mutableStateOf(false) }
     var textColorInput by remember(prefs) { mutableStateOf(prefs.textColor) }
     var backgroundColorInput by remember(prefs) { mutableStateOf(prefs.backgroundColor) }
@@ -89,14 +93,14 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
     val perms = me?.permissions.orEmpty().toSet()
     val canWrite = "write" in perms  // Runner/Viewer: tombol simpan & file baru disembunyikan
 
-    suspend fun save(tab: EditorTab, force: Boolean = false): Boolean {
+    suspend fun save(tab: EditorTab, force: Boolean = false, quiet: Boolean = false): Boolean {
         val c = client ?: return false
         val content = editor.getDoc(tab.id) ?: return false
         val res = apiCall { c.api.write(FileWrite(tab.projectId, tab.path, content, if (force) null else tab.sha256)) }
         res.onSuccess { w ->
             vm.updateTab(tab.id) { it.copy(sha256 = w.sha256, dirty = false) }
             editor.markSaved(tab.id)
-            vm.toast("Tersimpan: ${tab.name}")
+            if (!quiet) vm.toast("Tersimpan: ${tab.name}")
         }.onFailure {
             val e = it as ApiException
             if (e.code == "write_conflict") conflict = tab else vm.toast(e.message)
@@ -150,7 +154,18 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
     LaunchedEffect(Unit) {
         editor.eventsFlow.collect { ev ->
             when (ev) {
-                is EditorEvent.Changed -> vm.updateTab(ev.tabId) { it.copy(dirty = ev.dirty) }
+                is EditorEvent.Changed -> {
+                    vm.updateTab(ev.tabId) { it.copy(dirty = ev.dirty) }
+                    // Simpan otomatis ±2 detik setelah berhenti mengetik (tidak untuk peran tanpa hak tulis).
+                    autoSaveJobs.remove(ev.tabId)?.cancel()
+                    if (ev.dirty && vm.editorPrefs.value.autoSave && vm.user.value?.permissions?.contains("write") == true) {
+                        autoSaveJobs[ev.tabId] = scope.launch {
+                            kotlinx.coroutines.delay(2_000)
+                            vm.tabs.value.firstOrNull { it.id == ev.tabId }?.takeIf { it.dirty }?.let { save(it, quiet = true) }
+                            autoSaveJobs.remove(ev.tabId)
+                        }
+                    }
+                }
                 is EditorEvent.SaveRequested -> if (vm.user.value?.permissions?.contains("write") == true) vm.tabs.value.firstOrNull { it.id == ev.tabId }?.let { save(it) }
                 is EditorEvent.RunRequested -> runActive(false)
                 is EditorEvent.OpenFile -> {
@@ -190,6 +205,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
             ToolIcon(Icons.AutoMirrored.Filled.Undo, "Undo", enabled = active != null, onClick = { scope.launch { editor.undo() } })
             ToolIcon(Icons.AutoMirrored.Filled.Redo, "Redo", enabled = active != null, onClick = { scope.launch { editor.redo() } })
             ToolIcon(Icons.Default.Search, "Cari & ganti", enabled = active != null, onClick = { scope.launch { editor.openSearch() } })
+            ToolIcon(Icons.Default.FindInPage, "Buka file cepat", enabled = project != null, onClick = { quickOpen = true })
             Column(Modifier.weight(1f).padding(start = 4.dp)) {
                 Text("${cursor.first}:${cursor.second}", style = MaterialTheme.typography.labelSmall)
                 if (prefs.lsp && lspStatus.isNotBlank()) Text(lspStatus, style = MaterialTheme.typography.labelSmall, maxLines = 1,
@@ -214,6 +230,11 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                     DropdownMenuItem({ Text("Lipat semua / buka semua") }, onClick = {
                         menu = false; scope.launch { editor.foldAll(); editor.unfoldAll() }
                     })
+                    DropdownMenuItem({ Text("Buka file cepat…") }, enabled = project != null, onClick = { menu = false; quickOpen = true })
+                    DropdownMenuItem({ Text(if (prefs.keyBar) "Sembunyikan tombol ekstra" else "Tampilkan tombol ekstra") },
+                        onClick = { menu = false; vm.setEditorPrefs(prefs.copy(keyBar = !prefs.keyBar)) })
+                    if (canWrite) DropdownMenuItem({ Text(if (prefs.autoSave) "Matikan simpan otomatis" else "Aktifkan simpan otomatis") },
+                        onClick = { menu = false; vm.setEditorPrefs(prefs.copy(autoSave = !prefs.autoSave)) })
                     DropdownMenuItem({ Text(if (prefs.wordWrap) "Matikan word wrap" else "Aktifkan word wrap") },
                         onClick = { menu = false; vm.setEditorPrefs(prefs.copy(wordWrap = !prefs.wordWrap)) })
                     DropdownMenuItem({ Text("Font lebih besar (${prefs.fontSize + 1})") },
@@ -254,6 +275,10 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
         Box(Modifier.fillMaxWidth().weight(1f, fill = true).heightIn(min = 300.dp)) {
             AndroidView(factory = { editor.detach(); editor.webView }, modifier = Modifier.fillMaxSize().heightIn(min = 300.dp))
         }
+        if (prefs.keyBar && active != null) EditorKeyBar(
+            onKey = { k -> scope.launch { editor.key(k) } },
+            onText = { t -> scope.launch { editor.typeText(t) } },
+        )
     }
 
     if (colorDialog) {
@@ -324,6 +349,13 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                     .onFailure { vm.toast(it.message ?: "Gagal membuat file") }
             }
         }, onDismiss = { newFile = false })
+    }
+    if (quickOpen) project?.let { p ->
+        val c = client
+        if (c != null) QuickOpenDialog(c, p.id, onDismiss = { quickOpen = false }) { path ->
+            quickOpen = false
+            vm.addOrFocusTab(EditorTab(p.id, path, null))
+        }
     }
     if (gotoLine) InputDialog("Ke baris", "Nomor baris", onConfirm = { n ->
         n.toIntOrNull()?.let { scope.launch { editor.gotoLine(it) } }
@@ -436,4 +468,81 @@ private fun FileTab(name: String, dirty: Boolean, selected: Boolean, onClick: ()
             Icon(Icons.Default.Close, "Tutup $name", Modifier.size(14.dp))
         }
     }
+}
+
+/** Baris tombol ekstra di atas keyboard HP: karakter yang sulit diketik + navigasi & perintah editor. */
+@Composable
+private fun EditorKeyBar(onKey: (String) -> Unit, onText: (String) -> Unit) {
+    val keys = listOf("tab" to "⇥", "untab" to "⇤", "left" to "←", "right" to "→", "up" to "↑", "down" to "↓",
+                      "home" to "⇱", "end" to "⇲", "comment" to "//", "complete" to "⌘␣", "duplicate" to "⧉", "deleteLine" to "⌫ln")
+    val chars = listOf("{", "}", "(", ")", "[", "]", ";", ":", "\"", "'", "<", ">", "=", "+", "-", "*", "/", "\\",
+                       "|", "&", "!", "#", "_", "%", ",", ".")
+    Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)
+            .horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 3.dp),
+        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        keys.take(2).forEach { (k, l) -> EditorKey(l) { onKey(k) } }
+        chars.forEach { ch -> EditorKey(ch) { onText(ch) } }
+        keys.drop(2).forEach { (k, l) -> EditorKey(l) { onKey(k) } }
+    }
+}
+
+@Composable
+private fun EditorKey(label: String, onClick: () -> Unit) {
+    Box(Modifier.height(34.dp).widthIn(min = 38.dp).background(MaterialTheme.colorScheme.surface,
+            androidx.compose.foundation.shape.RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick).padding(horizontal = 9.dp),
+        contentAlignment = Alignment.Center) {
+        Text(label, style = MaterialTheme.typography.labelLarge, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+    }
+}
+
+/** Buka file cepat: ketik sebagian nama/path, hasil diurutkan (cocok di nama file dulu). */
+@Composable
+private fun QuickOpenDialog(c: id.codingserver.android.data.api.ApiClient, projectId: String, onDismiss: () -> Unit,
+                            onPick: (String) -> Unit) {
+    var q by remember { mutableStateOf("") }
+    var files by remember { mutableStateOf<List<String>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(projectId) {
+        apiCall { c.api.listFiles(projectId) }
+            .onSuccess { r -> files = r.files }
+            .onFailure { error = it.message }
+    }
+    val shown = remember(q, files) { quickOpenFilter(files.orEmpty(), q).take(60) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Buka file cepat") },
+        text = {
+            Column {
+                OutlinedTextField(q, { q = it }, singleLine = true, placeholder = { Text("nama file, mis. main") },
+                                  modifier = Modifier.fillMaxWidth())
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                if (files == null && error == null) Text("Memuat daftar file…", style = MaterialTheme.typography.bodySmall)
+                else if (shown.isEmpty()) Text("Tidak ada file cocok", style = MaterialTheme.typography.bodySmall)
+                LazyColumn(Modifier.heightIn(max = 380.dp)) {
+                    items(shown) { path ->
+                        Column(Modifier.fillMaxWidth().clickable { onPick(path) }.padding(vertical = 7.dp)) {
+                            Text(path.substringAfterLast('/'), style = MaterialTheme.typography.bodyMedium)
+                            if ('/' in path) Text(path.substringBeforeLast('/'), style = MaterialTheme.typography.labelSmall,
+                                                  color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } },
+    )
+}
+
+/** Urutan: nama file diawali kueri → nama file memuat kueri → path memuat kueri → huruf kueri berurutan (fuzzy). */
+internal fun quickOpenFilter(files: List<String>, query: String): List<String> {
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return files
+    fun fuzzy(s: String): Boolean { var i = 0; for (ch in s) if (i < q.length && ch == q[i]) i++; return i == q.length }
+    return files.mapNotNull { p ->
+        val path = p.lowercase(); val name = path.substringAfterLast('/')
+        val rank = when { name.startsWith(q) -> 0; q in name -> 1; q in path -> 2; fuzzy(path) -> 3; else -> return@mapNotNull null }
+        rank to p
+    }.sortedWith(compareBy({ it.first }, { it.second.length })).map { it.second }
 }

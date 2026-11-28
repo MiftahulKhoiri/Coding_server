@@ -144,6 +144,9 @@ class EditorController(context: Context) {
     suspend fun foldAll() { eval("CS.foldAll()") }
     suspend fun unfoldAll() { eval("CS.unfoldAll()") }
     suspend fun insert(text: String) { eval("CS.insert(${q(text)})") }
+    /** Baris tombol ekstra: ketik teks (kurung berpasangan otomatis) / jalankan perintah editor (left, tab, comment, …). */
+    suspend fun typeText(text: String) { eval("CS.typeText(${q(text)})") }
+    suspend fun key(name: String) { eval("CS.key(${q(name)})") }
     suspend fun applyPrefs(dark: Boolean, font: Int, wrap: Boolean, tab: Int, textColor: String = "", backgroundColor: String = "") {
         eval("CS.configure({theme:${q(if (dark) "dark" else "light")},fontSize:$font,wordWrap:$wrap,tabSize:$tab,textColor:${q(textColor)},backgroundColor:${q(backgroundColor)}})")
     }

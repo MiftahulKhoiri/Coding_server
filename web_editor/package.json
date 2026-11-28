@@ -4,7 +4,8 @@
   "private": true,
   "description": "Editor CodeMirror 6 + terminal xterm.js untuk WebView Android CODING_SERVER",
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "test": "node test/run.mjs"
   },
   "dependencies": {
     "codemirror": "^6.0.1",

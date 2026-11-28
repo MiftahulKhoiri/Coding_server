@@ -18,6 +18,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.util.UUID
 
 /** Profil server Raspberry Pi yang disimpan di HP (tanpa token; token ada di [TokenStore]). */
@@ -38,6 +42,10 @@ data class EditorPrefs(
     val backgroundColor: String = "",
     /** Language server (clangd/pyright) untuk autocomplete, diagnostik, definisi. */
     val lsp: Boolean = true,
+    /** Baris tombol ekstra di atas keyboard (Tab, kurung, panah, komentar, …). */
+    val keyBar: Boolean = true,
+    /** Simpan otomatis ±2 detik setelah berhenti mengetik. */
+    val autoSave: Boolean = true,
 )
 
 /** Pengaturan tampilan terminal (disesuaikan manual seperti terminal pada umumnya). */
@@ -65,6 +73,9 @@ class ServerStore(private val context: Context) {
     private val kTextColor = stringPreferencesKey("editor_text_color")
     private val kBackgroundColor = stringPreferencesKey("editor_background_color")
     private val kLsp = booleanPreferencesKey("editor_lsp")
+    private val kKeyBar = booleanPreferencesKey("editor_key_bar")
+    private val kAutoSave = booleanPreferencesKey("editor_auto_save")
+    private val kOpenTabs = androidx.datastore.preferences.core.stringPreferencesKey("editor_open_tabs")
     private val kLastProject = stringPreferencesKey("last_project")
     private val kThemeMode = stringPreferencesKey("app_theme_mode")
     private val kThemeAccent = stringPreferencesKey("app_theme_accent")
@@ -101,7 +112,8 @@ class ServerStore(private val context: Context) {
     val activeId: Flow<String?> = context.dataStore.data.map { it[kActive] }
     val lastProject: Flow<String?> = context.dataStore.data.map { it[kLastProject] }
     val editorPrefs: Flow<EditorPrefs> = context.dataStore.data.map {
-        EditorPrefs(it[kDark] ?: true, it[kFont] ?: 14, it[kWrap] ?: false, it[kTab] ?: 4, it[kTextColor] ?: "", it[kBackgroundColor] ?: "", it[kLsp] ?: true)
+        EditorPrefs(it[kDark] ?: true, it[kFont] ?: 14, it[kWrap] ?: false, it[kTab] ?: 4, it[kTextColor] ?: "", it[kBackgroundColor] ?: "", it[kLsp] ?: true,
+                    it[kKeyBar] ?: true, it[kAutoSave] ?: true)
     }
 
     val appTheme: Flow<AppTheme> = context.dataStore.data.map {
@@ -157,6 +169,31 @@ class ServerStore(private val context: Context) {
             it[kTextColor] = p.textColor
             it[kBackgroundColor] = p.backgroundColor
             it[kLsp] = p.lsp
+            it[kKeyBar] = p.keyBar
+            it[kAutoSave] = p.autoSave
+        }
+    }
+
+    /** Tab editor yang terbuka per server (dipulihkan saat aplikasi dibuka lagi). Format JSON {serverId: {tabs, active}}. */
+    suspend fun openTabs(serverId: String): Pair<List<String>, String?> {
+        val raw = context.dataStore.data.first()[kOpenTabs] ?: return emptyList<String>() to null
+        return runCatching {
+            val o = kotlinx.serialization.json.Json.parseToJsonElement(raw).jsonObject[serverId]?.jsonObject
+                ?: return emptyList<String>() to null
+            val tabs = o["tabs"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty()
+            tabs to o["active"]?.jsonPrimitive?.contentOrNull
+        }.getOrDefault(emptyList<String>() to null)
+    }
+
+    suspend fun setOpenTabs(serverId: String, tabs: List<String>, active: String?) {
+        context.dataStore.edit { prefs ->
+            val all = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(prefs[kOpenTabs] ?: "{}").jsonObject }
+                .getOrDefault(kotlinx.serialization.json.JsonObject(emptyMap())).toMutableMap()
+            all[serverId] = kotlinx.serialization.json.buildJsonObject {
+                put("tabs", kotlinx.serialization.json.JsonArray(tabs.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+                put("active", kotlinx.serialization.json.JsonPrimitive(active))
+            }
+            prefs[kOpenTabs] = kotlinx.serialization.json.JsonObject(all).toString()
         }
     }
 }

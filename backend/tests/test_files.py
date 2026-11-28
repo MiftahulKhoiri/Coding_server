@@ -85,3 +85,28 @@ def test_other_user_cannot_access_project(client, auth, project):
     tok = client.post("/api/v1/auth/login", json={"username": "dev2", "password": "dev2-pass-1"}).json()["access_token"]
     h = {"Authorization": f"Bearer {tok}"}
     assert client.get("/api/v1/files/tree", params={"project_id": project}, headers=h).status_code == 403
+
+
+def test_list_files_for_quick_open(client, auth, project):
+    for path in ("main.py", "src/app/util.py", "node_modules/x/index.js", ".git/config", ".venv/bin/python"):
+        assert client.put("/api/v1/files/write", json={"project_id": project, "path": path, "content": "x"},
+                          headers=auth).status_code == 200
+    r = client.get("/api/v1/files/list", params={"project_id": project}, headers=auth)
+    assert r.status_code == 200, r.text
+    files = r.json()["files"]
+    assert "main.py" in files and "src/app/util.py" in files
+    assert not any(f.startswith(("node_modules/", ".git/", ".venv/")) for f in files), files
+    assert r.json()["truncated"] is False
+
+
+def test_history_keeps_last_versions(client, auth, project):
+    svc = client.app.state.services.files
+    keep = svc.HISTORY_KEEP
+    for i in range(keep + 5):
+        assert client.put("/api/v1/files/write", json={"project_id": project, "path": "simpan.txt", "content": f"v{i}"},
+                          headers=auth).status_code == 200
+    h = client.get("/api/v1/files/history", params={"project_id": project, "path": "simpan.txt"}, headers=auth).json()["history"]
+    assert len(h) == keep
+    snaps = list((client.app.state.services.settings.history_dir / project).iterdir())
+    rows = svc.db.all("SELECT snapshot FROM file_history WHERE project_id=?", (project,))
+    assert {p.name for p in snaps} == {r["snapshot"] for r in rows}  # file snapshot lama ikut terhapus
