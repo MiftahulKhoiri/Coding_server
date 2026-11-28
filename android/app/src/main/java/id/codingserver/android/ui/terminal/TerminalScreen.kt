@@ -114,7 +114,7 @@ class TerminalController(context: Context) {
     fun apply(p: TerminalPrefs) {
         tapKeyboard = p.tapKeyboard
         js("CS_TERM.setOptions({fontSize:${p.fontSize},lineHeight:${p.lineHeight},theme:${q(p.theme)}," +
-           "cursorStyle:${q(p.cursorStyle)},cursorBlink:${p.cursorBlink}})")
+           "cursorStyle:${q(p.cursorStyle)},cursorBlink:${p.cursorBlink},fontFamily:${q(p.fontFamily)}})")
     }
     fun focus() = js("CS_TERM.focus()")
     /** Hitung ulang kolom/baris (dipanggil saat ukuran WebView berubah, mis. keyboard muncul/hilang). */

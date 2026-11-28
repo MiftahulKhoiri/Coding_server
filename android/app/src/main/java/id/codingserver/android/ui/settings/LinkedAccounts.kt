@@ -83,8 +83,12 @@ fun LinkedAccountsCard(vm: AppViewModel, u: UserOut, c: ApiClient) {
                             Text("@${id.login}" + if (id.git_push) " · push aktif" else "", style = MaterialTheme.typography.bodySmall)
                             id.emails.forEach { e -> Text("✓ $e", style = MaterialTheme.typography.labelSmall,
                                                          color = MaterialTheme.colorScheme.primary) }
-                        } else Text(if (enabled) "Belum ditautkan" else "Belum diatur admin utama",
-                                    style = MaterialTheme.typography.bodySmall)
+                        } else Text(when {
+                            enabled -> "Belum ditautkan"
+                            u.is_root -> "Belum diatur — ketuk \"Atur Client ID\" di bawah"
+                            else -> "Belum bisa: admin utama (akun @admin) harus mengisi Client ID dulu"
+                        }, style = MaterialTheme.typography.bodySmall,
+                            color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
                     }
                     if (id != null) TextButton(onClick = { unlinking = p }) { Text("Lepas", color = MaterialTheme.colorScheme.error) }
                     else Button(enabled = enabled, onClick = { linking = p }) { Text("Tautkan") }

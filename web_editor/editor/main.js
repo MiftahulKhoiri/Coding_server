@@ -22,6 +22,7 @@ import { lintKeymap, setDiagnostics, lintGutter, forEachDiagnostic } from "@code
 import { oneDark } from "@codemirror/theme-one-dark";
 import { detectLanguage, languageExtension, SYMBOL_PATTERNS } from "./languages.js";
 import { LspManager, applyDiagnosticsTo } from "./lsp.js";
+import { fontCss, whenFontReady } from "./fonts.js";
 import { gitGutter, setGitMarks, gitMarksFor, snippetSource, snippetList, insertSnippet } from "./extras.js";
 
 // Android WebView: CodeMirror memakai API EditContext bila tersedia. Pada sebagian WebView/keyboard
@@ -46,7 +47,7 @@ let tapKeyboard = true;
 let keyboardOpen = false;  // keyboard dibuka lewat tombol saat tapKeyboard=false
 const inputModeExt = () => EditorView.contentAttributes.of(tapKeyboard || keyboardOpen ? {} : { inputmode: "none" });
 
-let settings = { theme: "dark", fontSize: 14, wordWrap: false, tabSize: 4, textColor: "", backgroundColor: "" };
+let settings = { theme: "dark", fontSize: 14, wordWrap: false, tabSize: 4, textColor: "", backgroundColor: "", fontFamily: "jetbrains" };
 const tabs = new Map(); // id -> { state, lang, filename, savedVersion }
 let current = null;
 let suppress = false;
@@ -106,7 +107,7 @@ function showInfo(text) {
 function fontTheme(size) {
   return EditorView.theme({
     "&": { fontSize: size + "px", height: "100%" },
-    ".cm-scroller": { fontFamily: "'JetBrains Mono','Fira Code',monospace", lineHeight: "1.5" },
+    ".cm-scroller": { fontFamily: fontCss(settings.fontFamily), lineHeight: "1.5" },
     ".cm-content": { paddingBottom: "40vh" },
   });
 }
@@ -496,7 +497,11 @@ window.CS = {
     if (open && current) view.focus();
     return true;
   },
-  configure(json) { Object.assign(settings, typeof json === "string" ? JSON.parse(json) : json); reconfigureAll(); },
+  configure(json) {
+    Object.assign(settings, typeof json === "string" ? JSON.parse(json) : json);
+    reconfigureAll();
+    whenFontReady(settings.fontFamily, () => { reconfigureAll(); view.requestMeasure(); });
+  },
   undo() { return undo(view); },
   redo() { return redo(view); },
   canUndo() { return undoDepth(view.state) > 0; },

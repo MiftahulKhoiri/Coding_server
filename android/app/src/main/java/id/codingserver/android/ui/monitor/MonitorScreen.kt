@@ -107,5 +107,7 @@ fun MonitorScreen(vm: AppViewModel) {
                 }
             }
         }
+        // Backup server dipindah dari Pengaturan ke sini (khusus admin utama).
+        id.codingserver.android.ui.settings.BackupCard(vm)
     }
 }

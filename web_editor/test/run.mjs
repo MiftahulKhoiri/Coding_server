@@ -22,7 +22,7 @@ window.addEventListener("load", async () => {
 });
 </script>`;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cs-editor-test-"));
-const page = path.join(tmp, "test.html");
+const page = path.join(root, "dist", "__test.html");  // di dist/ agar fonts/ (relatif) ikut termuat
 const at = html.lastIndexOf("</body>");
 fs.writeFileSync(page, html.slice(0, at) + harness + html.slice(at));
 const chrome = process.env.CHROME || ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"]
@@ -31,6 +31,7 @@ if (!chrome) { console.log("SKIP: Chromium tidak ditemukan"); process.exit(0); }
 const dom = execFileSync(chrome, ["--headless=new", "--no-sandbox", "--disable-gpu", "--virtual-time-budget=15000",
   "--user-data-dir=" + path.join(tmp, "profile"), "--dump-dom", "file://" + page], { encoding: "utf8", maxBuffer: 64 << 20 });
 fs.rmSync(tmp, { recursive: true, force: true });
+fs.rmSync(page, { force: true });
 const m = dom.match(/@@RESULT@@(.*?)@@END@@/s);
 if (!m) { console.error("Tidak ada hasil dari halaman uji"); process.exit(2); }
 const results = JSON.parse(m[1].replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"));

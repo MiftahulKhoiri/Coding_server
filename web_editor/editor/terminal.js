@@ -1,6 +1,7 @@
 // Terminal xterm.js untuk WebView Android. Kotlin memanggil CS_TERM.connect(wsUrl) dan CS_TERM.setOptions({...}).
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { fontCss, whenFontReady } from "./fonts.js";
 
 const bridge = window.AndroidBridge || { onStatus(s) { console.log("status", s); }, onReady() {} };
 
@@ -17,7 +18,7 @@ const THEMES = {
 
 const term = new Terminal({
   cursorBlink: true, fontSize: 13, scrollback: 5000, convertEol: false, lineHeight: 1.0,
-  fontFamily: "'JetBrains Mono','Fira Code','Droid Sans Mono',monospace",
+  fontFamily: fontCss("jetbrains"),
   theme: THEMES.dark,
 });
 const fit = new FitAddon();
@@ -67,27 +68,66 @@ function resizeSoon() { clearTimeout(resizeTimer); resizeTimer = setTimeout(resi
 window.addEventListener("resize", resizeSoon);
 if (window.ResizeObserver) new ResizeObserver(resizeSoon).observe(host);
 resize();
+whenFontReady("jetbrains", () => { lastSize = ""; resizeSoon(); });
 
-// ---- sentuhan: ketuk = fokus & keyboard; cubit dua jari = ubah ukuran huruf (seperti Termux) ----
+// ---- sentuhan: ketuk = fokus & keyboard; geser 1 jari = gulir (dengan momentum); cubit = ukuran huruf ----
+// xterm.js hampir tidak punya gulir sentuh di Android (langkah kecil, tanpa momentum) -> ditangani sendiri.
+// Layar alternatif (less, vim, top, man): geser = tombol ↑/↓ seperti Termux.
 let touchStart = null;
 let pinch = null;
+let drag = null;      // {y, acc, lastY, lastT, v}
+let fling = null;
 const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-document.addEventListener("touchstart", (e) => {
+function cellHeight() {
+  const rows = term.element && term.element.querySelector(".xterm-rows");
+  const h = rows && rows.firstElementChild ? rows.firstElementChild.getBoundingClientRect().height : 0;
+  return h > 4 ? h : Math.max(8, (host.clientHeight || 400) / Math.max(1, term.rows));
+}
+function scrollBy(lines) {
+  if (!lines) return;
+  if (term.buffer.active.type === "alternate") {
+    const key = lines > 0 ? "\x1b[B" : "\x1b[A";
+    for (let i = 0; i < Math.min(Math.abs(lines), 20); i++) send({ type: "input", data: key });
+  } else term.scrollLines(lines);
+}
+function stopFling() { if (fling) { cancelAnimationFrame(fling); fling = null; } }
+host.addEventListener("touchstart", (e) => {
+  stopFling();
   if (e.touches.length === 2) {
     pinch = { d: dist(e.touches), size: term.options.fontSize };
-    touchStart = null;
+    touchStart = null; drag = null;
     return;
   }
   const t = e.touches[0];
   touchStart = t && !pinch ? { x: t.clientX, y: t.clientY, at: Date.now() } : null;
-}, { passive: true });
-document.addEventListener("touchmove", (e) => {
+  drag = t && !pinch ? { y: t.clientY, acc: 0, lastY: t.clientY, lastT: performance.now(), v: 0, active: false } : null;
+}, { passive: true, capture: true });
+host.addEventListener("touchmove", (e) => {
   if (pinch && e.touches.length === 2) {
     const size = Math.max(8, Math.min(28, Math.round(pinch.size * dist(e.touches) / pinch.d)));
     if (size !== term.options.fontSize) { term.options.fontSize = size; resizeSoon(); }
+    e.preventDefault();
+    return;
   }
-}, { passive: true });
-document.addEventListener("touchend", (e) => {
+  const t = e.touches[0];
+  if (!drag || !t) return;
+  if (!drag.active) {
+    const dx = Math.abs(t.clientX - touchStart.x), dy = Math.abs(t.clientY - touchStart.y);
+    if (dy < 8 || dy < dx) return;   // belum/bukan geser vertikal
+    drag.active = true;
+  }
+  e.preventDefault();
+  e.stopPropagation();              // jangan sampai ke penangan sentuh bawaan xterm
+  const now = performance.now();
+  const dy = drag.lastY - t.clientY;   // geser ke atas = lihat baris berikutnya
+  drag.v = 0.8 * (dy / Math.max(1, now - drag.lastT)) + 0.2 * drag.v;  // px/ms, dihaluskan
+  drag.lastY = t.clientY; drag.lastT = now;
+  drag.acc += dy;
+  const ch = cellHeight();
+  const lines = Math.trunc(drag.acc / ch);
+  if (lines) { scrollBy(lines); drag.acc -= lines * ch; }
+}, { passive: false, capture: true });
+host.addEventListener("touchend", (e) => {
   if (pinch) {
     if (e.touches.length === 0) {
       bridge.onFontSize && bridge.onFontSize(term.options.fontSize);
@@ -96,11 +136,28 @@ document.addEventListener("touchend", (e) => {
     return;
   }
   const t = e.changedTouches[0];
+  if (drag && drag.active) {
+    // momentum: lanjutkan gulir dengan kecepatan yang melambat
+    let v = drag.v, acc = drag.acc, last = performance.now();
+    const ch = cellHeight();
+    const step = (now) => {
+      const dt = now - last; last = now;
+      acc += v * dt;
+      v *= Math.pow(0.995, dt);
+      const lines = Math.trunc(acc / ch);
+      if (lines) { scrollBy(lines); acc -= lines * ch; }
+      fling = Math.abs(v) > 0.02 ? requestAnimationFrame(step) : null;
+    };
+    if (Math.abs(v) > 0.15) fling = requestAnimationFrame(step);
+    drag = null; touchStart = null;
+    return;
+  }
+  drag = null;
   if (!touchStart || !t) return;
   const moved = Math.abs(t.clientX - touchStart.x) + Math.abs(t.clientY - touchStart.y);
   if (moved < 12 && Date.now() - touchStart.at < 600) { term.focus(); bridge.onTap && bridge.onTap(); }
   touchStart = null;
-}, { passive: true });
+}, { passive: true, capture: true });
 
 term.onData((d) => send({ type: "input", data: d }));
 
@@ -136,7 +193,7 @@ window.CS_TERM = {
     if (map[k]) send({ type: "input", data: map[k] });
   },
   signal(s) { send({ type: "signal", signal: s }); },
-  /** Pengaturan tampilan: {fontSize, lineHeight, theme, cursorStyle, cursorBlink, scrollback}. */
+  /** Pengaturan tampilan: {fontSize, lineHeight, theme, cursorStyle, cursorBlink, scrollback, fontFamily}. */
   setOptions(o) {
     if (o.fontSize) term.options.fontSize = Math.max(8, Math.min(28, Number(o.fontSize)));
     if (o.lineHeight) term.options.lineHeight = Math.max(1, Math.min(2, Number(o.lineHeight)));
@@ -144,6 +201,7 @@ window.CS_TERM = {
     if (o.cursorBlink !== undefined) term.options.cursorBlink = !!o.cursorBlink;
     if (o.scrollback) term.options.scrollback = Number(o.scrollback);
     if (o.theme) applyTheme(o.theme);
+    if (o.fontFamily) whenFontReady(o.fontFamily, (fam) => { term.options.fontFamily = fam; lastSize = ""; resizeSoon(); });
     lastSize = "";
     resizeSoon();
   },

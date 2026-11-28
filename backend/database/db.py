@@ -23,7 +23,8 @@ MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("updated_at", "REAL NOT NULL DEFAULT 0"),
         ("last_login_at", "REAL"),
         ("avatar_version", "REAL"),  # waktu foto profil diunggah (NULL = tanpa foto); dipakai klien untuk cache
-        ("email_verified", "INTEGER NOT NULL DEFAULT 0"),  # 1 = email berasal dari akun GitHub/Google tertaut
+        ("email_verified", "INTEGER NOT NULL DEFAULT 0"),
+        ("cover", "TEXT NOT NULL DEFAULT ''"),  # latar profil di belakang foto: id gradasi (lihat COVERS) atau #RRGGBB  # 1 = email berasal dari akun GitHub/Google tertaut
     ],
     "ai_proposals": [
         ("conversation_id", "INTEGER"), ("message_id", "INTEGER"),

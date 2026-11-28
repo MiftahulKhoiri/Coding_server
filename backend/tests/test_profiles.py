@@ -177,3 +177,11 @@ def test_extra_perms_guard(client):
     assert "ai_manage" in u["permissions"]
     for n in ("x2", "x4"):
         auth_svc.delete_user({**root, "is_root": 1}, auth_svc.db.one("SELECT id FROM users WHERE username=?", (n,))["id"])
+
+
+def test_profile_cover(client, auth):
+    for v in ("senja", "#1A2B3C", ""):
+        r = client.patch("/api/v1/auth/me", json={"cover": v}, headers=auth)
+        assert r.status_code == 200 and r.json()["cover"] == v, r.text
+    for bad in ("merah", "#12345", "url(x)"):
+        assert client.patch("/api/v1/auth/me", json={"cover": bad}, headers=auth).status_code in (400, 422)

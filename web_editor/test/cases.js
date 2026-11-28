@@ -115,4 +115,13 @@ const CASES = {
     CS.setTapKeyboard(true);
     return (off === "none" && opened === null && closed === "none" && mode() === null) || JSON.stringify([off, opened, closed, mode()]);
   },
+  "font: pilihan font termuat & dipakai editor": async () => {
+    open("x", "f.py");
+    CS.configure({ fontFamily: "fira" });
+    for (let i = 0; i < 30 && !document.fonts.check('14px "CS Fira Code"'); i++) await new Promise((r) => setTimeout(r, 100));
+    const fam = getComputedStyle(document.querySelector(".cm-scroller")).fontFamily;
+    const ok = document.fonts.check('14px "CS Fira Code"') && fam.includes("CS Fira Code");
+    CS.configure({ fontFamily: "jetbrains" });
+    return ok || JSON.stringify([fam, document.fonts.check('14px "CS Fira Code"')]);
+  },
 };

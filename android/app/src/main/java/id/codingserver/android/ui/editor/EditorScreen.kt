@@ -90,6 +90,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
     var loadError by remember { mutableStateOf<String?>(null) }
     var newFile by remember { mutableStateOf(false) }
     var quickOpen by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
     var refs by remember { mutableStateOf<ReferenceResult?>(null) }
     var renameFrom by remember { mutableStateOf<String?>(null) }
     var problemList by remember { mutableStateOf<List<Problem>?>(null) }
@@ -226,7 +227,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
         pendingGoto?.let { (id, line, col) -> if (id == tab.id && editor.hasTab(id)) { editor.gotoLine(line, col); pendingGoto = null } }
     }
     LaunchedEffect(prefs.tapKeyboard) { editor.setTapKeyboard(prefs.tapKeyboard) }
-    LaunchedEffect(prefs) { editor.applyPrefs(prefs.darkTheme, prefs.fontSize, prefs.wordWrap, prefs.tabSize, prefs.textColor, prefs.backgroundColor) }
+    LaunchedEffect(prefs) { editor.applyPrefs(prefs.darkTheme, prefs.fontSize, prefs.wordWrap, prefs.tabSize, prefs.textColor, prefs.backgroundColor, prefs.fontFamily) }
     LaunchedEffect(Unit) {
         editor.eventsFlow.collect { ev ->
             when (ev) {
@@ -336,6 +337,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                         menu = false; scope.launch { renameFrom = editor.currentWord() }
                     })
                     DropdownMenuItem({ Text("Buka file cepat…") }, enabled = project != null, onClick = { menu = false; quickOpen = true })
+                    DropdownMenuItem({ Text("⚙ Pengaturan editor…") }, onClick = { menu = false; showSettings = true })
                     DropdownMenuItem({ Text(if (prefs.tapKeyboard) "Ketuk kode: jangan munculkan keyboard" else "Ketuk kode: munculkan keyboard") },
                         onClick = { menu = false; vm.setEditorPrefs(prefs.copy(tapKeyboard = !prefs.tapKeyboard)) })
                     DropdownMenuItem({ Text(if (prefs.keyBar) "Sembunyikan tombol ekstra" else "Tampilkan tombol ekstra") },
@@ -462,6 +464,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
             }
         }, onDismiss = { newFile = false })
     }
+    if (showSettings) EditorSettingsDialog(vm) { showSettings = false }
     if (quickOpen) project?.let { p ->
         val c = client
         if (c != null) QuickOpenDialog(c, p.id, onDismiss = { quickOpen = false }) { path ->
@@ -648,7 +651,7 @@ val EditorColorPresets = listOf(
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun EditorPresetRow(onPick: (EditorColorPreset) -> Unit) {
+internal fun EditorPresetRow(onPick: (EditorColorPreset) -> Unit) {
     androidx.compose.foundation.layout.FlowRow(
         horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp),
     ) {

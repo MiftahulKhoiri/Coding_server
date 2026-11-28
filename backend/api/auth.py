@@ -50,7 +50,7 @@ def me(user: dict = Depends(current_user)):
 
 @router.patch("/me", response_model=UserOut, summary="Ubah profil sendiri (nama tampilan, email, bio)")
 def update_me(body: ProfileUpdate, user: dict = Depends(current_user), svc: Services = Depends(services)):
-    u = svc.auth.update_profile(user, body.display_name, body.email, body.bio)
+    u = svc.auth.update_profile(user, body.display_name, body.email, body.bio, body.cover)
     svc.db.audit("profile_update", user=user)
     return u
 

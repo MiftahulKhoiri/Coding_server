@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.7.1 — 2026-11-29
+### Diubah
+- **Pengaturan disusun ulang**: hanya 1 · Profil, 2 · Manajer akun, 3 · Pembaruan aplikasi, 4 · Font, 5 · Warna.
+  Perilaku editor pindah ke Code Editor → ⋮ → **Pengaturan editor**; kartu AI dihapus (ada di Model AI);
+  **Backup** pindah ke Server Monitor.
+- **Profil**: latar profil di belakang foto (10 gradasi atau warna tema, disimpan di server `users.cover`),
+  **ketuk foto = tampilan penuh** (cubit untuk memperbesar).
+### Ditambahkan
+- **Jenis huruf** Code Editor & Terminal: JetBrains Mono, Fira Code (ligatur), Source Code Pro, Ubuntu Mono,
+  Roboto Mono, IBM Plex Mono (dibundel, lisensi SIL OFL), atau bawaan sistem — Pengaturan → Font.
+- Pengaturan → Warna: tema aplikasi, preset warna Code Editor, tema Terminal di satu tempat.
+### Diperbaiki
+- **Terminal susah digeser**: gulir satu jari kini ditangani sendiri dengan momentum (xterm.js hampir tidak punya
+  gulir sentuh di Android); di less/vim/top geser = tombol ↑/↓.
+- Akun tertaut: pesan jelas bila Client ID belum diisi ("admin utama (akun @admin) harus mengisi Client ID").
+
 ## 1.7.0 — 2026-11-28
 ### Ditambahkan
 - **Akun tertaut GitHub & Google** (Pengaturan → Akun tertaut), lewat OAuth *device flow* (tanpa domain publik):

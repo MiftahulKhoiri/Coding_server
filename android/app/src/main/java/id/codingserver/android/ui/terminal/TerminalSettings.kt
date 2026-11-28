@@ -33,9 +33,9 @@ import androidx.compose.ui.unit.sp
 import id.codingserver.android.data.settings.TerminalPrefs
 import id.codingserver.android.ui.common.InfoButton
 
-private data class ThemeInfo(val key: String, val label: String, val bg: Color, val fg: Color, val accent: Color)
+internal data class ThemeInfo(val key: String, val label: String, val bg: Color, val fg: Color, val accent: Color)
 
-private val THEMES = listOf(
+internal val TERMINAL_THEMES = listOf(
     ThemeInfo("dark", "Gelap", Color(0xFF1E1E1E), Color(0xFFD4D4D4), Color(0xFF569CD6)),
     ThemeInfo("light", "Terang", Color(0xFFFAFAFA), Color(0xFF1F1F1F), Color(0xFF0451A5)),
     ThemeInfo("solarized", "Solarized", Color(0xFF002B36), Color(0xFF93A1A1), Color(0xFF268BD2)),
@@ -60,7 +60,7 @@ fun TerminalSettingsDialog(p: TerminalPrefs, onChange: (TerminalPrefs) -> Unit, 
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 // Pratinjau
-                val th = THEMES.firstOrNull { it.key == p.theme } ?: THEMES[0]
+                val th = TERMINAL_THEMES.firstOrNull { it.key == p.theme } ?: TERMINAL_THEMES[0]
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(th.bg).padding(8.dp)) {
                     val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = p.fontSize.sp,
                                           lineHeight = (p.fontSize * p.lineHeight * 1.2f).sp)
@@ -82,7 +82,7 @@ fun TerminalSettingsDialog(p: TerminalPrefs, onChange: (TerminalPrefs) -> Unit, 
 
                 Text("Tema warna", style = MaterialTheme.typography.titleSmall)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    THEMES.forEach { t ->
+                    TERMINAL_THEMES.forEach { t ->
                         val sel = t.key == p.theme
                         Column(Modifier.clip(RoundedCornerShape(8.dp)).background(t.bg)
                                 .border(if (sel) 3.dp else 1.dp, if (sel) MaterialTheme.colorScheme.primary else Color.Gray,

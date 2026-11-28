@@ -50,6 +50,7 @@ class UserOut(BaseModel):
     last_login_at: float | None = None
     avatar_version: float | None = None  # ada foto profil bila tidak null → GET /auth/users/{id}/avatar
     email_verified: bool = False  # email berasal dari akun GitHub/Google tertaut
+    cover: str = ""  # latar profil di belakang foto
 
 
 class TokenResponse(BaseModel):
@@ -81,6 +82,7 @@ class ProfileUpdate(BaseModel):
     display_name: str | None = Field(default=None, max_length=80)
     email: str | None = Field(default=None, max_length=120)
     bio: str | None = Field(default=None, max_length=500)
+    cover: str | None = Field(default=None, max_length=20)  # latar profil: preset atau #RRGGBB
 
 
 class UserDeleted(BaseModel):

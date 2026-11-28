@@ -5,7 +5,6 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,23 +15,18 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import id.codingserver.android.BuildConfig
-import id.codingserver.android.data.api.AIStatus
 import id.codingserver.android.data.api.BackupCreate
 import id.codingserver.android.data.api.BackupInfo
 import id.codingserver.android.data.api.apiCall
@@ -41,19 +35,46 @@ import id.codingserver.android.data.update.AppRelease
 import id.codingserver.android.data.update.AppUpdater
 import id.codingserver.android.data.update.InstallEvent
 import id.codingserver.android.data.update.UpdateChecker
-import id.codingserver.android.ui.common.InfoButton
-import id.codingserver.android.ui.common.TitleWithInfo
 import id.codingserver.android.ui.AppViewModel
+import id.codingserver.android.ui.common.TitleWithInfo
 import id.codingserver.android.ui.common.formatBytes
 import id.codingserver.android.ui.common.formatTime
 import kotlinx.coroutines.launch
 import java.io.File
 
+/**
+ * Pengaturan aplikasi — hanya: 1. Profil, 2. Manajer akun, 3. Pembaruan aplikasi, 4. Font, 5. Warna.
+ * Pengaturan lain ada di tempatnya: perilaku editor di Code Editor → ⋮ → Pengaturan editor, tampilan terminal di
+ * Terminal → ⚙, semua tentang AI di Model AI, backup server di Server Monitor.
+ */
 @Composable
 fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
-    val prefs by vm.editorPrefs.collectAsState()
-    val user by vm.user.collectAsState()
-    val client by vm.client.collectAsState()
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionHeader("1 · Profil")
+        ProfileSection(vm)
+        SectionHeader("2 · Manajer akun")
+        AccountManagerSection(vm, onServers)
+        SectionHeader("3 · Pembaruan aplikasi")
+        UpdateCard()
+        SectionHeader("4 · Font")
+        FontSettingsCard(vm)
+        SectionHeader("5 · Warna")
+        ColorSettingsCards(vm)
+        Text("Pengaturan lain ada di tempatnya: Code Editor → ⋮ → Pengaturan editor · Terminal → ⚙ · " +
+             "Model AI (semua tentang AI) · Server Monitor → Backup.",
+             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+             modifier = Modifier.padding(4.dp))
+    }
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+    Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
+         modifier = Modifier.padding(start = 4.dp, top = 6.dp))
+}
+
+@Composable
+private fun UpdateCard() {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val install by ApkInstaller.events.collectAsState()
@@ -61,129 +82,80 @@ fun SettingsScreen(vm: AppViewModel, onServers: () -> Unit) {
     var release by remember { mutableStateOf<AppRelease?>(null) }
     var updateMsg by remember { mutableStateOf<String?>(null) }
     var progress by remember { mutableStateOf<Float?>(null) }
-    var backups by remember { mutableStateOf<List<BackupInfo>?>(null) }
-    var ai by remember { mutableStateOf<AIStatus?>(null) }
     val updater = remember { AppUpdater() }
-    val isAdmin = user?.permissions?.contains("system") == true
-
-    LaunchedEffect(client) {
-        val c = client ?: return@LaunchedEffect
-        apiCall { c.api.aiStatus() }.onSuccess { ai = it }
-        if (isAdmin) apiCall { c.api.backups() }.onSuccess { backups = it.backups }
-    }
-
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        AccountSection(vm, onServers)
-        ThemeSettingsCard(vm)
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp)) {
-                Text("Editor", style = MaterialTheme.typography.titleMedium)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Tema gelap", Modifier.weight(1f)); Switch(prefs.darkTheme, { vm.setEditorPrefs(prefs.copy(darkTheme = it)) })
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            TitleWithInfo("Pembaruan aplikasi", "Aplikasi memeriksa APK terbaru di GitHub secara otomatis saat dibuka, " +
+                "saat kembali ke aplikasi, dan tiap 6 jam. Bila ada versi baru, muncul notifikasi dan banner biru di atas " +
+                "layar — tidak perlu cek manual.\n\nPemasangan tetap butuh konfirmasi \"Perbarui\" dari Android; " +
+                "APK hanya diterima bila tanda tangannya sama.")
+            Text("Versi terpasang: ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
+            autoRelease?.let { if (release == null) Text("⬆️ Tersedia ${it.title}", color = MaterialTheme.colorScheme.primary) }
+            OutlinedButton(onClick = {
+                updateMsg = "Memeriksa…"
+                scope.launch {
+                    runCatching { UpdateChecker.check(ctx, force = true) }.onSuccess { r ->
+                        release = r
+                        updateMsg = if (r != null) "Tersedia ${r.title}" else "Sudah versi terbaru"
+                    }.onFailure { updateMsg = it.message }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Word wrap", Modifier.weight(1f)); Switch(prefs.wordWrap, { vm.setEditorPrefs(prefs.copy(wordWrap = it)) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Language server", modifier = Modifier.weight(1f, fill = false))
-                        InfoButton("Language server", "Autocomplete pintar, error saat mengetik, info simbol, ke definisi, " +
-                            "referensi & ganti nama lintas file. Dijalankan di server untuk C/C++, Python, JS/TS, Go, PHP, " +
-                            "HTML, CSS, JSON, dan Bash.")
-                    }
-                    Switch(prefs.lsp, { vm.setEditorPrefs(prefs.copy(lsp = it)) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Ketuk kode = keyboard muncul", modifier = Modifier.weight(1f, fill = false))
-                        InfoButton("Ketuk kode = keyboard muncul", "Aktif: mengetuk kode langsung memunculkan keyboard.\n" +
-                            "Mati: ketukan hanya memindah kursor, enak untuk membaca kode. Keyboard dibuka/ditutup " +
-                            "dengan tombol ⌨ di editor. Menggeser layar tidak pernah memunculkan keyboard.")
-                    }
-                    Switch(prefs.tapKeyboard, { vm.setEditorPrefs(prefs.copy(tapKeyboard = it)) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Baris tombol ekstra", Modifier.weight(1f)); Switch(prefs.keyBar, { vm.setEditorPrefs(prefs.copy(keyBar = it)) })
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Simpan otomatis", Modifier.weight(1f)); Switch(prefs.autoSave, { vm.setEditorPrefs(prefs.copy(autoSave = it)) })
-                }
-                Text("Ukuran font: ${prefs.fontSize}")
-                Slider(prefs.fontSize.toFloat(), { vm.setEditorPrefs(prefs.copy(fontSize = it.toInt())) }, valueRange = 9f..28f)
-                Text("Lebar tab: ${prefs.tabSize}")
-                Slider(prefs.tabSize.toFloat(), { vm.setEditorPrefs(prefs.copy(tabSize = it.toInt())) }, valueRange = 2f..8f, steps = 5)
-            }
-        }
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                TitleWithInfo("Pembaruan aplikasi", "Aplikasi memeriksa APK terbaru di GitHub secara otomatis saat dibuka, " +
-                    "saat kembali ke aplikasi, dan tiap 6 jam. Bila ada versi baru, muncul notifikasi dan banner biru di atas " +
-                    "layar — tidak perlu cek manual.\n\nPemasangan tetap butuh konfirmasi \"Perbarui\" dari Android; " +
-                    "APK hanya diterima bila tanda tangannya sama.")
-                Text("Versi terpasang: ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})")
-                autoRelease?.let { if (release == null) Text("⬆️ Tersedia ${it.title}", color = MaterialTheme.colorScheme.primary) }
-                OutlinedButton(onClick = {
-                    updateMsg = "Memeriksa…"
-                    scope.launch {
-                        runCatching { UpdateChecker.check(ctx, force = true) }.onSuccess { r ->
-                            release = r
-                            updateMsg = if (r != null) "Tersedia ${r.title}" else "Sudah versi terbaru"
-                        }.onFailure { updateMsg = it.message }
-                    }
-                }) { Text("Periksa sekarang") }
-                updateMsg?.let { Text(it) }
-                val r = release ?: autoRelease
-                if (r != null && r.build > BuildConfig.VERSION_CODE) {
-                    Button(onClick = {
-                        if (!ApkInstaller.canInstall(ctx)) {
-                            ctx.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}")))
-                            return@Button
-                        }
-                        scope.launch {
-                            val dest = File(ctx.cacheDir, "update/CodingServer.apk")
-                            runCatching {
-                                updater.download(r, dest) { done, total -> progress = if (total > 0) done.toFloat() / total else null }
-                                ApkInstaller.install(ctx, dest)
-                            }.onFailure { updateMsg = it.message }
-                            progress = null
-                        }
-                    }) { Text("Unduh & pasang (${formatBytes(r.sizeBytes)})") }
-                }
-                progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
-                when (val e = install) {
-                    is InstallEvent.Failed -> Text(e.message, color = MaterialTheme.colorScheme.error)
-                    InstallEvent.WaitingUser -> Text("Konfirmasi pemasangan di layar…")
-                    InstallEvent.Success -> Text("Pembaruan terpasang")
-                    InstallEvent.None -> {}
-                }
-            }
-        }
-        ai?.let { a ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("AI", style = MaterialTheme.typography.titleMedium)
-                    Text(if (a.status == "ready") "Model aktif: ${a.model} (${a.connection?.name ?: "-"})"
-                         else "Belum ada model aktif — atur di menu Model AI")
-                    Text("Hak AI: ${a.ai_permissions.joinToString()}", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-        if (isAdmin) Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                TitleWithInfo("Backup server", "Membuat salinan database & konfigurasi server lalu memverifikasinya.\n\n" +
-                    "Restore dilakukan dari server: scripts/backup.py restore NAMA")
+            }) { Text("Periksa sekarang") }
+            updateMsg?.let { Text(it) }
+            val r = release ?: autoRelease
+            if (r != null && r.build > BuildConfig.VERSION_CODE) {
                 Button(onClick = {
-                    val c = client ?: return@Button
-                    vm.toast("Membuat backup…")
-                    scope.launch {
-                        apiCall { c.api.createBackup(BackupCreate("android")) }.onSuccess {
-                            vm.toast("Backup ${it.name} dibuat & terverifikasi")
-                            apiCall { c.api.backups() }.onSuccess { b -> backups = b.backups }
-                        }.onFailure { vm.toast(it.message ?: "") }
+                    if (!ApkInstaller.canInstall(ctx)) {
+                        ctx.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${ctx.packageName}")))
+                        return@Button
                     }
-                }) { Text("Backup sekarang") }
-                backups?.forEach { b -> Text("${b.name} · ${formatBytes(b.size)} · ${formatTime(b.created_at)}", style = MaterialTheme.typography.bodySmall) }
+                    scope.launch {
+                        val dest = File(ctx.cacheDir, "update/CodingServer.apk")
+                        runCatching {
+                            updater.download(r, dest) { done, total -> progress = if (total > 0) done.toFloat() / total else null }
+                            ApkInstaller.install(ctx, dest)
+                        }.onFailure { updateMsg = it.message }
+                        progress = null
+                    }
+                }) { Text("Unduh & pasang (${formatBytes(r.sizeBytes)})") }
             }
+            progress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+            when (val e = install) {
+                is InstallEvent.Failed -> Text(e.message, color = MaterialTheme.colorScheme.error)
+                InstallEvent.WaitingUser -> Text("Konfirmasi pemasangan di layar…")
+                InstallEvent.Success -> Text("Pembaruan terpasang")
+                InstallEvent.None -> {}
+            }
+        }
+    }
+}
+
+/** Backup server (khusus admin utama) — ditampilkan di Server Monitor. */
+@Composable
+fun BackupCard(vm: AppViewModel) {
+    val client by vm.client.collectAsState()
+    val user by vm.user.collectAsState()
+    val scope = rememberCoroutineScope()
+    var backups by remember { mutableStateOf<List<BackupInfo>?>(null) }
+    if (user?.permissions?.contains("system") != true) return
+    androidx.compose.runtime.LaunchedEffect(client) {
+        val c = client ?: return@LaunchedEffect
+        apiCall { c.api.backups() }.onSuccess { backups = it.backups }
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            TitleWithInfo("Backup server", "Membuat salinan database & konfigurasi server lalu memverifikasinya.\n\n" +
+                "Restore dilakukan dari server: scripts/backup.py restore NAMA")
+            Button(onClick = {
+                val c = client ?: return@Button
+                vm.toast("Membuat backup…")
+                scope.launch {
+                    apiCall { c.api.createBackup(BackupCreate("android")) }.onSuccess {
+                        vm.toast("Backup ${it.name} dibuat & terverifikasi")
+                        apiCall { c.api.backups() }.onSuccess { b -> backups = b.backups }
+                    }.onFailure { vm.toast(it.message ?: "") }
+                }
+            }) { Text("Backup sekarang") }
+            backups?.forEach { b -> Text("${b.name} · ${formatBytes(b.size)} · ${formatTime(b.created_at)}", style = MaterialTheme.typography.bodySmall) }
         }
     }
 }

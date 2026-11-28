@@ -48,6 +48,8 @@ data class EditorPrefs(
     val autoSave: Boolean = true,
     /** Ketuk kode = keyboard muncul. Mati: keyboard hanya lewat tombol ⌨ (membaca kode tanpa gangguan). */
     val tapKeyboard: Boolean = true,
+    /** Jenis huruf (id di EditorFonts: jetbrains, fira, sourcecode, ubuntu, roboto, plex, system). */
+    val fontFamily: String = "jetbrains",
 )
 
 /** Pengaturan tampilan terminal (disesuaikan manual seperti terminal pada umumnya). */
@@ -60,6 +62,13 @@ data class TerminalPrefs(
     val showKeys: Boolean = true,        // baris tombol khusus (ESC, TAB, ^C …)
     val tapKeyboard: Boolean = true,     // ketuk terminal -> keyboard muncul
     val extraKeys: Boolean = false,      // baris tombol tambahan (^A ^E ^R ^U ^W PGUP PGDN)
+    val fontFamily: String = "jetbrains", // jenis huruf (lihat EditorFonts)
+)
+
+/** Jenis huruf monospace yang dibundel di aplikasi (aset web/fonts, lisensi SIL OFL). id -> nama tampilan. */
+val EditorFonts = linkedMapOf(
+    "jetbrains" to "JetBrains Mono", "fira" to "Fira Code", "sourcecode" to "Source Code Pro",
+    "ubuntu" to "Ubuntu Mono", "roboto" to "Roboto Mono", "plex" to "IBM Plex Mono", "system" to "Bawaan sistem",
 )
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "coding_server")
@@ -92,10 +101,13 @@ class ServerStore(private val context: Context) {
     private val kTermKeys = booleanPreferencesKey("term_keys")
     private val kTermTap = booleanPreferencesKey("term_tap_keyboard")
     private val kTermExtra = booleanPreferencesKey("term_extra_keys")
+    private val kTermFamily = stringPreferencesKey("term_font_family")
+    private val kEdFamily = stringPreferencesKey("editor_font_family")
 
     val terminalPrefs: Flow<TerminalPrefs> = context.dataStore.data.map {
         TerminalPrefs(it[kTermFont] ?: 13, it[kTermTheme] ?: "dark", it[kTermCursor] ?: "block", it[kTermBlink] ?: true,
-                      it[kTermLine]?.toFloatOrNull() ?: 1.0f, it[kTermKeys] ?: true, it[kTermTap] ?: true, it[kTermExtra] ?: false)
+                      it[kTermLine]?.toFloatOrNull() ?: 1.0f, it[kTermKeys] ?: true, it[kTermTap] ?: true, it[kTermExtra] ?: false,
+                      it[kTermFamily] ?: "jetbrains")
     }
 
     suspend fun setTerminalPrefs(p: TerminalPrefs) {
@@ -108,6 +120,7 @@ class ServerStore(private val context: Context) {
             it[kTermKeys] = p.showKeys
             it[kTermTap] = p.tapKeyboard
             it[kTermExtra] = p.extraKeys
+            it[kTermFamily] = p.fontFamily
         }
     }
 
@@ -116,7 +129,7 @@ class ServerStore(private val context: Context) {
     val lastProject: Flow<String?> = context.dataStore.data.map { it[kLastProject] }
     val editorPrefs: Flow<EditorPrefs> = context.dataStore.data.map {
         EditorPrefs(it[kDark] ?: true, it[kFont] ?: 14, it[kWrap] ?: false, it[kTab] ?: 4, it[kTextColor] ?: "", it[kBackgroundColor] ?: "", it[kLsp] ?: true,
-                    it[kKeyBar] ?: true, it[kAutoSave] ?: true, it[kTapKb] ?: true)
+                    it[kKeyBar] ?: true, it[kAutoSave] ?: true, it[kTapKb] ?: true, it[kEdFamily] ?: "jetbrains")
     }
 
     val appTheme: Flow<AppTheme> = context.dataStore.data.map {
@@ -175,6 +188,7 @@ class ServerStore(private val context: Context) {
             it[kKeyBar] = p.keyBar
             it[kAutoSave] = p.autoSave
             it[kTapKb] = p.tapKeyboard
+            it[kEdFamily] = p.fontFamily
         }
     }
 

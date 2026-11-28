@@ -1,5 +1,10 @@
 package id.codingserver.android.ui.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import id.codingserver.android.ui.common.InfoButton
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -83,15 +88,39 @@ private const val ROOT_NOTE = "Admin utama adalah akun pemulihan: tidak bisa dih
     "  scripts/admin_password.sh --set      (ganti)\n" +
     "  scripts/admin_password.sh --random   (acak baru)"
 
-/** Kartu Akun & Profil + (untuk admin) Kelola pengguna. Dipakai di SettingsScreen. */
+/** Bagian Profil: kartu profil (latar + foto) dan akun tertaut. Dipakai di SettingsScreen. */
 @Composable
-fun AccountSection(vm: AppViewModel, onServers: () -> Unit) {
+fun ProfileSection(vm: AppViewModel) {
     val user by vm.user.collectAsState()
     val client by vm.client.collectAsState()
     val u = user
     val c = client
-    ProfileCard(vm, u, c, onServers)
+    ProfileCard(vm, u, c)
     if (u != null && c != null) LinkedAccountsCard(vm, u, c)
+}
+
+/** Bagian Manajer akun: server & sesi, lalu (admin) kelola pengguna. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun AccountManagerSection(vm: AppViewModel, onServers: () -> Unit) {
+    val user by vm.user.collectAsState()
+    val client by vm.client.collectAsState()
+    val u = user
+    val c = client
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TitleWithInfo("Server & sesi", "Server yang sedang dipakai dan akun yang login di aplikasi ini. Tambah/ganti " +
+                "server di Kelola server; Logout untuk masuk dengan akun lain.")
+            Text("Server: ${c?.server?.name ?: "-"}", style = MaterialTheme.typography.bodyMedium)
+            Text("Login sebagai @${u?.username ?: "-"} · ${ROLE_LABEL[u?.role] ?: u?.role ?: "-"}",
+                 style = MaterialTheme.typography.bodySmall)
+            Text("Izin: ${u?.permissions?.joinToString() ?: "-"}", style = MaterialTheme.typography.labelSmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onServers) { Text("Kelola server") }
+                OutlinedButton(onClick = { vm.logout() }) { Text("Logout") }
+            }
+        }
+    }
     if (u != null && c != null && "users" in u.permissions) UsersCard(vm, u, c)
 }
 
@@ -105,37 +134,47 @@ fun RootBadge() {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ProfileCard(vm: AppViewModel, u: UserOut?, c: ApiClient?, onServers: () -> Unit) {
+private fun ProfileCard(vm: AppViewModel, u: UserOut?, c: ApiClient?) {
     var editProfile by remember { mutableStateOf(false) }
     var editPassword by remember { mutableStateOf(false) }
+    var viewPhoto by remember { mutableStateOf(false) }
+    val themeCover = listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.tertiaryContainer)
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TitleWithInfo("Akun & profil", if (u?.is_root == true) ROOT_NOTE
-                else "Ubah nama tampilan, email, bio, dan sandi akunmu. Bila lupa sandi, minta admin utama mereset.")
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                UserAvatar(c, u, 56.dp)
-                Column(Modifier.weight(1f)) {
-                    Text(u?.shownName ?: "-", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("@${u?.username ?: "-"} · ${ROLE_LABEL[u?.role] ?: u?.role ?: "-"} · ${c?.server?.name ?: "-"}",
-                        style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (u?.is_root == true) RootBadge()
+        Column {
+            // Latar profil + foto (ketuk foto = tampilan penuh)
+            Box(Modifier.fillMaxWidth().height(132.dp)) {
+                Box(Modifier.fillMaxWidth().height(92.dp).background(id.codingserver.android.ui.common.coverBrush(u?.cover, themeCover)))
+                Box(Modifier.align(Alignment.BottomStart).padding(start = 16.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant, androidx.compose.foundation.shape.CircleShape)
+                        .padding(3.dp)
+                        .clickable(enabled = u?.avatar_version != null) { viewPhoto = true }) {
+                    UserAvatar(c, u, 80.dp)
+                }
+                Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
+                    InfoButton("Akun & profil", if (u?.is_root == true) ROOT_NOTE
+                        else "Ubah nama tampilan, foto, latar profil, email, bio, dan sandi akunmu. Bila lupa sandi, minta " +
+                             "admin utama mereset. Ketuk foto untuk melihatnya penuh.")
                 }
             }
-            u?.email?.takeIf { it.isNotBlank() }?.let {
-                Text("✉ $it " + if (u.email_verified) "✓ terverifikasi" else "(belum terverifikasi — tautkan akun)",
-                     style = MaterialTheme.typography.bodySmall,
-                     color = if (u.email_verified) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
-            }
-            u?.bio?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-            Text("Izin: ${u?.permissions?.joinToString() ?: "-"}", style = MaterialTheme.typography.labelSmall)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(enabled = u != null, onClick = { editProfile = true }) { Text("Ubah profil") }
-                OutlinedButton(enabled = u != null, onClick = { editPassword = true }) { Text("Ganti sandi") }
-                OutlinedButton(onClick = onServers) { Text("Kelola server") }
-                OutlinedButton(onClick = { vm.logout() }) { Text("Logout") }
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp, top = 6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(u?.shownName ?: "-", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("@${u?.username ?: "-"} · ${ROLE_LABEL[u?.role] ?: u?.role ?: "-"}",
+                    style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (u?.is_root == true) RootBadge()
+                u?.email?.takeIf { it.isNotBlank() }?.let {
+                    Text("✉ $it " + if (u.email_verified) "✓ terverifikasi" else "(belum terverifikasi — tautkan akun)",
+                         style = MaterialTheme.typography.bodySmall,
+                         color = if (u.email_verified) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                }
+                u?.bio?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(enabled = u != null, onClick = { editProfile = true }) { Text("Ubah profil") }
+                    OutlinedButton(enabled = u != null, onClick = { editPassword = true }) { Text("Ganti sandi") }
+                }
             }
         }
     }
+    if (viewPhoto && u != null && c != null) id.codingserver.android.ui.common.AvatarViewer(c, u) { viewPhoto = false }
     if (editProfile && u != null && c != null) ProfileDialog(vm, u, c) { editProfile = false }
     if (editPassword && u != null && c != null) {
         if (u.is_root) {
@@ -155,6 +194,7 @@ private fun ProfileDialog(vm: AppViewModel, u: UserOut, c: ApiClient, onDismiss:
     var verified by remember { mutableStateOf<List<String>?>(null) }
     LaunchedEffect(Unit) { apiCall { c.api.identities() }.onSuccess { verified = it.verified_emails } }
     var bio by remember { mutableStateOf(u.bio) }
+    var cover by remember { mutableStateOf(u.cover) }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var current by remember { mutableStateOf(u) }
@@ -210,6 +250,23 @@ private fun ProfileDialog(vm: AppViewModel, u: UserOut, c: ApiClient, onDismiss:
                     }
                 }
                 OutlinedTextField(bio, { bio = it.take(500) }, label = { Text("Bio (opsional)") }, minLines = 2, maxLines = 5)
+                Text("Latar profil (di belakang foto)", style = MaterialTheme.typography.labelLarge)
+                val themeCover = listOf(MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.tertiaryContainer)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    (listOf("") + id.codingserver.android.ui.common.ProfileCovers.map { it.first }).forEach { k ->
+                        Box(Modifier.size(width = 64.dp, height = 40.dp)
+                                .background(id.codingserver.android.ui.common.coverBrush(k, themeCover),
+                                            androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                                .border(if (cover == k) 3.dp else 1.dp,
+                                        if (cover == k) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+                                        androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
+                                .clickable { cover = k },
+                            contentAlignment = Alignment.Center) {
+                            Text(id.codingserver.android.ui.common.CoverNames[k] ?: k, style = MaterialTheme.typography.labelSmall,
+                                 color = Color.White)
+                        }
+                    }
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
@@ -218,7 +275,7 @@ private fun ProfileDialog(vm: AppViewModel, u: UserOut, c: ApiClient, onDismiss:
                 busy = true
                 scope.launch {
                     // email hanya dikirim bila diubah (email lama yang belum terverifikasi tetap boleh disimpan apa adanya)
-                    apiCall { c.api.updateMe(ProfileUpdate(name, email.takeIf { it != u.email }, bio)) }
+                    apiCall { c.api.updateMe(ProfileUpdate(name, email.takeIf { it != u.email }, bio, cover)) }
                         .onSuccess { vm.setUser(it); vm.toast("Profil disimpan"); onDismiss() }
                         .onFailure { error = it.message }
                     busy = false

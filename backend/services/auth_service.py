@@ -29,6 +29,7 @@ from backend.database.db import Database
 log = get_logger("auth")
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 ROOT_FILE = "initial_admin_password.txt"
 
 
@@ -121,6 +122,7 @@ class AuthService:
             "display_name": row.get("display_name") or "", "email": row.get("email") or "",
             "bio": row.get("bio") or "", "is_root": bool(row.get("is_root")),
             "email_verified": bool(row.get("email_verified")) and bool(row.get("email")),
+            "cover": row.get("cover") or "",
             "updated_at": row.get("updated_at") or 0.0, "last_login_at": row.get("last_login_at"),
             "avatar_version": row.get("avatar_version"),
         }
@@ -331,9 +333,16 @@ class AuthService:
                            code="email_unverified")
         return {"email": email, "email_verified": 1}
 
+    COVERS = {"", "laut", "senja", "hutan", "anggur", "malam", "mawar", "aurora", "batu", "api", "es"}
+
     def update_profile(self, user: dict, display_name: str | None = None, email: str | None = None,
-                       bio: str | None = None) -> dict:
+                       bio: str | None = None, cover: str | None = None) -> dict:
         sets = self._profile_fields(display_name, email, bio)
+        if cover is not None:
+            cover = cover.strip()
+            if cover not in self.COVERS and not _HEX.match(cover):
+                raise AppError("Latar profil tidak dikenal (pilih preset atau warna #RRGGBB)", code="bad_profile")
+            sets["cover"] = cover
         if "email" in sets:
             sets.update(self._check_email(user["id"], sets["email"]))
         if sets:

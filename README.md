@@ -8,7 +8,7 @@ menguji, dan memperbaiki kode dari HP. Kodenya tersimpan dan dijalankan di Pi, d
 
 | | |
 |---|---|
-| Versi server | **1.7.0** (FastAPI, Python 3) |
+| Versi server | **1.7.1** (FastAPI, Python 3) |
 | Aplikasi | Android 8.0+ (Kotlin + Jetpack Compose), dibangun otomatis oleh GitHub Actions |
 | Platform uji | Raspberry Pi 5 16 GB · Debian 13 (trixie) aarch64 · kernel 6.x · NVMe |
 | Port bawaan | `8800` · API `/api/v1` · dokumentasi interaktif `/docs` |
@@ -257,8 +257,10 @@ kerja harian dan `admin` hanya untuk pemulihan.
 | Git | menu Git → status, **Commit semua** → **Push** / Pull, branch. Token: tautkan GitHub (izinkan push) atau tombol "Token Git" |
 | Database | menu Database → pilih/buat DB → query |
 | Uji API | menu HTTP Client |
-| Ubah tampilan | Pengaturan → Tampilan → mode, warna aksen, **warna latar**, AMOLED |
-| Backup | Pengaturan → Backup server (admin utama) |
+| Ubah tampilan | Pengaturan → **Warna** (tema aplikasi, warna editor, tema terminal) · **Font** (jenis & ukuran huruf editor/terminal) |
+| Atur perilaku editor | Code Editor → ⋮ → **Pengaturan editor** (LSP, ketuk = keyboard, tombol ekstra, simpan otomatis, word wrap, tab) |
+| Foto & latar profil | Pengaturan → Profil → **Ubah profil** (foto, latar di belakang foto); ketuk foto = tampilan penuh |
+| Backup | Server Monitor → Backup server (admin utama) |
 | Pi macet karena model AI | Model AI → AI Agent → ⛔ **Paksa lepas** → lanjutkan task agent nanti dengan **Lanjutkan** |
 
 Ekstensi yang dikenali: `.py .js .mjs .php .go .c .cpp .cc .java .cs .sql .html .css .sh`. Detail ada di

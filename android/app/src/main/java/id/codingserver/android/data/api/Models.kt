@@ -21,6 +21,8 @@ import kotlinx.serialization.json.JsonElement
     val avatar_version: Double? = null,
     /** Email berasal dari akun GitHub/Google yang ditautkan. */
     val email_verified: Boolean = false,
+    /** Latar profil di belakang foto (preset atau #RRGGBB, "" = warna tema). */
+    val cover: String = "",
 ) {
     val shownName: String get() = display_name.ifBlank { username }
 }
@@ -38,7 +40,8 @@ import kotlinx.serialization.json.JsonElement
                                   val verification_uri: String = "", val interval: Int = 5, val expires_in: Int = 0,
                                   val status: String = "pending", val message: String = "", val identity: LinkedIdentity? = null)
 
-@Serializable data class ProfileUpdate(val display_name: String? = null, val email: String? = null, val bio: String? = null)
+@Serializable data class ProfileUpdate(val display_name: String? = null, val email: String? = null, val bio: String? = null,
+                                      val cover: String? = null)
 @Serializable data class PasswordChange(val old_password: String, val new_password: String)
 @Serializable data class UserCreate(
     val username: String, val password: String, val role: String = "developer",
