@@ -87,6 +87,9 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class ProjectUpdate(val name: String? = null, val description: String? = null, val language: String? = null)
 @Serializable data class Templates(val languages: List<String>)
 
+@Serializable data class FormatRequest(val project_id: String, val path: String, val content: String, val tab_size: Int = 4)
+@Serializable data class FormatResult(val content: String, val changed: Boolean = false, val formatter: String = "")
+
 @Serializable data class ProjectFiles(val files: List<String> = emptyList(), val truncated: Boolean = false)
 
 @Serializable data class FileEntry(

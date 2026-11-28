@@ -10,11 +10,21 @@ import id.codingserver.android.data.update.AppUpdater
 import id.codingserver.android.ui.ai.splitMarkdown
 import id.codingserver.android.ui.editor.DiagnosticParser
 import id.codingserver.android.ui.editor.quickOpenFilter
+import id.codingserver.android.ui.editor.TextEdits
+import id.codingserver.android.ui.editor.TextEditItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class UnitTests {
+    @Test fun applyLspRenameEdits() {
+        val src = "int tambah(int a, int b);\nint x = tambah(1, 2) + tambah(3, 4);\n"
+        val edits = listOf(TextEditItem(1, 8, 1, 14, "jumlah"), TextEditItem(0, 4, 0, 10, "jumlah"), TextEditItem(1, 23, 1, 29, "jumlah"))
+        assertEquals("int jumlah(int a, int b);\nint x = jumlah(1, 2) + jumlah(3, 4);\n", TextEdits.apply(src, edits))
+        // posisi di luar akhir baris/berkas dijepit, tidak crash
+        assertEquals("ab!", TextEdits.apply("ab", listOf(TextEditItem(0, 99, 5, 0, "!"))))
+    }
+
     @Test fun quickOpenRanksFileNameFirst() {
         val files = listOf("docs/main_notes.md", "src/app/main.py", "src/domain/util.py", "main.cpp", "tests/test_main.py")
         val r = quickOpenFilter(files, "main")

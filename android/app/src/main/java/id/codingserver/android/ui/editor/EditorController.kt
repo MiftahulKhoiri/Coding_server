@@ -27,6 +27,36 @@ sealed interface EditorEvent {
     /** Go-to-definition (LSP) menunjuk file lain di proyek. */
     data class OpenFile(val path: String, val line: Int, val column: Int) : EditorEvent
     data class RunRequested(val tabId: String) : EditorEvent
+    data class References(val result: ReferenceResult) : EditorEvent
+    data class RenameDone(val result: RenameResult) : EditorEvent
+}
+
+@Serializable data class Problem(val line: Int, val column: Int = 1, val severity: String = "error", val message: String = "")
+@Serializable data class ReferenceItem(val path: String? = null, val uri: String = "", val line: Int = 1, val column: Int = 1,
+                                       val text: String = "")
+@Serializable data class ReferenceResult(val symbol: String = "", val items: List<ReferenceItem> = emptyList())
+/** Satu TextEdit LSP (0-based, offset UTF-16 = indeks String Kotlin). */
+@Serializable data class TextEditItem(val startLine: Int, val startChar: Int, val endLine: Int, val endChar: Int, val newText: String)
+@Serializable data class RenameResult(val newName: String = "", val files: Int = 0, val edits: Int = 0, val local: Int = 0,
+                                      val remote: Map<String, List<TextEditItem>> = emptyMap())
+@Serializable data class PreloadFile(val path: String, val text: String, val lang: String)
+
+/** Terapkan TextEdit LSP ke teks (untuk file yang tidak terbuka di editor saat rename). */
+object TextEdits {
+    fun apply(text: String, edits: List<TextEditItem>): String {
+        val starts = mutableListOf(0)
+        text.forEachIndexed { i, ch -> if (ch == '\n') starts += i + 1 }
+        fun off(line: Int, ch: Int): Int {
+            if (line >= starts.size) return text.length
+            val lineEnd = if (line + 1 < starts.size) starts[line + 1] - 1 else text.length
+            return (starts[line] + ch).coerceAtMost(lineEnd)
+        }
+        val sb = StringBuilder(text)
+        edits.map { Triple(off(it.startLine, it.startChar), off(it.endLine, it.endChar), it.newText) }
+            .sortedByDescending { it.first }
+            .forEach { (a, b, t) -> sb.replace(a, maxOf(a, b), t) }
+        return sb.toString()
+    }
 }
 
 @Serializable data class Symbol(val name: String, val line: Int, val text: String = "")
@@ -45,6 +75,15 @@ class EditorBridge(private val c: EditorController) {
     @JavascriptInterface fun onOpenFile(path: String?, line: Int, col: Int) {
         path?.let { c.events.tryEmit(EditorEvent.OpenFile(it, line, col)) }
     }
+    @JavascriptInterface fun onProblems(errors: Int, warnings: Int) { c.problems.value = errors to warnings }
+    @JavascriptInterface fun onReferences(json: String?) {
+        json?.let { runCatching { ApiJson.decodeFromString(ReferenceResult.serializer(), it) }.getOrNull() }
+            ?.let { c.events.tryEmit(EditorEvent.References(it)) }
+    }
+    @JavascriptInterface fun onRenameEdits(json: String?) {
+        json?.let { runCatching { ApiJson.decodeFromString(RenameResult.serializer(), it) }.getOrNull() }
+            ?.let { c.events.tryEmit(EditorEvent.RenameDone(it)) }
+    }
 }
 
 /**
@@ -61,6 +100,8 @@ class EditorController(context: Context) {
     /** JSON {wsBase, token, projectId, enabled} untuk klien LSP di WebView; diisi MainActivity. */
     @Volatile var lspConfig: () -> String = { "" }
     val lspStatus = MutableStateFlow("")
+    /** (jumlah error, jumlah peringatan) file aktif — dari LSP atau output build. */
+    val problems = MutableStateFlow(0 to 0)
     private val main = Handler(Looper.getMainLooper())
 
     // Pakai context Activity (bukan applicationContext): koneksi keyboard (IME) WebView lebih andal.
@@ -158,6 +199,19 @@ class EditorController(context: Context) {
         eval("CS.setDiagnostics(${q(ApiJson.encodeToString(ListSerializer(Diagnostic.serializer()), d))})")
     }
     suspend fun clearDiagnostics() { eval("CS.clearDiagnostics()") }
+    suspend fun problemList(): List<Problem> {
+        val raw = decodeString(eval("CS.problems()")) ?: return emptyList()
+        return runCatching { ApiJson.decodeFromString(ListSerializer(Problem.serializer()), raw) }.getOrDefault(emptyList())
+    }
+    suspend fun applyFormatted(id: String, text: String) = eval("CS.applyFormatted(${q(id)}, ${q(text)})") == "true"
+    suspend fun currentWord(): String = decodeString(eval("CS.currentWord()")).orEmpty()
+    suspend fun lspServer(): String = decodeString(eval("CS.lspServer()")).orEmpty()
+    private fun preloadJson(files: List<PreloadFile>?) =
+        if (files.isNullOrEmpty()) "null" else q(ApiJson.encodeToString(ListSerializer(PreloadFile.serializer()), files))
+    suspend fun findReferences(preload: List<PreloadFile>? = null) { eval("CS.findReferences(${preloadJson(preload)})") }
+    suspend fun renameSymbol(newName: String, preload: List<PreloadFile>? = null) {
+        eval("CS.renameSymbol(${q(newName)}, ${preloadJson(preload)})")
+    }
 }
 
 /** Ambil error kompilasi/runtime dari output sebagai diagnostics untuk file tertentu. */

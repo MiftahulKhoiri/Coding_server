@@ -55,6 +55,7 @@ import id.codingserver.android.data.api.ApiException
 import id.codingserver.android.data.api.FileEntry
 import id.codingserver.android.data.api.FileCreate
 import id.codingserver.android.data.api.FileWrite
+import id.codingserver.android.data.api.FormatRequest
 import id.codingserver.android.data.api.HistoryEntry
 import id.codingserver.android.data.api.RestoreRequest
 import id.codingserver.android.data.api.apiCall
@@ -82,6 +83,11 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
     var loadError by remember { mutableStateOf<String?>(null) }
     var newFile by remember { mutableStateOf(false) }
     var quickOpen by remember { mutableStateOf(false) }
+    var refs by remember { mutableStateOf<ReferenceResult?>(null) }
+    var renameFrom by remember { mutableStateOf<String?>(null) }
+    var problemList by remember { mutableStateOf<List<Problem>?>(null) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    val problems by editor.problems.collectAsState()
     val autoSaveJobs = remember { mutableMapOf<String, kotlinx.coroutines.Job>() }
     var colorDialog by remember { mutableStateOf(false) }
     var textColorInput by remember(prefs) { mutableStateOf(prefs.textColor) }
@@ -115,6 +121,56 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
         vm.execute(FileEntry(tab.name, tab.path, "file"), build, projectId = tab.projectId)
             .onSuccess { onRunStarted() }
             .onFailure { vm.toast(it.message ?: "Gagal menjalankan") }
+    }
+
+    suspend fun formatActive() {
+        val tab = active ?: return
+        val c = client ?: return
+        val content = editor.getDoc(tab.id) ?: return
+        busy = "Memformat…"
+        apiCall { c.api.formatCode(FormatRequest(tab.projectId, tab.path, content, prefs.tabSize)) }
+            .onSuccess { r ->
+                if (r.changed) { editor.applyFormatted(tab.id, r.content); vm.toast("Diformat dengan ${r.formatter}") }
+                else vm.toast("Sudah rapi (${r.formatter})")
+            }
+            .onFailure { vm.toast(it.message ?: "Gagal memformat") }
+        busy = null
+    }
+
+    /** clangd tanpa background index hanya mengenal file yang terbuka: muat file C/C++ proyek dulu (maks. 60). */
+    suspend fun cFamilyPreload(): List<PreloadFile>? {
+        if (editor.lspServer() != "clangd") return null
+        val tab = active ?: return null
+        val c = client ?: return null
+        val exts = setOf("c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx")
+        val open = tabs.map { it.path }.toSet()
+        val paths = apiCall { c.api.listFiles(tab.projectId) }.getOrNull()?.files.orEmpty()
+            .filter { it.substringAfterLast('.', "").lowercase() in exts && it !in open }.take(60)
+        busy = "Menganalisis ${paths.size} file C/C++…"
+        return paths.mapNotNull { path ->
+            apiCall { c.api.read(tab.projectId, path) }.getOrNull()?.takeIf { !it.binary && it.content != null && it.size < 300_000 }
+                ?.let { f -> PreloadFile(path, f.content!!, if (path.endsWith(".c")) "c" else "cpp") }
+        }
+    }
+
+    /** Terapkan hasil rename ke file yang tidak terbuka (baca → ubah → tulis, dengan cek konflik). */
+    suspend fun applyRemoteRename(r: RenameResult) {
+        val c = client ?: return
+        val pid = active?.projectId ?: project?.id ?: return
+        var ok = 0
+        val failed = mutableListOf<String>()
+        for ((path, edits) in r.remote) {
+            val f = apiCall { c.api.read(pid, path) }.getOrNull()
+            if (f?.content == null) { failed += path; continue }
+            apiCall { c.api.write(FileWrite(pid, path, TextEdits.apply(f.content, edits), f.sha256)) }
+                .onSuccess { ok++ }.onFailure { failed += path }
+        }
+        busy = null
+        vm.toast(buildString {
+            append("'${r.newName}': ${r.edits} perubahan di ${r.files} file")
+            if (r.local > 0) append(" (${r.local} tab terbuka — simpan untuk menerapkan)")
+            if (failed.isNotEmpty()) append(" · gagal: ${failed.joinToString()}")
+        })
     }
 
     // Lompat ke posisi setelah file tujuan go-to-definition dimuat.
@@ -168,6 +224,8 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                 }
                 is EditorEvent.SaveRequested -> if (vm.user.value?.permissions?.contains("write") == true) vm.tabs.value.firstOrNull { it.id == ev.tabId }?.let { save(it) }
                 is EditorEvent.RunRequested -> runActive(false)
+                is EditorEvent.References -> { busy = null; refs = ev.result }
+                is EditorEvent.RenameDone -> applyRemoteRename(ev.result)
                 is EditorEvent.OpenFile -> {
                     val pid = project?.id ?: vm.tabs.value.firstOrNull { it.id == activeId }?.projectId
                     if (pid != null) {
@@ -207,7 +265,14 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
             ToolIcon(Icons.Default.Search, "Cari & ganti", enabled = active != null, onClick = { scope.launch { editor.openSearch() } })
             ToolIcon(Icons.Default.FindInPage, "Buka file cepat", enabled = project != null, onClick = { quickOpen = true })
             Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                Text("${cursor.first}:${cursor.second}", style = MaterialTheme.typography.labelSmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("${cursor.first}:${cursor.second}", style = MaterialTheme.typography.labelSmall)
+                    if (active != null && (problems.first > 0 || problems.second > 0)) Text(
+                        "  ⛔${problems.first} ⚠${problems.second}", style = MaterialTheme.typography.labelSmall,
+                        color = if (problems.first > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.clickable { scope.launch { problemList = editor.problemList() } })
+                }
+                busy?.let { Text(it, style = MaterialTheme.typography.labelSmall, maxLines = 1, color = MaterialTheme.colorScheme.primary) }
                 if (prefs.lsp && lspStatus.isNotBlank()) Text(lspStatus, style = MaterialTheme.typography.labelSmall, maxLines = 1,
                                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -229,6 +294,17 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                         onClick = { menu = false; vm.setEditorPrefs(prefs.copy(lsp = !prefs.lsp)) })
                     DropdownMenuItem({ Text("Lipat semua / buka semua") }, onClick = {
                         menu = false; scope.launch { editor.foldAll(); editor.unfoldAll() }
+                    })
+                    if (canWrite) DropdownMenuItem({ Text("Format kode") }, enabled = active != null && busy == null,
+                        onClick = { menu = false; scope.launch { formatActive() } })
+                    DropdownMenuItem({ Text("Masalah (error & peringatan)") }, enabled = active != null,
+                        onClick = { menu = false; scope.launch { problemList = editor.problemList() } })
+                    DropdownMenuItem({ Text("Cari semua referensi") }, enabled = active != null && busy == null, onClick = {
+                        menu = false
+                        scope.launch { busy = "Mencari referensi…"; editor.findReferences(cFamilyPreload()); }
+                    })
+                    if (canWrite) DropdownMenuItem({ Text("Ganti nama simbol…") }, enabled = active != null && busy == null, onClick = {
+                        menu = false; scope.launch { renameFrom = editor.currentWord() }
                     })
                     DropdownMenuItem({ Text("Buka file cepat…") }, enabled = project != null, onClick = { menu = false; quickOpen = true })
                     DropdownMenuItem({ Text(if (prefs.keyBar) "Sembunyikan tombol ekstra" else "Tampilkan tombol ekstra") },
@@ -356,6 +432,66 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
             quickOpen = false
             vm.addOrFocusTab(EditorTab(p.id, path, null))
         }
+    }
+    renameFrom?.let { from ->
+        InputDialog("Ganti nama '$from'", "Nama baru (semua pemakaian di proyek ikut diganti)", initial = from,
+                    confirmText = "Ganti", onConfirm = { name ->
+            val n = name.trim()
+            if (n.isNotEmpty() && n != from) scope.launch {
+                val pre = cFamilyPreload()
+                busy = "Mengganti nama…"
+                editor.renameSymbol(n, pre)
+                // hasil datang lewat EditorEvent.RenameDone; batas waktu bila server tidak menjawab
+                kotlinx.coroutines.delay(30_000)
+                if (busy == "Mengganti nama…") busy = null
+            }
+        }, onDismiss = { renameFrom = null })
+    }
+    refs?.let { r ->
+        AlertDialog(
+            onDismissRequest = { refs = null },
+            title = { Text("Referensi '${r.symbol}' (${r.items.size})") },
+            text = {
+                if (r.items.isEmpty()) Text("Tidak ada referensi")
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(r.items) { ref ->
+                        Column(Modifier.fillMaxWidth().clickable(enabled = ref.path != null) {
+                            refs = null
+                            ref.path?.let { path -> editor.events.tryEmit(EditorEvent.OpenFile(path, ref.line, ref.column)) }
+                        }.padding(vertical = 6.dp)) {
+                            Text("${ref.path ?: ref.uri.removePrefix("file://")}:${ref.line}", style = MaterialTheme.typography.labelMedium,
+                                 color = MaterialTheme.colorScheme.primary)
+                            if (ref.text.isNotBlank()) Text(ref.text, style = MaterialTheme.typography.bodySmall,
+                                                           fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, maxLines = 2)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { refs = null }) { Text("Tutup") } },
+        )
+    }
+    problemList?.let { list ->
+        AlertDialog(
+            onDismissRequest = { problemList = null },
+            title = { Text("Masalah (${list.size})") },
+            text = {
+                if (list.isEmpty()) Text("Tidak ada error atau peringatan di file ini 🎉")
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(list) { p ->
+                        Row(Modifier.fillMaxWidth().clickable { problemList = null; scope.launch { editor.gotoLine(p.line, p.column) } }
+                                .padding(vertical = 6.dp)) {
+                            Text(when (p.severity) { "error" -> "⛔"; "warning" -> "⚠"; else -> "ℹ" }, Modifier.padding(end = 6.dp))
+                            Column {
+                                Text("Baris ${p.line}:${p.column}", style = MaterialTheme.typography.labelMedium,
+                                     color = MaterialTheme.colorScheme.primary)
+                                Text(p.message, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { problemList = null }) { Text("Tutup") } },
+        )
     }
     if (gotoLine) InputDialog("Ke baris", "Nomor baris", onConfirm = { n ->
         n.toIntOrNull()?.let { scope.launch { editor.gotoLine(it) } }

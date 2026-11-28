@@ -98,6 +98,27 @@ def test_clangd_diagnostics_completion_definition(client, auth, token, project):
         # hover
         r = c.request("textDocument/hover", {"textDocument": {"uri": uri}, "position": {"line": 4, "character": 11}})
         assert "tambah" in str(r["result"])
+        # referensi & ganti nama lintas file (header + sumber), petunjuk parameter
+        # editor membuka file C/C++ proyek lainnya di LSP dulu (clangd tanpa background index hanya tahu file terbuka)
+        for path, body in (("src/util.h", "#pragma once\nint tambah(int a, int b);\n"),
+                           ("src/util.cpp", '#include "util.h"\nint tambah(int a, int b) { return a + b; }\n')):
+            c.notify("textDocument/didOpen", {"textDocument": {"uri": URI + path, "languageId": "cpp", "version": 1,
+                                                               "text": body}})
+            c.wait_note("textDocument/publishDiagnostics", lambda m, p=path: m["params"]["uri"] == URI + p)
+        r = c.request("textDocument/references", {"textDocument": {"uri": uri}, "position": {"line": 4, "character": 11},
+                                                  "context": {"includeDeclaration": True}})
+        files = {l["uri"] for l in r["result"]}
+        assert uri in files and any(f.endswith("src/util.h") for f in files), files
+        r = c.request("textDocument/rename", {"textDocument": {"uri": uri}, "position": {"line": 4, "character": 11},
+                                              "newName": "jumlah"})
+        changes = r["result"].get("changes") or {d["textDocument"]["uri"]: d["edits"] for d in r["result"]["documentChanges"]}
+        assert uri in changes and all(e["newText"] == "jumlah" for es in changes.values() for e in es), changes
+        assert all(u.startswith(URI) for u in changes), changes  # path asli disamarkan
+        c.notify("textDocument/didChange", {"textDocument": {"uri": uri, "version": 3},
+                                            "contentChanges": [{"text": text2.replace("tambah(1, 2)", "tambah(1, ")}]})
+        r = c.request("textDocument/signatureHelp", {"textDocument": {"uri": uri}, "position": {"line": 4, "character": 20}})
+        sig = r["result"]["signatures"][0]
+        assert "tambah" in sig["label"] and r["result"].get("activeParameter", sig.get("activeParameter")) == 1, r
         c.shutdown()
 
 
@@ -119,6 +140,15 @@ def test_pyright_diagnostics_and_completion(client, auth, token, project):
         r = c.request("textDocument/definition", {"textDocument": {"uri": uri}, "position": {"line": 3, "character": 15}})
         locs = r["result"] if isinstance(r["result"], list) else [r["result"]]
         assert any(l.get("uri", l.get("targetUri", "")) == URI + "lib/hitung.py" for l in locs), locs
+        r = c.request("textDocument/references", {"textDocument": {"uri": uri}, "position": {"line": 3, "character": 15},
+                                                  "context": {"includeDeclaration": True}})
+        assert any(l["uri"] == URI + "lib/hitung.py" for l in r["result"]), r
+        r = c.request("textDocument/rename", {"textDocument": {"uri": uri}, "position": {"line": 3, "character": 15},
+                                              "newName": "pangkat2"})
+        res = r["result"]
+        changes = res.get("changes") or {d["textDocument"]["uri"]: d["edits"] for d in res.get("documentChanges", [])
+                                         if "textDocument" in d}
+        assert URI + "lib/hitung.py" in changes and uri in changes, res
         c.shutdown()
 
 

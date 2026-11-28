@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from backend.dependencies import Services, current_user, project_dir, require, services
 from backend.schemas.models import (FavoriteRequest, FileContent, FileCreate, FileEntry, FileMove, FileRename,
-                                    FileWrite, OkResponse, RestoreRequest)
+                                    FileWrite, FormatRequest, OkResponse, RestoreRequest)
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -77,6 +77,18 @@ def search(project_id: str, q: str = Query(min_length=1), content: bool = False,
 @router.get("/list", summary="Semua path file proyek (untuk Buka file cepat); tanpa .git, node_modules, .venv, cache")
 def list_files(project_id: str, user: dict = Depends(require("read")), svc: Services = Depends(services)):
     return svc.files.list_files(project_dir(svc, project_id, user))
+
+
+@router.post("/format", summary="Format kode (clang-format, ruff, prettier, gofmt) — mengembalikan teks, tidak menulis file")
+async def format_code(body: FormatRequest, user: dict = Depends(require("write")), svc: Services = Depends(services)):
+    root = project_dir(svc, body.project_id, user)
+    file = svc.files.resolve(root, body.path, allow_root=False)
+    return await svc.fmt.format(root, file, body.content, body.tab_size)
+
+
+@router.get("/format/status", summary="Formatter yang terpasang di server")
+def format_status(_: dict = Depends(current_user), svc: Services = Depends(services)):
+    return svc.fmt.status()
 
 
 @router.get("/history")

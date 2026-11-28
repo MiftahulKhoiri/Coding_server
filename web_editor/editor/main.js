@@ -18,7 +18,7 @@ import { searchKeymap, highlightSelectionMatches, openSearchPanel, closeSearchPa
 import {
   autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, completeAnyWord, insertBracket, startCompletion,
 } from "@codemirror/autocomplete";
-import { lintKeymap, setDiagnostics, lintGutter } from "@codemirror/lint";
+import { lintKeymap, setDiagnostics, lintGutter, forEachDiagnostic } from "@codemirror/lint";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { detectLanguage, languageExtension, SYMBOL_PATTERNS } from "./languages.js";
 import { LspManager, applyDiagnosticsTo } from "./lsp.js";
@@ -58,7 +58,10 @@ const lsp = new LspManager({
   },
   getState: stateOf,
   applyDiagnostics(id, diags) {
-    if (id === current) { suppress = true; view.dispatch(setDiagnostics(view.state, diags)); suppress = false; tabs.get(id).state = view.state; return; }
+    if (id === current) {
+      suppress = true; view.dispatch(setDiagnostics(view.state, diags)); suppress = false; tabs.get(id).state = view.state;
+      notifyProblems(); return;
+    }
     const t = tabs.get(id);
     if (t) t.state = applyDiagnosticsTo(t.state, diags);
   },
@@ -152,7 +155,12 @@ function baseExtensions(lang, editable = true) {
         bridge.onChange(current, isDirty(current));
         if (t) t.state = u.state;
         lsp.change(current);
+        let typed = "";
+        u.changes.iterChanges((_a, _b, _c, _d, ins) => { typed = ins.toString(); });
+        if (typed === "(" || typed === "()" || typed === ",") scheduleSignature();
+        else if (typed === ")" || typed === ";") hideSignature();
       }
+      if (u.selectionSet && sigLine !== null && u.state.doc.lineAt(u.state.selection.main.head).number !== sigLine) hideSignature();
       if (u.selectionSet && current) {
         const pos = u.state.selection.main.head;
         const line = u.state.doc.lineAt(pos);
@@ -252,6 +260,79 @@ function regexDefinition() {
   return false;
 }
 
+// ---------- masalah, rename, petunjuk parameter ----------
+function problemList() {
+  const out = [];
+  const st = view.state;
+  forEachDiagnostic(st, (d, from) => {
+    const line = st.doc.lineAt(from);
+    out.push({ line: line.number, column: from - line.from + 1, severity: d.severity, message: d.message });
+  });
+  const rank = { error: 0, warning: 1, info: 2, hint: 3 };
+  return out.sort((a, b) => a.line - b.line || (rank[a.severity] ?? 9) - (rank[b.severity] ?? 9));
+}
+function notifyProblems() {
+  const list = current ? problemList() : [];
+  callBridge("onProblems", list.filter((p) => p.severity === "error").length, list.filter((p) => p.severity === "warning").length);
+}
+function findTab(path) {
+  for (const id of tabs.keys()) if (id.endsWith(":" + path)) return id;
+  return null;
+}
+function applyEditsToTab(id, edits) {
+  const t = tabs.get(id);
+  const st = id === current ? view.state : t.state;
+  const doc = st.doc;
+  const pos = (l, c) => Math.min(doc.line(Math.min(l + 1, doc.lines)).from + c, doc.length);
+  const changes = edits.map((e) => ({ from: pos(e.startLine, e.startChar), to: pos(e.endLine, e.endChar), insert: e.newText }))
+    .sort((a, b) => a.from - b.from);
+  if (id === current) view.dispatch({ changes, userEvent: "input.rename" });
+  else { t.state = t.state.update({ changes }).state; bridge.onChange(id, isDirty(id)); lsp.change(id); }
+}
+let sigTimer = null;
+let sigLine = null;
+function sigEl() {
+  let el = document.getElementById("cs-sig");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "cs-sig";
+    el.style.cssText = "position:fixed;left:6px;right:6px;top:4px;z-index:60;padding:6px 10px;border-radius:8px;" +
+      "font:12.5px/1.4 'JetBrains Mono',monospace;white-space:pre-wrap;display:none;box-shadow:0 2px 10px rgba(0,0,0,.35)";
+    el.addEventListener("click", hideSignature);
+    document.body.appendChild(el);
+  }
+  const dark = settings.theme === "dark";
+  el.style.background = dark ? "#2c313a" : "#fffbe6";
+  el.style.color = dark ? "#d7dae0" : "#202124";
+  el.style.border = "1px solid " + (dark ? "#4b5263" : "#e0d9a8");
+  return el;
+}
+function hideSignature() { clearTimeout(sigTimer); sigLine = null; const el = document.getElementById("cs-sig"); if (el) el.style.display = "none"; }
+function scheduleSignature() {
+  if (!current || !lsp.supports(current)) return;
+  clearTimeout(sigTimer);
+  sigTimer = setTimeout(async () => {
+    const id = current;
+    const pos = view.state.selection.main.head;
+    const r = await lsp.signatureHelp(id, view.state, pos);
+    if (id !== current) return;
+    if (!r) { hideSignature(); return; }
+    const el = sigEl();
+    el.textContent = "";
+    const [a, b] = r.active || [0, 0];
+    const parts = [r.label.slice(0, a), r.label.slice(a, b), r.label.slice(b)];
+    parts.forEach((txt, i) => {
+      const span = document.createElement("span");
+      span.textContent = txt;
+      if (i === 1 && txt) { span.style.fontWeight = "bold"; span.style.textDecoration = "underline"; span.style.color = settings.theme === "dark" ? "#e5c07b" : "#9a6700"; }
+      el.appendChild(span);
+    });
+    if (r.more) el.appendChild(document.createTextNode(`   (+${r.more - 1} versi lain)`));
+    el.style.display = "block";
+    sigLine = view.state.doc.lineAt(pos).number;
+  }, 150);
+}
+
 const KEY_COMMANDS = {
   left: cursorCharLeft, right: cursorCharRight, up: cursorLineUp, down: cursorLineDown,
   home: cursorLineBoundaryBackward, end: cursorLineBoundaryForward,
@@ -279,6 +360,8 @@ window.CS = {
     view.setState(tabs.get(id).state);
     reconfigureAll();
     suppress = false;
+    hideSignature();
+    notifyProblems();
     view.focus();
     return true;
   },
@@ -391,9 +474,69 @@ window.CS = {
       return { from, to: Math.max(from, to), severity: d.severity || "error", message: d.message || "" };
     });
     view.dispatch(setDiagnostics(view.state, diags));
+    notifyProblems();
     return diags.length;
   },
-  clearDiagnostics() { view.dispatch(setDiagnostics(view.state, [])); },
+  clearDiagnostics() { view.dispatch(setDiagnostics(view.state, [])); notifyProblems(); },
+  /** Daftar masalah (error/peringatan) file aktif, urut baris: JSON [{line, column, severity, message}]. */
+  problems() { return JSON.stringify(problemList()); },
+  /** Ganti isi dokumen dengan hasil format; hanya bagian yang berubah diganti agar kursor & undo tetap wajar. */
+  applyFormatted(id, text) {
+    const t = tabs.get(id);
+    if (!t) return false;
+    const st = id === current ? view.state : t.state;
+    const old = st.doc.toString();
+    if (old === text) return false;
+    let a = 0;
+    while (a < old.length && a < text.length && old[a] === text[a]) a++;
+    let b = 0;
+    while (b < old.length - a && b < text.length - a && old[old.length - 1 - b] === text[text.length - 1 - b]) b++;
+    const change = { from: a, to: old.length - b, insert: text.slice(a, text.length - b) };
+    if (id === current) view.dispatch({ changes: change, userEvent: "input.format" });
+    else { t.state = t.state.update({ changes: change }).state; bridge.onChange(id, isDirty(id)); lsp.change(id); }
+    return true;
+  },
+  /** Cari semua referensi simbol di kursor; hasil lewat bridge.onReferences(json). */
+  // filesJson (opsional): [{path, text, lang}] file proyek lain yang dibuka dulu di LSP (C/C++: clangd hanya tahu file terbuka).
+  findReferences(filesJson) {
+    if (!current || !lsp.supports(current)) { showInfo("Cari referensi butuh language server untuk bahasa ini."); return false; }
+    const id = current;
+    const word = wordAtCursor();
+    const pos = view.state.selection.main.head;
+    lsp.preload(id, filesJson ? JSON.parse(filesJson) : []).then(() => lsp.references(id, stateOf(id), pos)).then((r) => {
+      if (!r || r.error) { showInfo("Referensi tidak ditemukan" + (r && r.error ? ": " + r.error : "")); return; }
+      const out = r.map((x) => {
+        const tid = x.path ? findTab(x.path) : null;
+        let text = "";
+        if (tid) { const d = (tid === current ? view.state : tabs.get(tid).state).doc; if (x.line <= d.lines) text = d.line(x.line).text.trim(); }
+        return { ...x, text: text.slice(0, 160) };
+      });
+      callBridge("onReferences", JSON.stringify({ symbol: word, items: out }));
+    });
+    return true;
+  },
+  /** Ganti nama simbol di kursor (LSP). Tab terbuka diubah langsung; file lain dikirim ke Kotlin (onRenameEdits). */
+  renameSymbol(newName, filesJson) {
+    if (!current || !lsp.supports(current)) { showInfo("Ganti nama butuh language server untuk bahasa ini."); return false; }
+    const id = current;
+    const pos = view.state.selection.main.head;
+    lsp.preload(id, filesJson ? JSON.parse(filesJson) : []).then(() => lsp.rename(id, stateOf(id), pos, newName)).then((r) => {
+      if (!r || r.error) { showInfo("Ganti nama gagal" + (r && r.error ? ": " + r.error : "")); return; }
+      const remote = {};
+      let local = 0, count = 0;
+      for (const [path, edits] of Object.entries(r.edits)) {
+        count += edits.length;
+        const tid = findTab(path);
+        if (tid) { applyEditsToTab(tid, edits); local++; } else remote[path] = edits;
+      }
+      lsp.dropGhosts(id);
+      callBridge("onRenameEdits", JSON.stringify({ newName, files: Object.keys(r.edits).length, edits: count, local, remote }));
+    });
+    return true;
+  },
+  currentWord() { return wordAtCursor(); },
+  /** Server LSP tab aktif ("clangd" / "pyright" / …) atau "" bila tidak ada. */
+  lspServer() { const d = current && lsp.docFor(current); return d && lsp.supports(current) ? d.server : ""; },
 };
 
 // WebView tertentu melaporkan viewport yang valid tetapi ukuran CSS html/body = 0.

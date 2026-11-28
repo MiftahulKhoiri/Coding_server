@@ -52,4 +52,23 @@ const CASES = {
     CS.key("undo");
     return doc() === "" || JSON.stringify(doc());
   },
+  "applyFormatted hanya mengganti bagian berubah & kursor tetap di baris": () => {
+    open("a=1\nb  =  2\nc=3\n", "a.py");
+    CS.gotoLine(3, 2);
+    const changed = CS.applyFormatted(id, "a=1\nb = 2\nc=3\n");
+    CS.typeText("X");
+    return (changed && doc() === "a=1\nb = 2\ncX=3\n") || JSON.stringify([changed, doc()]);
+  },
+  "problems mengurutkan diagnostik per baris": () => {
+    open("x\ny\nz", "a.c");
+    CS.setDiagnostics(JSON.stringify([{ line: 3, severity: "warning", message: "w3" }, { line: 1, column: 1, severity: "error", message: "e1" }]));
+    const p = JSON.parse(CS.problems());
+    return (p.length === 2 && p[0].line === 1 && p[0].severity === "error" && p[1].message === "w3") || JSON.stringify(p);
+  },
+  "clearDiagnostics mengosongkan masalah": () => {
+    open("x", "a.c");
+    CS.setDiagnostics(JSON.stringify([{ line: 1, severity: "error", message: "e" }]));
+    CS.clearDiagnostics();
+    return JSON.parse(CS.problems()).length === 0 || CS.problems();
+  },
 };

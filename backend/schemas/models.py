@@ -147,6 +147,13 @@ class FileCreate(BaseModel):
     content: str = ""
 
 
+class FormatRequest(BaseModel):
+    project_id: str
+    path: str
+    content: str = Field(max_length=2_000_000)
+    tab_size: int = Field(default=4, ge=1, le=8)
+
+
 class FileWrite(BaseModel):
     project_id: str
     path: str

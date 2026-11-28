@@ -13,6 +13,7 @@ from backend.core.security import RateLimiter
 from backend.database.db import Database
 from backend.engines.registry import EngineRegistry
 from backend.services.lsp_service import LspService
+from backend.services.format_service import FormatService
 from backend.services.agent_service import AgentService
 from backend.services.ai_service import AIService
 from backend.services.model_bench import ModelBench
@@ -50,6 +51,7 @@ class Services:
     agent: AgentService
     bench: ModelBench
     llama_ctx: "LlamaContextService"
+    fmt: "FormatService"
     login_limiter: RateLimiter
     api_limiter: RateLimiter
 
@@ -70,6 +72,7 @@ def build_services(settings: Settings, registry: EngineRegistry) -> Services:
         agent=AgentService(settings, db, lambda: holder["svc"]),
         bench=ModelBench(settings, db, lambda: holder["svc"]),
         llama_ctx=None,  # diisi di bawah (butuh AIService)
+        fmt=FormatService(settings),
     )
     from backend.services.llama_context import LlamaContextService
 
