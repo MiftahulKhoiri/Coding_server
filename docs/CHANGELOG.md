@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.6.0 — 2026-11-28 (IDE)
+Fokus: Code Editor menjadi IDE yang lengkap untuk HP.
+### Ditambahkan
+- **Baris tombol ekstra** di atas keyboard: Tab/Shift-Tab, kurung & simbol (berpasangan otomatis), panah, Home/End,
+  komentar, saran kode, duplikat & hapus baris.
+- **Simpan otomatis** 2 dtk setelah berhenti mengetik; **tab terbuka dipulihkan** saat aplikasi dibuka lagi;
+  **Buka file cepat** (`GET /files/list`, urutan nama → path → fuzzy).
+- **Format kode** (`POST /files/format`): clang-format (C/C++/Java/C#), ruff (Python), prettier
+  (JS/TS/CSS/HTML/JSON/YAML/Markdown), gofmt — di sandbox, menghormati `.clang-format`, `.prettierrc`, `pyproject.toml`.
+- **Ganti nama simbol** & **cari semua referensi** lintas file (LSP; C/C++ menganalisis file proyek dulu),
+  **petunjuk parameter** saat mengetik `(`/`,`, **panel Masalah** (penghitung ⛔/⚠ + daftar, lompat ke baris).
+- **Language server baru**: JavaScript/TypeScript, Go (gopls), PHP (intelephense), HTML, CSS, JSON, Bash —
+  selain C/C++ (clangd) dan Python (pyright). Semua di sandbox, dipasang `install_runtimes.sh`.
+- **Cari & ganti di seluruh proyek** (`POST /files/grep`, `POST /files/replace`): teks/regex, huruf besar-kecil,
+  kata utuh; tiap file yang diganti tercatat di riwayat versi.
+- **Penanda baris Git** (ditambah/diubah/dihapus vs HEAD, termasuk perubahan belum disimpan; `GET /git/head-file`).
+- **Outline** bersarang dari LSP + **breadcrumb** fungsi/kelas di kursor; **snippet** per bahasa (saran & menu).
+- Uji editor di Chromium headless (`web_editor/test`, juga di CI).
+### Diperbaiki
+- Riwayat versi file dibatasi 50 versi per file (sebelumnya tumbuh tanpa batas).
+- `install_runtimes.sh` memasang ulang clangd setiap kali dijalankan.
+- Bundel editor: teks `</script>` di dalam kode tidak lagi memutus tag `<script>` inline.
+
 ## 1.5.0 — 2026-11-28 (rilis stabil)
 ### Ditambahkan
 - **Profil pengguna**: foto profil (lama dihapus saat diganti), nama tampilan, email, bio; profil aktif di Dashboard

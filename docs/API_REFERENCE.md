@@ -26,6 +26,10 @@ Error: `{"error":{"code","message","details"}}`.
 | GET | /files/tree?project_id&path&depth | read | pohon folder |
 | GET | /files/read?project_id&path | read | isi + sha256 (biner ditandai) |
 | GET | /files/info · /files/search?q&content | read | |
+| GET | /files/list?project_id | read | semua path file proyek (Buka file cepat; tanpa .git/node_modules/.venv) |
+| POST | /files/grep `{project_id, query, regex, case_sensitive, whole_word}` | read | cari di seluruh proyek (maks. 1000) |
+| POST | /files/replace `{… , replacement, paths?}` | write | ganti semua; tiap file tercatat di riwayat |
+| POST | /files/format `{project_id, path, content, tab_size}` · GET /files/format/status | write / login | format kode di sandbox; mengembalikan teks |
 | POST | /files/create | write | file/folder |
 | PUT | /files/write | write | atomik; `expected_sha256` → 409 `write_conflict` bila berubah |
 | POST | /files/rename · /files/copy · /files/move | write | |
@@ -46,6 +50,7 @@ Error: `{"error":{"code","message","details"}}`.
 | POST | /database/query | read atau write | `mode`, `confirm` untuk destruktif |
 | POST | /database/backup | read | salinan terverifikasi |
 | GET | /git/status · /git/log · /git/branches · /git/diff | read | |
+| GET | /git/head-file?project_id&path | read | isi file di HEAD (penanda baris berubah di editor) |
 | POST | /git/init · /git/add · /git/commit · /git/branch · /git/checkout · /git/remote · /git/pull · /git/push · /git/clone | write | |
 | GET/POST/DELETE | /git/credentials | write | token terenkripsi |
 | POST | /http/request | execute | anti-SSRF |
@@ -71,8 +76,10 @@ Error: `{"error":{"code","message","details"}}`.
   `{type:"signal",signal:"SIGINT"}`, `{type:"ping"}`; server: `{type:"output",data}`, `{type:"exit",exit_code}`.
 
 ## Language server (LSP)
-- `GET /api/v1/lsp/status` → ketersediaan per bahasa (`c`, `cpp` → clangd; `python` → pyright) + sesi aktif.
-- `WS /ws/lsp?project_id=&language=cpp|c|python&token=` — satu pesan WS = satu pesan JSON-RPC LSP.
+- `GET /api/v1/lsp/status` → ketersediaan per bahasa (`c`, `cpp` → clangd; `python` → pyright; `javascript`,
+  `typescript` → typescript-language-server; `go` → gopls; `php` → intelephense; `html`, `css`, `json` →
+  vscode-*-language-server; `shell` → bash-language-server) + sesi aktif (maks. `CS_LSP_MAX_SESSIONS`, bawaan 6).
+- `WS /ws/lsp?project_id=&language=<bahasa di atas>&token=` — satu pesan WS = satu pesan JSON-RPC LSP.
   URI file memakai akar virtual `file:///workspace/<path>`; path asli server tidak pernah dikirim ke klien.
   Server mengirim `cs/ready` setelah language server berjalan, `cs/error` (`lsp_unavailable`, `lsp_busy`,
   `low_memory`, `permission_denied`) atau `cs/exit`. Butuh izin `read` + `execute`. Proses berjalan di sandbox

@@ -8,7 +8,7 @@ menguji, dan memperbaiki kode dari HP. Kodenya tersimpan dan dijalankan di Pi, d
 
 | | |
 |---|---|
-| Versi server | **1.5.0** — rilis stabil (FastAPI, Python 3) |
+| Versi server | **1.6.0** (FastAPI, Python 3) |
 | Aplikasi | Android 8.0+ (Kotlin + Jetpack Compose), dibangun otomatis oleh GitHub Actions |
 | Platform uji | Raspberry Pi 5 16 GB · Debian 13 (trixie) aarch64 · kernel 6.x · NVMe |
 | Port bawaan | `8800` · API `/api/v1` · dokumentasi interaktif `/docs` |
@@ -69,10 +69,19 @@ kosong, tanpa jaringan, dan hanya folder proyek yang bisa ditulis. Output dikiri
   dan riwayat. Status job: `QUEUED → STARTING → RUNNING → COMPLETED / FAILED / TIMEOUT / CANCELLED`.
 - **Instal dependensi** dengan satu tombol: pip ke `.venv` proyek, `npm install`, `go mod download`, `composer install`.
   Langkah instal mendapat internet, tetapi program biasa tetap tanpa internet ([detail](#sandbox--instal-dependensi)).
-- **Editor CodeMirror 6**: syntax highlighting 18+ bahasa, banyak tab, cari & ganti, lompat ke baris, code folding,
-  autocomplete, diagnostics dari output compiler, simbol dokumen, riwayat versi & restore, serta tema dan warna sendiri.
-- **Language server (LSP)** di server dan di dalam sandbox: clangd (C/C++) dan pyright (Python) untuk autocomplete
-  pintar, error saat mengetik, info simbol, dan go-to-definition lintas file.
+- **Code Editor (IDE)** berbasis CodeMirror 6, dirancang untuk layar HP:
+  - syntax highlighting 18+ bahasa, banyak tab (dipulihkan saat aplikasi dibuka lagi), cari & ganti, lompat ke baris,
+    lipat kode, multi-kursor, kurung otomatis, riwayat versi & restore, tema & warna sendiri;
+  - **baris tombol ekstra** di atas keyboard (⇥ ⇤ { } ( ) [ ] ; : " ' < > = …, panah, Home/End, komentar, saran,
+    duplikat/hapus baris) dan **simpan otomatis**;
+  - **Buka file cepat**, **Cari & ganti di seluruh proyek** (teks/regex, kata utuh, huruf besar-kecil);
+  - **Format kode**: clang-format (C/C++/Java/C#), ruff (Python), prettier (JS/TS/CSS/HTML/JSON/YAML/Markdown), gofmt;
+  - **penanda baris Git** (ditambah/diubah/dihapus dibanding commit terakhir), **outline** & **breadcrumb**,
+    **snippet** per bahasa, **panel Masalah** (⛔/⚠).
+- **Language server (LSP)** di server, di dalam sandbox, untuk **C/C++ (clangd), Python (pyright),
+  JavaScript/TypeScript, Go (gopls), PHP (intelephense), HTML, CSS, JSON, Bash**: autocomplete pintar, error saat
+  mengetik, info simbol, ke definisi, **cari semua referensi**, **ganti nama simbol** lintas file, dan **petunjuk
+  parameter** saat mengetik.
 - **Terminal interaktif** (PTY + WebSocket, xterm.js): banyak sesi, tombol ESC/TAB/Ctrl, dan idle timeout.
 - **File manager aman**: CRUD, rename/copy/move, cari nama & isi, favorit, file terakhir, tulis atomik,
   deteksi konflik SHA-256, riwayat versi + undo, serta perlindungan path traversal & symlink.
@@ -121,7 +130,9 @@ kosong, tanpa jaringan, dan hanya folder proyek yang bisa ditulis. Output dikiri
 - Raspberry Pi OS / Debian 12–13, Python ≥ 3.10, RAM ≥ 4 GB (16 GB disarankan bila memakai model AI lokal).
 - Paket wajib: `git bubblewrap curl python3-venv`.
 - Compiler sesuai kebutuhan: `gcc g++ make cmake ninja-build default-jdk golang nodejs npm sqlite3 php-cli`.
-- .NET SDK 8, PHP, clangd, dan pyright dipasang otomatis tanpa sudo oleh `scripts/install_runtimes.sh` bila belum ada.
+- .NET SDK 8, PHP, language server (clangd, pyright, typescript-language-server, gopls, intelephense, HTML/CSS/JSON,
+  bash-language-server) dan formatter (clang-format, ruff, prettier) dipasang otomatis tanpa sudo oleh
+  `scripts/install_runtimes.sh` bila belum ada (±350 MB di `.lsp/`; gopls dikompilasi ±5 menit di Pi).
 - Opsional: [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` + model `.gguf` untuk AI lokal.
 
 **HP**
@@ -211,6 +222,14 @@ kerja harian dan `admin` hanya untuk pemulihan.
 |---|---|
 | Buat proyek | Proyek → ➕ → pilih template bahasa (atau clone dari Git) |
 | Tulis & jalankan | Explorer → buka file → ▶ Jalankan / 🔨 Build; output real-time di layar Output (stdin, Stop, error bisa diklik) |
+| Buka file cepat | Code Editor → ikon 🔍📄 → ketik sebagian nama file |
+| Rapikan kode | Code Editor → ⋮ → **Format kode** |
+| Ganti nama fungsi/variabel | taruh kursor di nama → ⋮ → **Ganti nama simbol…** (semua file ikut diganti) |
+| Cari pemakaian | kursor di nama → ⋮ → **Cari semua referensi** |
+| Cari & ganti di proyek | Code Editor → ⋮ → **Cari & ganti di proyek…** |
+| Lihat error | ketuk ⛔/⚠ di toolbar editor → pilih baris |
+| Fungsi/kelas di file | ⋮ → **Outline**, atau ketuk baris "ƒ …" di bawah toolbar |
+| Template kode | ketik awalan (mis. `main`, `for`, `ifmain`, `html5`) lalu pilih dari saran, atau ⋮ → **Sisipkan snippet…** |
 | Pasang library | Explorer → ⬇ **Instal dependensi** (baca `requirements.txt`, `package.json`, `go.mod`, `composer.json`, atau ketik nama paket) |
 | Terminal | menu Terminal → sesi baru (shell di sandbox proyek) |
 | Git | menu Git → status, commit, push/pull, branch |
@@ -352,7 +371,7 @@ Coding_server/
 │       ├── ui/              dashboard, projects, editor, terminal, output, ai, agent, git, database,
 │       │                    http, monitor, settings, theme, common
 │       └── agent/           layanan notifikasi pemantau AI Agent
-├── web_editor/              sumber CodeMirror 6 & xterm.js → dibundel ke aset Android
+├── web_editor/              sumber CodeMirror 6 & xterm.js → dibundel ke aset Android (test/: uji Chromium headless)
 ├── model_profiles/          profil parameter per model AI (hasil Uji Model)
 ├── scripts/                 install, start/stop/restart/status, admin_password, backup, uninstall, runtime
 ├── deployment/              template systemd & contoh konfigurasi .env
@@ -379,6 +398,11 @@ cd android && echo "sdk.dir=$HOME/android-sdk" > local.properties
 ./gradlew -Pcodingserver.localArm64 -Pcodingserver.allowDebugSigning \
   -Pandroid.aapt2FromMavenOverride=$HOME/android-sdk/aapt2-arm64/aapt2 testDebugUnitTest assembleDebug
 ```
+**Editor web (CodeMirror) — dibundel ke aset Android:**
+```bash
+cd web_editor && npm ci && npm run build && npm test   # uji API editor di Chromium headless
+```
+
 APK resmi (API 35, tanda tangan rilis) dibuat oleh GitHub Actions setiap push ke `main` lalu diterbitkan sebagai
 `android-latest`. Detail ada di [docs/ANDROID.md](docs/ANDROID.md) dan [docs/TESTING.md](docs/TESTING.md).
 
@@ -417,6 +441,9 @@ APK resmi (API 35, tanda tangan rilis) dibuat oleh GitHub Actions setiap push ke
 | Pi macet / RAM penuh saat agen berjalan | Model AI → AI Agent → ⛔ Paksa lepas; kurangi "Model lokal termuat bersamaan" ke 1 |
 | Agen gagal "konteks terlampaui" | naikkan konteks di Model AI → AI Agent → Konteks model (mis. 16K); jalankan perintah sudo yang ditampilkan bila diminta |
 | Menu tidak ada (mis. Terminal, Backup) | peran akun tidak punya izinnya — minta admin mengubah peran |
+| Autocomplete/error editor tidak muncul | ⋮ → Aktifkan language server; proyek harus terbuka; cek `GET /api/v1/lsp/status`; jalankan `scripts/install_runtimes.sh` |
+| "Format kode" gagal | pesan menunjukkan error sintaks dari formatter; perbaiki kodenya dulu. Formatter hilang → `scripts/install_runtimes.sh` |
+| Ganti nama C/C++ tidak mengubah semua file | file di luar proyek (header sistem) tidak pernah diubah; proyek > 60 file C/C++ hanya 60 pertama yang dianalisis |
 
 Selengkapnya ada di [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 

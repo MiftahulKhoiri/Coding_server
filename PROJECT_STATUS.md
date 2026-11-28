@@ -1,10 +1,10 @@
-# PROJECT_STATUS — CODING_SERVER 1.5.0 (rilis stabil)
+# PROJECT_STATUS — CODING_SERVER 1.6.0
 
 Terakhir diperbarui: 28 Nov 2026. Status berdasarkan uji nyata di Raspberry Pi 5 (aarch64), CI GitHub, dan
 pemakaian APK oleh pemilik proyek di HP.
 
-**Status proyek: SELESAI (feature freeze).** Pengembangan berikutnya hanya perbaikan bug. Satu pekerjaan rumah
-tercatat di bawah (uji panjang AI Agent dengan model asli).
+**Status proyek: SELESAI.** 1.6.0 menyempurnakan fungsi utama aplikasi: **Code Editor sebagai IDE** (lihat
+docs/CHANGELOG.md). Pengembangan berikutnya hanya perbaikan bug. Pekerjaan rumah tercatat di bawah.
 
 ## Lingkungan server aktual
 Raspberry Pi 5 Model B · Debian 13 (trixie) aarch64 · kernel 6.18 · 16 GB RAM · NVMe ·
@@ -19,7 +19,10 @@ sandbox **bubblewrap aktif** · `llama-server` (systemd sistem, mode router, `--
 | Login, profil, admin utama terkunci | ✅ | test_auth, test_profiles; uji manual di APK |
 | Izin per kelompok & menu tersembunyi | ✅ | test_profiles::test_permission_groups, test_extra_perms_guard; build APK CI |
 | Project & file manager | ✅ | test_files + uji kontrak |
-| Editor (CodeMirror) + LSP clangd/pyright | ✅ | test_lsp (10× berturut-turut lulus setelah perbaikan) |
+| Editor (CodeMirror) — tombol ekstra, simpan otomatis, tab dipulihkan, snippet, penanda Git, masalah | ✅ | web_editor/test (15 kasus di Chromium headless, juga di CI) + UnitTests Android |
+| LSP 11 bahasa (C/C++, Python, JS/TS, Go, PHP, HTML, CSS, JSON, Bash): diagnostik, completion, definisi, referensi, rename, signature | ✅ | test_lsp (server asli di Pi) |
+| Format kode (clang-format, ruff, prettier, gofmt) | ✅ | test_format |
+| Cari & ganti seluruh proyek, buka file cepat, isi HEAD Git | ✅ | test_files::test_grep_and_replace_all, test_list_files_for_quick_open, test_services::test_git_head_file |
 | Terminal interaktif, output real-time | ✅ | test_terminal_*, test_output_streaming_ws |
 | 11 engine bahasa, build C/C++ multi-file | ✅ | test_run_language, test_engines |
 | Instal dependensi di sandbox | ✅ | test_deps_install; uji di Pi (pip ke `.venv`) |
@@ -34,7 +37,9 @@ sandbox **bubblewrap aktif** · `llama-server` (systemd sistem, mode router, `--
 `*` = mekanisme agent teruji; keberhasilan menyelesaikan tugas besar bergantung pada kemampuan model lokal.
 
 ## Hasil uji aktual (28 Nov 2026)
-- **Backend di Pi 5**: 171 tes (pytest) lulus, termasuk uji sandbox bwrap asli dan LSP nyata.
+- **1.6.0 di Pi 5**: 189 tes backend lulus (termasuk 13 uji LSP dengan server asli dan uji format), 15 uji editor di
+  Chromium headless, unit test Android; CI Backend tests ✅ & Android APK ✅ untuk setiap paket.
+- **Backend di Pi 5 (1.5.0)**: 171 tes (pytest) lulus, termasuk uji sandbox bwrap asli dan LSP nyata.
 - **CI GitHub**: Backend tests ✅, Android APK ✅ (rilis `android-latest`).
 - **APK**: diuji pemilik seharian di HP — profil, foto, tema, editor, terminal, AI Agent, izin.
 - **Install → pakai → uninstall bersih (28 Nov 2026, Pi 5)** dari clone baru GitHub v1.5.0 di folder terpisah
@@ -52,6 +57,8 @@ sandbox **bubblewrap aktif** · `llama-server` (systemd sistem, mode router, `--
     tidak ada proses/unit tersisa, crontab & unit lain (gameserver, coding-server utama) tidak berubah.
 
 ## Pekerjaan rumah (masa depan)
+0. **Coba fitur IDE 1.6.0 di HP** (tombol ekstra, format, rename, cari di proyek, penanda Git): sudah diuji otomatis
+   (backend, Chromium headless, kompilasi & unit test Android), belum disentuh langsung di layar HP.
 1. **Uji panjang AI Agent dengan model asli**: 1 model untuk semua peran, konteks 16K, ulangi task contoh
    "dasbor login/register/lupa sandi" sampai selesai. Butuh waktu lama di Pi (model lokal ±1–5 token/detik).
 2. Opsional: service sistem dengan user khusus (`sudo ./scripts/install_systemd.sh`), reverse proxy HTTPS / VPN
