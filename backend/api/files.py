@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from backend.dependencies import Services, current_user, project_dir, require, services
 from backend.schemas.models import (FavoriteRequest, FileContent, FileCreate, FileEntry, FileMove, FileRename,
-                                    FileWrite, FormatRequest, OkResponse, RestoreRequest)
+                                    FileWrite, FormatRequest, GrepRequest, OkResponse, ReplaceRequest, RestoreRequest)
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -77,6 +77,22 @@ def search(project_id: str, q: str = Query(min_length=1), content: bool = False,
 @router.get("/list", summary="Semua path file proyek (untuk Buka file cepat); tanpa .git, node_modules, .venv, cache")
 def list_files(project_id: str, user: dict = Depends(require("read")), svc: Services = Depends(services)):
     return svc.files.list_files(project_dir(svc, project_id, user))
+
+
+@router.post("/grep", summary="Cari teks/regex di seluruh file proyek (maks. 1000 hasil)")
+def grep(body: GrepRequest, user: dict = Depends(require("read")), svc: Services = Depends(services)):
+    root = project_dir(svc, body.project_id, user)
+    return svc.files.grep(root, body.query, regex=body.regex, case_sensitive=body.case_sensitive, whole_word=body.whole_word)
+
+
+@router.post("/replace", summary="Ganti semua kemunculan di proyek (tiap file tercatat di riwayat versi)")
+def replace_all(body: ReplaceRequest, user: dict = Depends(require("write")), svc: Services = Depends(services)):
+    root = project_dir(svc, body.project_id, user)
+    out = svc.files.replace_all(body.project_id, root, body.query, body.replacement, regex=body.regex,
+                                case_sensitive=body.case_sensitive, whole_word=body.whole_word, paths=body.paths, actor=user)
+    svc.db.audit("files_replace_all", user=user, target=body.project_id,
+                 detail={"query": body.query[:100], "files": len(out["files"]), "total": out["total"]})
+    return out
 
 
 @router.post("/format", summary="Format kode (clang-format, ruff, prettier, gofmt) — mengembalikan teks, tidak menulis file")

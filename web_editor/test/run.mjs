@@ -23,7 +23,8 @@ window.addEventListener("load", async () => {
 </script>`;
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "cs-editor-test-"));
 const page = path.join(tmp, "test.html");
-fs.writeFileSync(page, html.replace("</body>", harness + "</body>"));
+const at = html.lastIndexOf("</body>");
+fs.writeFileSync(page, html.slice(0, at) + harness + html.slice(at));
 const chrome = process.env.CHROME || ["/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome"]
   .find((p) => fs.existsSync(p));
 if (!chrome) { console.log("SKIP: Chromium tidak ditemukan"); process.exit(0); }

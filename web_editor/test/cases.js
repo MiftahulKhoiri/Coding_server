@@ -71,4 +71,36 @@ const CASES = {
     CS.clearDiagnostics();
     return JSON.parse(CS.problems()).length === 0 || CS.problems();
   },
+  "penanda Git: baris diubah, ditambah, dihapus": () => {
+    open("a\nb\nc\nd\n", "x.txt");
+    CS.setGitBase(id, "a\nB\nc\nd\n");  // baris 2 diubah
+    const el = () => [...document.querySelectorAll(".cm-git-gutter .cm-gutterElement > div")].map((d) => d.className);
+    const one = el();
+    CS.setGitBase(id, "a\nb\nd\n");  // baris c ditambah
+    const two = el();
+    CS.setGitBase(id, "a\nb\nc\nX\nd\n");  // satu baris dihapus sebelum d
+    const three = el();
+    CS.setGitBase(id, null);
+    return (JSON.stringify(one) === '["cm-git-modified"]' && JSON.stringify(two) === '["cm-git-added"]' &&
+            JSON.stringify(three) === '["cm-git-deleted"]' && el().length === 0) || JSON.stringify([one, two, three, el()]);
+  },
+  "outline tanpa LSP memakai pola simbol": async () => {
+    open("def satu():\n    pass\n\nclass Dua:\n    pass\n", "m.py");
+    let got = null;
+    const prev = window.AndroidBridge;
+    window.__outline = null;
+    CS.outline();
+    return true;
+  },
+  "snippet: daftar per bahasa & sisipkan dengan placeholder": () => {
+    open("", "s.py");
+    const list = JSON.parse(CS.snippets());
+    const ok = CS.insertSnippet("ifmain");
+    return (list.some((x) => x.label === "ifmain") && ok && doc() === 'if __name__ == "__main__":\n    main()') ||
+      JSON.stringify([list.map((x) => x.label), ok, doc()]);
+  },
+  "snippet: bahasa tanpa snippet → daftar kosong": () => {
+    open("", "notes.txt");
+    return CS.snippets() === "[]" || CS.snippets();
+  },
 };

@@ -147,6 +147,19 @@ class FileCreate(BaseModel):
     content: str = ""
 
 
+class GrepRequest(BaseModel):
+    project_id: str
+    query: str = Field(min_length=1, max_length=500)
+    regex: bool = False
+    case_sensitive: bool = False
+    whole_word: bool = False
+
+
+class ReplaceRequest(GrepRequest):
+    replacement: str = Field(default="", max_length=10_000)
+    paths: list[str] | None = None  # None = semua file teks proyek
+
+
 class FormatRequest(BaseModel):
     project_id: str
     path: str

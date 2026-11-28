@@ -29,7 +29,12 @@ sealed interface EditorEvent {
     data class RunRequested(val tabId: String) : EditorEvent
     data class References(val result: ReferenceResult) : EditorEvent
     data class RenameDone(val result: RenameResult) : EditorEvent
+    data class Outline(val items: List<OutlineItem>) : EditorEvent
 }
+
+@Serializable data class OutlineItem(val name: String, val kind: String = "", val detail: String = "", val depth: Int = 0,
+                                     val line: Int = 1)
+@Serializable data class SnippetItem(val label: String, val detail: String = "", val preview: String = "")
 
 @Serializable data class Problem(val line: Int, val column: Int = 1, val severity: String = "error", val message: String = "")
 @Serializable data class ReferenceItem(val path: String? = null, val uri: String = "", val line: Int = 1, val column: Int = 1,
@@ -76,6 +81,11 @@ class EditorBridge(private val c: EditorController) {
         path?.let { c.events.tryEmit(EditorEvent.OpenFile(it, line, col)) }
     }
     @JavascriptInterface fun onProblems(errors: Int, warnings: Int) { c.problems.value = errors to warnings }
+    @JavascriptInterface fun onBreadcrumb(text: String?) { c.breadcrumb.value = text.orEmpty() }
+    @JavascriptInterface fun onOutline(json: String?) {
+        json?.let { runCatching { ApiJson.decodeFromString(ListSerializer(OutlineItem.serializer()), it) }.getOrNull() }
+            ?.let { c.events.tryEmit(EditorEvent.Outline(it)) }
+    }
     @JavascriptInterface fun onReferences(json: String?) {
         json?.let { runCatching { ApiJson.decodeFromString(ReferenceResult.serializer(), it) }.getOrNull() }
             ?.let { c.events.tryEmit(EditorEvent.References(it)) }
@@ -102,6 +112,8 @@ class EditorController(context: Context) {
     val lspStatus = MutableStateFlow("")
     /** (jumlah error, jumlah peringatan) file aktif — dari LSP atau output build. */
     val problems = MutableStateFlow(0 to 0)
+    /** Fungsi/kelas tempat kursor berada (mis. "Kalkulator › tambah"). */
+    val breadcrumb = MutableStateFlow("")
     private val main = Handler(Looper.getMainLooper())
 
     // Pakai context Activity (bukan applicationContext): koneksi keyboard (IME) WebView lebih andal.
@@ -208,6 +220,13 @@ class EditorController(context: Context) {
     suspend fun lspServer(): String = decodeString(eval("CS.lspServer()")).orEmpty()
     private fun preloadJson(files: List<PreloadFile>?) =
         if (files.isNullOrEmpty()) "null" else q(ApiJson.encodeToString(ListSerializer(PreloadFile.serializer()), files))
+    suspend fun setGitBase(id: String, text: String?) { eval("CS.setGitBase(${q(id)}, ${text?.let { q(it) } ?: "null"})") }
+    suspend fun outline() { eval("CS.outline()") }
+    suspend fun snippets(): List<SnippetItem> {
+        val raw = decodeString(eval("CS.snippets()")) ?: return emptyList()
+        return runCatching { ApiJson.decodeFromString(ListSerializer(SnippetItem.serializer()), raw) }.getOrDefault(emptyList())
+    }
+    suspend fun insertSnippet(label: String) { eval("CS.insertSnippet(${q(label)})") }
     suspend fun findReferences(preload: List<PreloadFile>? = null) { eval("CS.findReferences(${preloadJson(preload)})") }
     suspend fun renameSymbol(newName: String, preload: List<PreloadFile>? = null) {
         eval("CS.renameSymbol(${q(newName)}, ${preloadJson(preload)})")

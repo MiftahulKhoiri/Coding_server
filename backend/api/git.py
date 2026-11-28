@@ -55,6 +55,11 @@ async def diff(project_id: str, staged: bool = False, path: str | None = None, u
     return await svc.git.diff(project_dir(svc, project_id, user), user, staged, path)
 
 
+@router.get("/head-file", summary="Isi file di HEAD (penanda baris berubah di editor)")
+async def head_file(project_id: str, path: str, user: dict = Depends(require("read")), svc: Services = Depends(services)):
+    return await svc.git.head_file(project_dir(svc, project_id, user), user, path)
+
+
 @router.post("/remote")
 async def remote(body: GitRemoteSet, user: dict = Depends(require("write")), svc: Services = Depends(services)):
     return await svc.git.set_remote(project_dir(svc, body.project_id, user), user, body.name, body.url)

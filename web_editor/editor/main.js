@@ -22,6 +22,7 @@ import { lintKeymap, setDiagnostics, lintGutter, forEachDiagnostic } from "@code
 import { oneDark } from "@codemirror/theme-one-dark";
 import { detectLanguage, languageExtension, SYMBOL_PATTERNS } from "./languages.js";
 import { LspManager, applyDiagnosticsTo } from "./lsp.js";
+import { gitGutter, setGitMarks, gitMarksFor, snippetSource, snippetList, insertSnippet } from "./extras.js";
 
 // Android WebView: CodeMirror memakai API EditContext bila tersedia. Pada sebagian WebView/keyboard
 // (Gboard, SwiftKey) input lewat EditContext tidak sampai ke editor sehingga "tidak bisa mengetik".
@@ -132,7 +133,9 @@ function baseExtensions(lang, editable = true) {
     dropCursor(), EditorState.allowMultipleSelections.of(true), indentOnInput(),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }), bracketMatching(), closeBrackets(),
     autocompletion({ override: null, activateOnTyping: true }),
-    EditorState.languageData.of(() => [{ autocomplete: lspCompletion }, { autocomplete: wordCompletion }]),
+    EditorState.languageData.of(() => [{ autocomplete: lspCompletion }, { autocomplete: wordCompletion },
+                                       { autocomplete: snippetSource(lang) }]),
+    gitGutter,
     rectangularSelection(), crosshairCursor(), highlightActiveLine(), highlightSelectionMatches(), lintGutter(),
     search({ top: true }),
     keymap.of([
@@ -157,6 +160,8 @@ function baseExtensions(lang, editable = true) {
         lsp.change(current);
         let typed = "";
         u.changes.iterChanges((_a, _b, _c, _d, ins) => { typed = ins.toString(); });
+        scheduleGit();
+        scheduleSymbols();
         if (typed === "(" || typed === "()" || typed === ",") scheduleSignature();
         else if (typed === ")" || typed === ";") hideSignature();
       }
@@ -165,6 +170,7 @@ function baseExtensions(lang, editable = true) {
         const pos = u.state.selection.main.head;
         const line = u.state.doc.lineAt(pos);
         bridge.onCursor(line.number, pos - line.from + 1);
+        if (line.number !== crumbLine || u.docChanged) { crumbLine = line.number; updateBreadcrumb(line.number); }
       }
     }),
   ];
@@ -260,6 +266,51 @@ function regexDefinition() {
   return false;
 }
 
+// ---------- penanda Git & breadcrumb ----------
+let gitTimer = null;
+function refreshGit(id) {
+  const t = tabs.get(id);
+  if (!t) return;
+  const st = id === current ? view.state : t.state;
+  const marks = t.gitBase === null || t.gitBase === undefined ? null : gitMarksFor(st, t.gitBase);
+  const effect = setGitMarks.of(marks || gitMarksFor(st, null));
+  if (id === current) { suppress = true; view.dispatch({ effects: effect }); suppress = false; t.state = view.state; }
+  else t.state = t.state.update({ effects: effect }).state;
+}
+function scheduleGit() {
+  const id = current;
+  const t = tabs.get(id);
+  if (!t || t.gitBase === null || t.gitBase === undefined) return;
+  clearTimeout(gitTimer);
+  gitTimer = setTimeout(() => refreshGit(id), 400);
+}
+let symTimer = null;
+let crumbLine = 0;
+let lastCrumb = null;
+function scheduleSymbols() {
+  const id = current;
+  if (!id || !lsp.supports(id)) return;
+  clearTimeout(symTimer);
+  symTimer = setTimeout(async () => {
+    const r = await lsp.documentSymbols(id);
+    const t = tabs.get(id);
+    if (t && r) { t.symbols = r; if (id === current) { lastCrumb = null; updateBreadcrumb(view.state.doc.lineAt(view.state.selection.main.head).number); } }
+  }, 1500);
+}
+function updateBreadcrumb(line) {
+  const t = current && tabs.get(current);
+  let text = "";
+  if (t && t.symbols && t.symbols.length) {
+    const chain = t.symbols.filter((s) => (s.startLine || s.line) <= line && (s.endLine || s.line) >= line && s.endLine > (s.startLine || s.line))
+      .sort((a, b) => a.depth - b.depth);
+    text = chain.map((s) => s.name).join(" › ");
+  } else if (t) {
+    const above = symbols(current).filter((s) => s.line <= line).pop();
+    text = above ? above.name : "";
+  }
+  if (text !== lastCrumb) { lastCrumb = text; callBridge("onBreadcrumb", text); }
+}
+
 // ---------- masalah, rename, petunjuk parameter ----------
 function problemList() {
   const out = [];
@@ -350,6 +401,7 @@ window.CS = {
     tabs.set(id, { state, lang: language, filename, savedText: text || "" });
     this.switchTab(id);
     lsp.open(id, language, text || "");
+    setTimeout(() => { if (current === id) scheduleSymbols(); }, 2500);
     return language;
   },
   switchTab(id) {
@@ -362,6 +414,8 @@ window.CS = {
     suppress = false;
     hideSignature();
     notifyProblems();
+    lastCrumb = null;
+    updateBreadcrumb(view.state.doc.lineAt(view.state.selection.main.head).number);
     view.focus();
     return true;
   },
@@ -535,6 +589,28 @@ window.CS = {
     return true;
   },
   currentWord() { return wordAtCursor(); },
+  snippets() { const t = tabs.get(current); return JSON.stringify(t ? snippetList(t.lang) : []); },
+  insertSnippet(label) { const t = tabs.get(current); const ok = !!t && insertSnippet(view, t.lang, label); view.focus(); return ok; },
+  /** Teks file di commit HEAD (null = bukan Git / file baru) untuk penanda baris berubah. */
+  setGitBase(id, text) {
+    const t = tabs.get(id);
+    if (!t) return false;
+    t.gitBase = text === undefined ? null : text;
+    refreshGit(id);
+    return true;
+  },
+  /** Outline: hasil lewat bridge.onOutline(json) — dari language server bila aktif, selain itu pola regex. */
+  outline() {
+    const id = current;
+    if (!id) return false;
+    const fallback = () => symbols(id).map((x) => ({ name: x.name, kind: "", detail: x.text, depth: 0, line: x.line }));
+    if (!lsp.supports(id)) { callBridge("onOutline", JSON.stringify(fallback())); return true; }
+    lsp.documentSymbols(id).then((r) => {
+      if (r && r.length) tabs.get(id) && (tabs.get(id).symbols = r);
+      callBridge("onOutline", JSON.stringify(r && r.length ? r : fallback()));
+    });
+    return true;
+  },
   /** Server LSP tab aktif ("clangd" / "pyright" / …) atau "" bila tidak ada. */
   lspServer() { const d = current && lsp.docFor(current); return d && lsp.supports(current) ? d.server : ""; },
 };

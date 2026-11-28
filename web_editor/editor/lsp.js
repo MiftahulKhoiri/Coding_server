@@ -17,6 +17,9 @@ const KIND = {
   9: "namespace", 10: "property", 11: "constant", 12: "enum", 13: "keyword", 14: "keyword", 15: "text",
   17: "text", 19: "namespace", 20: "enum", 21: "constant", 22: "class", 23: "type", 25: "type",
 };
+const SYMBOL_KIND = { 2: "modul", 3: "namespace", 4: "paket", 5: "kelas", 6: "metode", 7: "properti", 8: "field",
+  9: "konstruktor", 10: "enum", 11: "interface", 12: "fungsi", 13: "variabel", 14: "konstanta", 22: "anggota enum",
+  23: "struct", 26: "tipe" };
 const SEVERITY = { 1: "error", 2: "warning", 3: "info", 4: "hint" };
 
 export function uriOfPath(path) {
@@ -417,6 +420,32 @@ export class LspManager {
     if (r.changes) for (const [uri, edits] of Object.entries(r.changes)) add(uri, edits);
     if (r.documentChanges) for (const dc of r.documentChanges) if (dc.textDocument && dc.edits) add(dc.textDocument.uri, dc.edits);
     return { edits: out };
+  }
+
+  /** Simbol dokumen (outline): [{name, kind, detail, depth, line, endLine}] — line 1-based. */
+  async documentSymbols(tabId) {
+    const x = this.conn(tabId);
+    if (!x) return null;
+    let r;
+    try {
+      r = await x.c.request("textDocument/documentSymbol", { textDocument: { uri: x.d.uri } }, 8000);
+    } catch { return null; }
+    const out = [];
+    const walk = (list, depth) => {
+      for (const s of list || []) {
+        if (s.location) {  // SymbolInformation (datar)
+          out.push({ name: s.name, kind: SYMBOL_KIND[s.kind] || "", detail: s.containerName || "", depth: s.containerName ? 1 : 0,
+                     line: s.location.range.start.line + 1, endLine: s.location.range.end.line + 1 });
+        } else {
+          out.push({ name: s.name, kind: SYMBOL_KIND[s.kind] || "", detail: s.detail || "", depth,
+                     line: (s.selectionRange || s.range).start.line + 1, startLine: s.range.start.line + 1,
+                     endLine: s.range.end.line + 1 });
+          walk(s.children, depth + 1);
+        }
+      }
+    };
+    walk(r, 0);
+    return out;
   }
 
   /** Petunjuk parameter: {label, active: [from, to] | null} atau null. */

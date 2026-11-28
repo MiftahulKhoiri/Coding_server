@@ -110,3 +110,35 @@ def test_history_keeps_last_versions(client, auth, project):
     snaps = list((client.app.state.services.settings.history_dir / project).iterdir())
     rows = svc.db.all("SELECT snapshot FROM file_history WHERE project_id=?", (project,))
     assert {p.name for p in snaps} == {r["snapshot"] for r in rows}  # file snapshot lama ikut terhapus
+
+
+def test_grep_and_replace_all(client, auth, project):
+    def put(path, content):
+        assert client.put("/api/v1/files/write", json={"project_id": project, "path": path, "content": content},
+                          headers=auth).status_code == 200
+    put("a.py", "def hitung(x):\n    return x\n\nprint(hitung(2), Hitung)\n")
+    put("lib/b.js", "const hitungan = 1; hitung(3);\n")
+    put("node_modules/z.js", "hitung()\n")  # dilewati
+    g = client.post("/api/v1/files/grep", json={"project_id": project, "query": "hitung", "whole_word": True,
+                                                 "case_sensitive": True}, headers=auth).json()
+    hits = {(m["path"], m["line"], m["column"]) for m in g["matches"]}
+    assert hits == {("a.py", 1, 5), ("a.py", 4, 7), ("lib/b.js", 1, 21)}, hits
+    assert g["files"] == 2
+    gi = client.post("/api/v1/files/grep", json={"project_id": project, "query": "hitung"}, headers=auth).json()
+    assert len(gi["matches"]) == 5  # tanpa whole-word & case: + "hitungan" + "Hitung"
+    bad = client.post("/api/v1/files/grep", json={"project_id": project, "query": "(", "regex": True}, headers=auth)
+    assert bad.status_code == 400 and bad.json()["error"]["code"] == "bad_regex"
+    # ganti (regex dengan grup) hanya di a.py
+    r = client.post("/api/v1/files/replace", json={"project_id": project, "query": r"hitung\((\w+)\)", "regex": True,
+                                                   "replacement": r"jumlah(\1)", "paths": ["a.py"]}, headers=auth).json()
+    assert r == {"files": [{"path": "a.py", "count": 2}], "total": 2}, r
+    a = client.get("/api/v1/files/read", params={"project_id": project, "path": "a.py"}, headers=auth).json()["content"]
+    assert a == "def jumlah(x):\n    return x\n\nprint(jumlah(2), Hitung)\n"
+    # ganti teks biasa: "\1" tidak ditafsirkan sebagai grup
+    r = client.post("/api/v1/files/replace", json={"project_id": project, "query": "hitungan", "replacement": r"x\1"},
+                    headers=auth).json()
+    assert r["total"] == 1
+    b = client.get("/api/v1/files/read", params={"project_id": project, "path": "lib/b.js"}, headers=auth).json()["content"]
+    assert b.startswith("const x\\1 = 1;")
+    h = client.get("/api/v1/files/history", params={"project_id": project, "path": "a.py"}, headers=auth).json()["history"]
+    assert any("ganti semua" in x["note"] for x in h)

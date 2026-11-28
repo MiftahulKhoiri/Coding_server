@@ -78,7 +78,9 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
     var conflict by remember { mutableStateOf<EditorTab?>(null) }
     var saveAs by remember { mutableStateOf(false) }
     var gotoLine by remember { mutableStateOf(false) }
-    var symbols by remember { mutableStateOf<List<Symbol>?>(null) }
+    var symbols by remember { mutableStateOf<List<OutlineItem>?>(null) }
+    var snippetList by remember { mutableStateOf<List<SnippetItem>?>(null) }
+    var projectSearch by remember { mutableStateOf(false) }
     var history by remember { mutableStateOf<List<HistoryEntry>?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var newFile by remember { mutableStateOf(false) }
@@ -88,6 +90,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
     var problemList by remember { mutableStateOf<List<Problem>?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
     val problems by editor.problems.collectAsState()
+    val breadcrumb by editor.breadcrumb.collectAsState()
     val autoSaveJobs = remember { mutableMapOf<String, kotlinx.coroutines.Job>() }
     var colorDialog by remember { mutableStateOf(false) }
     var textColorInput by remember(prefs) { mutableStateOf(prefs.textColor) }
@@ -121,6 +124,14 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
         vm.execute(FileEntry(tab.name, tab.path, "file"), build, projectId = tab.projectId)
             .onSuccess { onRunStarted() }
             .onFailure { vm.toast(it.message ?: "Gagal menjalankan") }
+    }
+
+    /** Penanda baris berubah: bandingkan dengan isi file di commit HEAD (file baru di repo = semua baris "ditambah"). */
+    suspend fun refreshGit(tab: EditorTab) {
+        val c = client ?: return
+        apiCall { c.api.gitHeadFile(tab.projectId, tab.path) }.onSuccess { h ->
+            editor.setGitBase(tab.id, if (h.tracked) h.content.orEmpty() else if (h.repo) "" else null)
+        }
     }
 
     suspend fun formatActive() {
@@ -195,6 +206,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                         editor.openTab(tab.id, f.content, f.name)
                         vm.updateTab(tab.id) { it.copy(sha256 = f.sha256, language = f.language, dirty = false) }
                         loadError = null
+                        refreshGit(tab)
                     }
                 }
                 .onFailure {
@@ -203,7 +215,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                         android.util.Log.e("CodingServerEditor", loadError, it)
                     }
                 }
-        } else editor.switchTab(tab.id)
+        } else { editor.switchTab(tab.id); refreshGit(tab) }
         pendingGoto?.let { (id, line, col) -> if (id == tab.id && editor.hasTab(id)) { editor.gotoLine(line, col); pendingGoto = null } }
     }
     LaunchedEffect(prefs) { editor.applyPrefs(prefs.darkTheme, prefs.fontSize, prefs.wordWrap, prefs.tabSize, prefs.textColor, prefs.backgroundColor) }
@@ -226,6 +238,7 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                 is EditorEvent.RunRequested -> runActive(false)
                 is EditorEvent.References -> { busy = null; refs = ev.result }
                 is EditorEvent.RenameDone -> applyRemoteRename(ev.result)
+                is EditorEvent.Outline -> symbols = ev.items
                 is EditorEvent.OpenFile -> {
                     val pid = project?.id ?: vm.tabs.value.firstOrNull { it.id == activeId }?.projectId
                     if (pid != null) {
@@ -281,8 +294,14 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                 DropdownMenu(menu, { menu = false }) {
                     if (canWrite) DropdownMenuItem({ Text("Simpan sebagai…") }, enabled = active != null, onClick = { menu = false; saveAs = true })
                     DropdownMenuItem({ Text("Ke baris…") }, enabled = active != null, onClick = { menu = false; gotoLine = true })
-                    DropdownMenuItem({ Text("Simbol dokumen") }, enabled = active != null, onClick = {
-                        menu = false; scope.launch { symbols = editor.symbols() }
+                    DropdownMenuItem({ Text("Outline (fungsi & kelas)") }, enabled = active != null, onClick = {
+                        menu = false; scope.launch { editor.outline() }
+                    })
+                    DropdownMenuItem({ Text("Cari & ganti di proyek…") }, enabled = project != null, onClick = {
+                        menu = false; projectSearch = true
+                    })
+                    if (canWrite) DropdownMenuItem({ Text("Sisipkan snippet…") }, enabled = active != null, onClick = {
+                        menu = false; scope.launch { snippetList = editor.snippets() }
                     })
                     DropdownMenuItem({ Text("Ke definisi (kata di kursor)") }, enabled = active != null, onClick = {
                         menu = false; scope.launch { if (!editor.gotoDefinition()) vm.toast("Definisi tidak ditemukan di file ini") }
@@ -340,6 +359,10 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
                 }
             }
         }
+        if (active != null && breadcrumb.isNotBlank()) Text("ƒ " + breadcrumb, style = MaterialTheme.typography.labelSmall,
+            maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth().clickable { scope.launch { editor.outline() } }.padding(horizontal = 8.dp, vertical = 1.dp))
         loadError?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
         if (tabs.isEmpty()) {
             Text(
@@ -493,20 +516,69 @@ fun EditorScreen(vm: AppViewModel, editor: EditorController, onMenu: () -> Unit 
             confirmButton = { TextButton(onClick = { problemList = null }) { Text("Tutup") } },
         )
     }
+    snippetList?.let { list ->
+        AlertDialog(
+            onDismissRequest = { snippetList = null },
+            title = { Text("Sisipkan snippet") },
+            text = {
+                if (list.isEmpty()) Text("Belum ada snippet untuk bahasa ini")
+                else Text("Tip: ketik awalannya (mis. \"${list.first().label}\") lalu pilih dari saran. Tab = isian berikutnya.",
+                          style = MaterialTheme.typography.bodySmall)
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                    items(list) { sn ->
+                        Column(Modifier.fillMaxWidth().clickable { snippetList = null; scope.launch { editor.insertSnippet(sn.label) } }
+                                .padding(vertical = 6.dp)) {
+                            Text("${sn.label} — ${sn.detail}", style = MaterialTheme.typography.labelLarge,
+                                 color = MaterialTheme.colorScheme.primary)
+                            Text(sn.preview.lines().take(3).joinToString("\n"), style = MaterialTheme.typography.bodySmall,
+                                 fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { snippetList = null }) { Text("Tutup") } },
+        )
+    }
+    if (projectSearch) project?.let { p ->
+        val c = client
+        if (c != null) ProjectSearchDialog(vm, c, p.id, canWrite, onDismiss = { projectSearch = false },
+            onOpen = { m -> projectSearch = false; editor.events.tryEmit(EditorEvent.OpenFile(m.path, m.line, m.column)) },
+            onReplaced = { files ->
+                // tab terbuka yang ikut diubah dimuat ulang (yang belum disimpan dibiarkan, beri tahu pengguna)
+                scope.launch {
+                    val skipped = mutableListOf<String>()
+                    for (t in vm.tabs.value.filter { t -> t.projectId == p.id && files.any { it == t.path } }) {
+                        if (t.dirty) { skipped += t.name; continue }
+                        if (!editor.hasTab(t.id)) continue
+                        apiCall { c.api.read(t.projectId, t.path) }.onSuccess { f ->
+                            editor.setDoc(t.id, f.content ?: "", true)
+                            vm.updateTab(t.id) { it.copy(sha256 = f.sha256, dirty = false) }
+                        }
+                    }
+                    if (skipped.isNotEmpty()) vm.toast("Belum dimuat ulang (ada perubahan belum disimpan): ${skipped.joinToString()}")
+                }
+            })
+    }
     if (gotoLine) InputDialog("Ke baris", "Nomor baris", onConfirm = { n ->
         n.toIntOrNull()?.let { scope.launch { editor.gotoLine(it) } }
     }, onDismiss = { gotoLine = false })
     symbols?.let { list ->
         AlertDialog(
             onDismissRequest = { symbols = null },
-            title = { Text("Simbol dokumen") },
+            title = { Text("Outline (${list.size})") },
             text = {
-                if (list.isEmpty()) Text("Tidak ada simbol terdeteksi")
-                LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                if (list.isEmpty()) Text("Tidak ada fungsi/kelas terdeteksi")
+                LazyColumn(Modifier.heightIn(max = 420.dp)) {
                     items(list) { s ->
-                        Text("${s.line}: ${s.name}", Modifier.fillMaxWidth().clickable {
-                            symbols = null; scope.launch { editor.gotoLine(s.line) }
-                        }.padding(8.dp))
+                        Row(Modifier.fillMaxWidth().clickable { symbols = null; scope.launch { editor.gotoLine(s.line) } }
+                                .padding(start = (8 + s.depth * 14).dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(s.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                            if (s.kind.isNotBlank()) Text(s.kind, style = MaterialTheme.typography.labelSmall,
+                                                          color = MaterialTheme.colorScheme.primary)
+                            Text("  ${s.line}", style = MaterialTheme.typography.labelSmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             },

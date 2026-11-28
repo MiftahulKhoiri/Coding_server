@@ -10,7 +10,8 @@ fs.mkdirSync(out, { recursive: true });
 async function bundle(entry) {
   const r = await esbuild.build({ entryPoints: [entry], bundle: true, minify: true, format: "iife", write: false,
     target: ["chrome80"], legalComments: "none", loader: { ".css": "css" } });
-  return r.outputFiles[0].text;
+  // JS disisipkan di <script> inline: teks "</script" di dalam string akan menutup tag lebih awal.
+  return r.outputFiles[0].text.replace(/<\/(script)/gi, "<\\/$1");
 }
 
 const editorJs = await bundle("editor/main.js");

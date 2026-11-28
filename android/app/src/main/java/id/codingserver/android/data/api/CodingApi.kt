@@ -58,6 +58,9 @@ interface CodingApi {
                                                       @Query("recursive") recursive: Boolean = false): OkResponse
     @GET("api/v1/files/search") suspend fun search(@Query("project_id") projectId: String, @Query("q") q: String,
                                                    @Query("content") content: Boolean = false): List<FileEntry>
+    @POST("api/v1/files/grep") suspend fun grep(@Body body: GrepRequest): GrepResult
+    @POST("api/v1/files/replace") suspend fun replaceAll(@Body body: ReplaceRequest): ReplaceResult
+    @GET("api/v1/git/head-file") suspend fun gitHeadFile(@Query("project_id") projectId: String, @Query("path") path: String): GitHeadFile
     @POST("api/v1/files/format") suspend fun formatCode(@Body body: FormatRequest): FormatResult
     @GET("api/v1/files/list") suspend fun listFiles(@Query("project_id") projectId: String): ProjectFiles
     @GET("api/v1/files/recent") suspend fun recent(): FileList

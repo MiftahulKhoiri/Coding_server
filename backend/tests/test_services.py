@@ -174,3 +174,19 @@ def test_backup_includes_avatars_and_root_password(client, auth):
         if created:
             pwfile.unlink(missing_ok=True)
         client.delete("/api/v1/auth/me/avatar", headers=auth)
+
+
+def test_git_head_file(client, auth, project):
+    def put(path, content):
+        client.put("/api/v1/files/write", json={"project_id": project, "path": path, "content": content}, headers=auth)
+    r = client.get("/api/v1/git/head-file", params={"project_id": project, "path": "x.txt"}, headers=auth).json()
+    assert r == {"tracked": False, "repo": False, "content": None}
+    assert client.post("/api/v1/git/init", json={"project_id": project}, headers=auth).status_code == 200
+    put("x.txt", "satu\ndua\n")
+    assert client.post("/api/v1/git/commit", json={"project_id": project, "message": "awal", "add_all": True},
+                       headers=auth).status_code == 200
+    put("x.txt", "satu\nDUA\ntiga\n")
+    r = client.get("/api/v1/git/head-file", params={"project_id": project, "path": "x.txt"}, headers=auth).json()
+    assert r == {"tracked": True, "repo": True, "content": "satu\ndua\n"}
+    r = client.get("/api/v1/git/head-file", params={"project_id": project, "path": "baru.txt"}, headers=auth).json()
+    assert r["tracked"] is False and r["repo"] is True

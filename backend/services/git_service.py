@@ -192,6 +192,18 @@ class GitService:
             args += ["--", FileService.normalize(path)]
         return await self._git(repo, args, user=user)
 
+    async def head_file(self, repo: Path, user: dict, path: str) -> dict:
+        """Isi file pada commit HEAD (untuk penanda baris berubah di editor). tracked=False bila bukan repo/file baru."""
+        if not (repo / ".git").exists():
+            return {"tracked": False, "repo": False, "content": None}
+        from backend.services.file_service import FileService
+
+        rel = FileService.normalize(path)
+        r = await self._git(repo, ["show", f"HEAD:{rel}"], user=user, timeout=30)
+        if not r["ok"]:
+            return {"tracked": False, "repo": True, "content": None}
+        return {"tracked": True, "repo": True, "content": r["stdout"]}
+
     async def set_remote(self, repo: Path, user: dict, name: str, url: str) -> dict:
         self._ensure_repo(repo)
         check_remote(name)

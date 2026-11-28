@@ -87,6 +87,18 @@ import kotlinx.serialization.json.JsonElement
 @Serializable data class ProjectUpdate(val name: String? = null, val description: String? = null, val language: String? = null)
 @Serializable data class Templates(val languages: List<String>)
 
+@Serializable data class GrepRequest(val project_id: String, val query: String, val regex: Boolean = false,
+                                     val case_sensitive: Boolean = false, val whole_word: Boolean = false)
+@Serializable data class GrepMatch(val path: String, val line: Int, val column: Int = 1, val length: Int = 0, val text: String = "",
+                                   val offset: Int = 0)
+@Serializable data class GrepResult(val matches: List<GrepMatch> = emptyList(), val files: Int = 0, val truncated: Boolean = false)
+@Serializable data class ReplaceRequest(val project_id: String, val query: String, val replacement: String, val regex: Boolean = false,
+                                        val case_sensitive: Boolean = false, val whole_word: Boolean = false,
+                                        val paths: List<String>? = null)
+@Serializable data class ReplacedFile(val path: String, val count: Int)
+@Serializable data class ReplaceResult(val files: List<ReplacedFile> = emptyList(), val total: Int = 0)
+@Serializable data class GitHeadFile(val tracked: Boolean = false, val repo: Boolean = false, val content: String? = null)
+
 @Serializable data class FormatRequest(val project_id: String, val path: String, val content: String, val tab_size: Int = 4)
 @Serializable data class FormatResult(val content: String, val changed: Boolean = false, val formatter: String = "")
 

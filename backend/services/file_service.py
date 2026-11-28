@@ -6,6 +6,7 @@ perubahan/penghapusan disimpan ke riwayat sehingga bisa dibatalkan.
 """
 from __future__ import annotations
 
+import re
 import fnmatch
 import hashlib
 import mimetypes
@@ -308,6 +309,81 @@ class FileService:
                 if len(out) >= limit:
                     return {"files": out, "truncated": True}
         return {"files": out, "truncated": False}
+
+    # ---------- cari & ganti di seluruh proyek ----------
+    @staticmethod
+    def _pattern(query: str, regex: bool, case_sensitive: bool, whole_word: bool) -> "re.Pattern[str]":
+        if not query or len(query) > 500:
+            raise AppError("Kata kunci kosong atau terlalu panjang", code="bad_query")
+        src = query if regex else re.escape(query)
+        if whole_word:
+            src = rf"(?<![\w]){src}(?![\w])"
+        try:
+            return re.compile(src, 0 if case_sensitive else re.IGNORECASE)
+        except re.error as e:
+            raise AppError(f"Regex tidak valid: {e}", code="bad_regex")
+
+    def _text_files(self, root: Path, paths: list[str] | None = None):
+        if paths is not None:
+            for rel in paths:
+                p = self.resolve(root, rel, allow_root=False)
+                if p.is_file() and not p.is_symlink():
+                    yield p
+            return
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(d for d in dirnames if d not in self.LIST_SKIP_DIRS and not (Path(dirpath) / d).is_symlink())
+            for name in sorted(filenames):
+                p = Path(dirpath) / name
+                if p.is_symlink() or p.suffix.lower() not in TEXT_EXT and name not in ("Makefile", "Dockerfile", "CMakeLists.txt"):
+                    continue
+                if p.stat().st_size < 2_000_000:
+                    yield p
+
+    def grep(self, root: Path, query: str, *, regex: bool = False, case_sensitive: bool = False, whole_word: bool = False,
+             limit: int = 1000) -> dict:
+        pat = self._pattern(query, regex, case_sensitive, whole_word)
+        matches: list[dict] = []
+        files = 0
+        for p in self._text_files(root):
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            hit = False
+            for i, line in enumerate(text.splitlines(), 1):
+                for m in pat.finditer(line):
+                    if m.end() == m.start():
+                        continue
+                    hit = True
+                    matches.append({"path": self.rel_of(root, p), "line": i, "column": m.start() + 1,
+                                    "length": m.end() - m.start(), "text": line.strip()[:300],
+                                    "offset": len(line) - len(line.lstrip())})
+                    if len(matches) >= limit:
+                        return {"matches": matches, "files": files + 1, "truncated": True}
+            files += hit
+        return {"matches": matches, "files": files, "truncated": False}
+
+    def replace_all(self, project_id: str, root: Path, query: str, replacement: str, *, regex: bool = False,
+                    case_sensitive: bool = False, whole_word: bool = False, paths: list[str] | None = None,
+                    actor: dict | None = None) -> dict:
+        pat = self._pattern(query, regex, case_sensitive, whole_word)
+        changed: list[dict] = []
+        total = 0
+        for p in self._text_files(root, paths):
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            try:
+                new, n = pat.subn(replacement if regex else (lambda _m: replacement), text)
+            except (re.error, IndexError) as e:
+                raise AppError(f"Pengganti tidak valid: {e}", code="bad_regex")
+            if n and new != text:
+                rel = self.rel_of(root, p)
+                self.write(project_id, root, rel, new, actor=actor, note=f"ganti semua: {query[:60]}")
+                changed.append({"path": rel, "count": n})
+                total += n
+        return {"files": changed, "total": total}
 
     def search(self, root: Path, query: str, *, content: bool = False, path: str = "", limit: int = 200) -> list[dict]:
         base = self.resolve(root, path, must_exist=True)
