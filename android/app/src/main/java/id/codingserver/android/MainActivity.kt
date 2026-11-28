@@ -396,6 +396,9 @@ private fun NavGraph(nav: NavHostController, vm: AppViewModel, editor: EditorCon
                     vm.installDeps(packages = pkgs).onSuccess { nav.navigate("output") { launchSingleTop = true } }
                         .onFailure { vm.toast(it.message ?: "Gagal") }
                 }
+            }, onOpenTerminal = { path ->
+                vm.openTerminalAt(path)
+                nav.navigate("terminal") { launchSingleTop = true }
             })
         }
         composable("editor") { EditorScreen(vm, editor, onMenu) { nav.navigate("output") { launchSingleTop = true } } }

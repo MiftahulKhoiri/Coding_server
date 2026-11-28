@@ -144,6 +144,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val _openRoute = MutableStateFlow<String?>(null)
     val openRoute: StateFlow<String?> = _openRoute.asStateFlow()
     fun requestRoute(route: String) { _openRoute.value = route }
+
+    /** Folder proyek (relatif) yang diminta dibuka di terminal baru (dari Project Explorer); "" = akar proyek. */
+    private val _terminalAt = MutableStateFlow<String?>(null)
+    val terminalAt: StateFlow<String?> = _terminalAt.asStateFlow()
+    fun openTerminalAt(path: String) { _terminalAt.value = path }
+    fun consumeTerminalAt() { _terminalAt.value = null }
     fun consumeRoute() { _openRoute.value = null }
 
     // ---------- Model AI (pusat pengelolaan model) ----------

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.2 — 2026-11-28
+### Ditambahkan
+- Project Explorer: **Buka di terminal** (ikon terminal di toolbar = akar proyek; menu ⋮ folder/file = folder itu).
+  Tab sesi menampilkan nama foldernya.
+- Terminal: `pip install …` otomatis memakai `.venv` di akar proyek (dibuat saat pertama dipakai) — pip sistem
+  Debian menolak instal ("externally-managed-environment"); perintah **`deps`** memasang semua dependensi folder
+  (requirements.txt / pyproject.toml, package.json, go.mod, composer.json). `npm`, `go get` langsung bisa.
+### Keamanan
+- File rc terminal ditulis server di folder yang hanya-baca di sandbox (tidak bisa diubah pengguna lain).
+
 ## 1.6.1 — 2026-11-28
 ### Ditambahkan
 - Code Editor: tombol **⌨ buka/tutup keyboard** (toolbar & baris tombol ekstra) dan pengaturan **"Ketuk kode =

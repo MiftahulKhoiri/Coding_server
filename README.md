@@ -8,7 +8,7 @@ menguji, dan memperbaiki kode dari HP. Kodenya tersimpan dan dijalankan di Pi, d
 
 | | |
 |---|---|
-| Versi server | **1.6.1** (FastAPI, Python 3) |
+| Versi server | **1.6.2** (FastAPI, Python 3) |
 | Aplikasi | Android 8.0+ (Kotlin + Jetpack Compose), dibangun otomatis oleh GitHub Actions |
 | Platform uji | Raspberry Pi 5 16 GB · Debian 13 (trixie) aarch64 · kernel 6.x · NVMe |
 | Port bawaan | `8800` · API `/api/v1` · dokumentasi interaktif `/docs` |
@@ -83,7 +83,9 @@ kosong, tanpa jaringan, dan hanya folder proyek yang bisa ditulis. Output dikiri
   JavaScript/TypeScript, Go (gopls), PHP (intelephense), HTML, CSS, JSON, Bash**: autocomplete pintar, error saat
   mengetik, info simbol, ke definisi, **cari semua referensi**, **ganti nama simbol** lintas file, dan **petunjuk
   parameter** saat mengetik.
-- **Terminal interaktif** (PTY + WebSocket, xterm.js): banyak sesi, tombol ESC/TAB/Ctrl, dan idle timeout.
+- **Terminal interaktif** (PTY + WebSocket, xterm.js): banyak sesi, tombol ESC/TAB/Ctrl, idle timeout, bisa dibuka
+  langsung di folder mana pun dari Project Explorer. Punya internet untuk instal paket: `deps`, `pip` (otomatis memakai
+  `.venv` proyek), `npm`, `go get`.
 - **File manager aman**: CRUD, rename/copy/move, cari nama & isi, favorit, file terakhir, tulis atomik,
   deteksi konflik SHA-256, riwayat versi + undo, serta perlindungan path traversal & symlink.
 
@@ -233,7 +235,8 @@ kerja harian dan `admin` hanya untuk pemulihan.
 | Fungsi/kelas di file | ⋮ → **Outline**, atau ketuk baris "ƒ …" di bawah toolbar |
 | Template kode | ketik awalan (mis. `main`, `for`, `ifmain`, `html5`) lalu pilih dari saran, atau ⋮ → **Sisipkan snippet…** |
 | Pasang library | Explorer → ⬇ **Instal dependensi** (baca `requirements.txt`, `package.json`, `go.mod`, `composer.json`, atau ketik nama paket) |
-| Terminal | menu Terminal → sesi baru (shell di sandbox proyek) |
+| Terminal | menu Terminal → sesi baru (shell di sandbox proyek), atau Explorer → ⋮ folder → **Buka di terminal** |
+| Pasang library dari terminal | `deps` (semua dependensi folder ini) · `pip install x` (otomatis ke `.venv` proyek) · `npm install x` · `go get x` |
 | Git | menu Git → status, commit, push/pull, branch |
 | Database | menu Database → pilih/buat DB → query |
 | Uji API | menu HTTP Client |

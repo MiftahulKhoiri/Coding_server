@@ -28,6 +28,37 @@ from backend.engines.registry import get_registry
 
 log = get_logger("terminal")
 
+# Dimuat bash di setiap sesi (--rcfile). $CS_PROJECT = akar proyek.
+#  * pip/pip3 otomatis memakai .venv proyek (dibuat saat pertama dipakai) — pip sistem Debian menolak instal
+#    ("externally-managed-environment");
+#  * `deps` memasang semua dependensi proyek (requirements.txt/pyproject.toml, package.json, go.mod, composer.json).
+TERMINAL_RC = r"""
+PS1="${CS_PS1:-$PS1}"
+[ -f "$CS_PROJECT/.venv/bin/activate" ] && . "$CS_PROJECT/.venv/bin/activate"
+_cs_venv() {
+  if [ -z "$VIRTUAL_ENV" ]; then
+    if [ ! -x "$CS_PROJECT/.venv/bin/python" ]; then
+      echo "[coding_server] membuat virtualenv proyek: $CS_PROJECT/.venv" >&2
+      python3 -m venv "$CS_PROJECT/.venv" || return 1
+    fi
+    . "$CS_PROJECT/.venv/bin/activate"
+  fi
+}
+pip()  { _cs_venv && command python -m pip "$@"; }
+pip3() { _cs_venv && command python -m pip "$@"; }
+deps() {
+  local d="${1:-$PWD}" did=0
+  ( cd "$d" || exit 1
+    if [ -f requirements.txt ]; then _cs_venv && python -m pip install -r requirements.txt; did=1; fi
+    if [ -f pyproject.toml ] && [ ! -f requirements.txt ]; then _cs_venv && python -m pip install -e .; did=1; fi
+    if [ -f package.json ]; then npm install --no-audit --no-fund; did=1; fi
+    if [ -f go.mod ]; then go mod download && go mod tidy; did=1; fi
+    if [ -f composer.json ]; then composer install; did=1; fi
+    [ $did = 1 ] || echo "Tidak ada requirements.txt / pyproject.toml / package.json / go.mod / composer.json di $(pwd)" )
+}
+echo "Tip: 'deps' = instal semua dependensi di folder ini · 'pip install …' otomatis memakai .venv proyek"
+"""
+
 
 @dataclass
 class TerminalSession:
@@ -103,13 +134,21 @@ class TerminalService:
         spec = SandboxSpec(
             cwd=cwd, writable=rw, readonly=ro,
             network=self.s.terminal_network, new_session=False,
-            env={"PS1": r"\[\e[32m\]coding_server\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]$ ", "HISTFILE": "/dev/null",
+            env={"CS_PS1": r"\[\e[32m\]coding_server\[\e[0m\]:\[\e[34m\]\w\[\e[0m\]$ ", "HISTFILE": "/dev/null",
                  "GOCACHE": str(self.s.cache_dir / "lang" / "go-build"), "GOPATH": str(self.s.cache_dir / "lang" / "gopath"),
                  "DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1", "DOTNET_EnableWriteXorExecute": "0",
                  "DOTNET_CLI_HOME": str(self.s.cache_dir / "lang" / "dotnet-home")},
         )
         (self.s.cache_dir / "lang").mkdir(parents=True, exist_ok=True)
-        argv, env = wrap(["/bin/bash", "--noprofile", "--norc", "-i"], spec, enabled=self.s.sandbox_enabled)
+        # rc ditulis server di folder yang hanya-baca di sandbox (cache/lang bisa ditulis semua pengguna).
+        rc_dir = self.s.cache_dir / "terminal-rc"
+        rc_dir.mkdir(parents=True, exist_ok=True)
+        rc = rc_dir / "rc.sh"
+        if not rc.is_file() or rc.read_text() != TERMINAL_RC:
+            rc.write_text(TERMINAL_RC)
+        spec.readonly.append(rc_dir)
+        spec.env["CS_PROJECT"] = str(project_dir.resolve())
+        argv, env = wrap(["/bin/bash", "--noprofile", "--rcfile", str(rc), "-i"], spec, enabled=self.s.sandbox_enabled)
         limits = Limits(timeout=self.s.terminal_idle_timeout, memory_mb=self.s.memory_limit_mb, cpu_seconds=24 * 3600)
         # Tanpa fork() manual di proses multi-thread: subprocess memakai _posixsubprocess (aman),
         # setsid --ctty menjadikan PTY sebagai terminal pengendali, prlimit membatasi sumber daya.

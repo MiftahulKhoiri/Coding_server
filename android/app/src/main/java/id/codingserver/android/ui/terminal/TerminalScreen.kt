@@ -170,18 +170,24 @@ fun TerminalScreen(vm: AppViewModel, term: TerminalController, onMenu: () -> Uni
         }
     }
 
-    fun newSession() {
+    fun newSession(cwd: String = "") {
         val c = client ?: return
         val p = project ?: run { vm.toast("Buka proyek dulu"); return }
         scope.launch {
-            apiCall { c.api.createTerminal(TerminalCreate(p.id, "", 80, 24)) }
+            apiCall { c.api.createTerminal(TerminalCreate(p.id, cwd, 80, 24)) }
                 .onSuccess { s -> reload++; connect(s) }
                 .onFailure { vm.toast(it.message ?: "Gagal membuka terminal") }
         }
     }
 
+    // Dibuka dari Project Explorer ("Buka di terminal"): sesi baru di folder itu.
+    val openAt by vm.terminalAt.collectAsState()
+    LaunchedEffect(ready, openAt) {
+        val at = openAt ?: return@LaunchedEffect
+        if (ready) { vm.consumeTerminalAt(); newSession(at) }
+    }
     LaunchedEffect(ready, sessions) {
-        if (ready && current == null && sessions.isNotEmpty()) connect(sessions.first())
+        if (ready && current == null && sessions.isNotEmpty() && openAt == null) connect(sessions.first())
     }
     // Keyboard muncul/hilang mengubah tinggi terminal -> hitung ulang baris.
     LaunchedEffect(imeVisible) { term.fit() }
@@ -192,7 +198,9 @@ fun TerminalScreen(vm: AppViewModel, term: TerminalController, onMenu: () -> Uni
             IconButton(onClick = onMenu, modifier = Modifier.size(36.dp)) { Icon(Icons.Default.Menu, "Menu", Modifier.size(20.dp)) }
             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                 sessions.forEachIndexed { i, s ->
-                    SessionTab("Sesi ${i + 1}", selected = s.session_id == current, onClick = { connect(s) }, onClose = {
+                    val folder = s.working_directory.trimEnd('/').substringAfterLast('/')
+                    val atRoot = project?.let { p -> s.working_directory.trimEnd('/').endsWith("/" + p.id) } ?: true
+                    SessionTab(if (atRoot) "Sesi ${i + 1}" else "Sesi ${i + 1} · $folder", selected = s.session_id == current, onClick = { connect(s) }, onClose = {
                         val c = client ?: return@SessionTab
                         scope.launch {
                             apiCall { c.api.closeTerminal(s.session_id) }

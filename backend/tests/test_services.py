@@ -190,3 +190,41 @@ def test_git_head_file(client, auth, project):
     assert r == {"tracked": True, "repo": True, "content": "satu\ndua\n"}
     r = client.get("/api/v1/git/head-file", params={"project_id": project, "path": "baru.txt"}, headers=auth).json()
     assert r["tracked"] is False and r["repo"] is True
+
+
+def test_terminal_cwd_pip_venv_and_deps(client, auth, token, project):
+    """Terminal bisa dibuka di subfolder; pip otomatis memakai .venv proyek; `deps` memasang dependensi;
+    file rc terminal tidak bisa diubah dari dalam sandbox (dipakai semua pengguna)."""
+    import re
+    import time as _t
+    for path, content in (("app/requirements.txt", "\n"), ("app/package.json", '{"name": "x", "version": "1.0.0"}\n')):
+        client.put("/api/v1/files/write", json={"project_id": project, "path": path, "content": content}, headers=auth)
+    r = client.post("/api/v1/terminal/sessions", json={"project_id": project, "cwd": "app"}, headers=auth)
+    assert r.status_code == 201, r.text
+    sid = r.json()["session_id"]
+    rc = client.app.state.services.settings.cache_dir / "terminal-rc" / "rc.sh"
+    cmds = [("pwd", "A"), ("pip --version", "B"), ("deps", "C"), ("ls -a", "D"),
+            (f"(echo hack >> {rc}) 2>/dev/null && echo RC_WRITABLE || echo RC_READONLY", "E")]
+    got = ""
+    with client.websocket_connect(f"/ws/terminal/{sid}?token={token}") as ws:
+        for cmd, m in cmds:
+            ws.send_json({"type": "input", "data": f"{cmd}; echo ==={m}=$?\n"})
+            end = _t.time() + 120
+            while _t.time() < end and not re.search(rf"==={m}=\d", got):
+                ev = ws.receive_json()
+                if ev["type"] == "output":
+                    got += ev["data"]
+    out = re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", got)
+
+    def part(m):  # keluaran perintah bertanda m: setelah gema perintah TERAKHIR (TTY bisa menggemakan dua kali)
+        seg = re.search(rf"==={m}=\$\?(.*?)==={m}=\d", out, re.S).group(1)
+        return seg.split(f"==={m}=$?")[-1]
+
+    assert "Tip: 'deps'" in out and "coding_server:" in out, out[-800:]
+    assert part("A").strip().endswith("/app"), repr(part("A"))                  # terminal dibuka di subfolder
+    assert "/.venv/" in part("B") and "/app/.venv" not in part("B"), part("B")  # pip memakai .venv di akar proyek
+    assert "===C=0" in out and "package-lock.json" in part("D"), out[-800:]
+    assert "RC_READONLY" in part("E") and "hack" not in rc.read_text(), part("E")
+    client.delete(f"/api/v1/terminal/sessions/{sid}", headers=auth)
+    root = client.app.state.services.projects.project_dir(project)
+    assert (root / ".venv" / "bin" / "python").exists()

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Download
@@ -74,7 +75,7 @@ private fun join(parent: String, name: String) = if (parent.isEmpty()) name else
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (FileEntry) -> Unit,
-                   onInstall: (List<String>) -> Unit = {}) {
+                   onInstall: (List<String>) -> Unit = {}, onOpenTerminal: (String) -> Unit = {}) {
     val client by vm.client.collectAsState()
     val project by vm.project.collectAsState()
     val me by vm.user.collectAsState()
@@ -127,6 +128,7 @@ fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (Fi
             if (canWrite) IconButton(onClick = { dialog = Dlg.NewFolder("") }) { Icon(Icons.Default.CreateNewFolder, "Folder baru") }
             IconButton(onClick = { searching = !searching; results = null }) { Icon(Icons.Default.Search, "Cari") }
             if ("execute" in perms) IconButton(onClick = { installDlg = true }) { Icon(Icons.Default.Download, "Instal dependensi") }
+            if ("terminal" in perms) IconButton(onClick = { onOpenTerminal("") }) { Icon(Icons.Default.Terminal, "Buka proyek di terminal") }
             IconButton(onClick = { refreshAll() }) { Icon(Icons.Default.Refresh, "Refresh") }
         }
         if (installDlg) InstallDepsDialog(c, p.id, onInstall = onInstall, onDismiss = { installDlg = false })
@@ -173,6 +175,7 @@ fun ExplorerScreen(vm: AppViewModel, onOpenFile: (FileEntry) -> Unit, onRun: (Fi
                             when (action) {
                                 "open" -> if (!e.isFolder) onOpenFile(e)
                                 "run" -> onRun(e)
+                                "terminal" -> onOpenTerminal(if (e.isFolder) e.path else parentOf(e.path))
                                 "newfile" -> dialog = Dlg.NewFile(if (e.isFolder) e.path else parentOf(e.path))
                                 "newfolder" -> dialog = Dlg.NewFolder(if (e.isFolder) e.path else parentOf(e.path))
                                 "rename" -> dialog = Dlg.Rename(e)
@@ -269,6 +272,7 @@ private fun FileRow(e: FileEntry, depth: Int, isExpanded: Boolean, perms: Set<St
                         add("rename" to "Ganti nama"); add("copy" to "Salin"); add("move" to "Pindahkan")
                     }
                     if (!e.isFolder) add("fav" to "Favorit")
+                    if ("terminal" in perms) add("terminal" to if (e.isFolder) "Buka di terminal" else "Buka foldernya di terminal")
                     if ("delete" in perms) add("delete" to "Hapus")
                 }
                 items.forEach { (k, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { menu = false; onAction(k) }) }
